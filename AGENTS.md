@@ -99,6 +99,12 @@ Previous testing approaches include API/model-input fuzzing, model architecture 
 - Never claim validation passed unless it was actually run and passed. State any unavailable checks and their limitations.
 - When finished, summarize what changed, how it was validated, and any remaining limitations or decisions requiring user input.
 
+## File Storage and Organization
+
+- Store all large files, including model weights, datasets, and large persistent caches, under `/work/asciibase64/Mirage/`.
+- Test outputs are an exception and may be stored under the repository's `./result/` directory, including large test outputs.
+- Organize files into subdirectories by purpose, such as `models/`, `datasets/`, and `cache/` under `/work/asciibase64/Mirage/`. Organize test outputs by test category and run, such as `./result/<test-category>/<run-id>/`. Do not scatter files or accumulate them directly in either storage root.
+
 ## Nano4 and Slurm Execution
 
 - This workspace is on Nano4. All compute-intensive work must be dispatched through Slurm, including GPU work, training, LLM inference, compilation, full integration suites, large CPU workloads, batch experiments, and compute-intensive replay or minimization. Do not run these directly from an interactive agent shell without a Slurm allocation.

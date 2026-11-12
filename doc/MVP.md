@@ -5,6 +5,7 @@
 
 需求範圍已確認，後續實作範圍與檔案已獲使用者核准。本文保留原始需求與
 階段提案以利追溯；目前交付內容與驗證限制見第 13 節。
+後續 vLLM serving、平行 worker 與模型比對方案見第 14 節，尚未實作。
 軟體功能與研究成果分開驗收，不因實作完成而宣稱已找到新 bug。
 
 ## 1. 目標與驗收
@@ -45,7 +46,7 @@
 | Framework 版本 | 固定 stable 探索，候選失敗再到 nightly 複驗 |
 | Worker | 獨立 subprocess，使用 CLI 所在的 Python 環境 |
 | 執行模式 | 一般 eager；compile 的 eager、aot_eager、inductor backend |
-| 平行範圍 | 第一版單 GPU；多 GPU 調度延後 |
+| 平行範圍 | 第一版單 GPU；後續 serving／測試 GPU 分工見第 14 節，單一測試仍使用單 GPU |
 
 固定 API 池如下，CLI 可指定子集：
 
@@ -137,6 +138,7 @@ storage 換成 clone，並假設結果不變。相同 seed 也不足以建立跨
 ```
 
 LLM 使用可替換的 Python provider 介面。第一版不綁模型、不實作 HTTP adapter。
+第 14 節規劃在此介面上新增 vLLM HTTP adapter，保留既有 provider 的使用方式。
 介面應傳入生成階段、結構化上下文與診斷，回傳生成內容及可取得的 usage 資訊。
 Provider 未提供 token 使用量時記錄 unknown，不填成零。
 
@@ -241,6 +243,9 @@ LLM provider、worker 與批次時間都計入成本；provider 的取消／逾�
 - 直接將 parameters 轉成 FP16／BF16 的訓練模式。
 - 自動最小化、自動安裝 nightly、自動 upstream issue 提交。
 - 綁定特定本地模型或 HTTP serving 協定。
+
+上述為原始第一版邊界；第 14 節新增 HTTP serving 與跨 experiment 平行執行方案。
+Distributed training 與單一測試跨 GPU 執行仍不在範圍內。
 
 ## 10. 實作順序與檔案授權提案
 
@@ -353,6 +358,10 @@ checkpoint、backend、precision 區分覆蓋。Device 固定於單一 batch 並
 與驗證依賴放於 `/tmp/mirage-validation-deps`，未修改 `pyproject.toml` 或使用者的
 `uv.lock`。可用 GPU 為 NVIDIA H100 NVL，driver 580.65.06。
 
+此處是先前驗證的歷史紀錄，不代表目前 `.venv` 已安裝 PyTorch，亦不代表
+compute node 能讀取該 `/tmp` 環境。後續環境與大型檔案依第 14 節的持久儲存規範準備；
+所有運算密集驗證必須透過 Slurm。
+
 驗證包含資料契約、抽樣、修正邊界、subprocess timeout、四類 MR、刻意注入的負例、
 獨立 scalar matmul 梯度公式、checkpoint RNG、warm-up 還原、CPU／CUDA、AMP、
 compile，以及完整生成／保存／無 LLM 重播／人工縮小流程。實際執行結果以交付時
@@ -368,3 +377,166 @@ PyTorch API 或全部狀態組合已被覆蓋。
 目前仍未取得 Nano4 H200、另一個 nightly 環境或真實 LLM provider 的整合驗收證據。
 `reference` provider 僅用於確定性的整合驗證，並非 LLM。尚未完成兩個新 bug 的
 探索、最小化、獨立佐證及查重；這些仍是研究成果驗收，不能由軟體測試通過替代。
+
+## 14. 待實作：vLLM serving、平行 worker 與模型比對
+
+本節記錄後續實作／配置方案。本次僅更新文件，未安裝套件、下載模型、啟動服務、
+提交 Slurm job 或修改程式。以下新增配置名稱與檔案均為提案，不能當作現有功能使用。
+
+### 14.1 已選方向與初始配置
+
+使用者選擇以 Qwen3-Coder-Next 為主並進行模型比對、多個 Mirage worker 平行執行，
+以及同一個 Slurm job 配置兩張 GPU。主模型沿用前述 FP8 版本；對照模型採
+Qwen3.8-27B。具體 revision、相容套件版本及資源限制需在準備環境時確認並固定。
+
+| 項目 | 配置方案 |
+| --- | --- |
+| 主模型 | `Qwen/Qwen3-Coder-Next-FP8` |
+| 對照模型 | `Qwen/Qwen3.8-27B`，先以 BF16 作為對照配置 |
+| 模型比對 | 依序載入 A、B；單一 serving GPU 同時只保留一個模型 |
+| Slurm allocation | 同一節點、兩張 GPU；一張 serving、一張執行 Mirage 測試 |
+| 其餘 job 預設 | account `ACD115198`、partition `8gpus`、8 CPUs、4 小時，沿用使用者 template |
+| Mirage worker 數 | 建議初始值 2，共享測試 GPU；保留降為 1 的配置 |
+| 同時生成請求數 | 建議初始上限 2，與測試 worker 數分開配置 |
+| Model context | 建議從 16,384 tokens 起驗證；輸入與最大輸出合計不得超過此值 |
+| Generation settings | 保存 temperature、top-p、seed、有限輸出 token 上限與 chat template 設定；具體值於整合測試固定 |
+| Thinking | 對照模型先使用關閉 thinking 的配置，實際支援方式以固定版本驗證 |
+| 時間預算 | 模型載入、兩輪比較、生成、測試與清理共用 allocation 的 4 小時 |
+
+兩張 GPU 是針對此方案明確調整原本單 GPU 的 template。模型能否在單張 H200
+以指定 context／並行度運作，仍須實際驗證，不能僅由參數量推定。
+若不相容或記憶體不足，保存原因並回報；不自行增加 GPU 或更換量化版本。
+
+### 14.2 環境準備與安裝責任
+
+不預設 vLLM 已安裝。2026-11-12 的唯讀檢查結果：目前 shell 的 `PATH` 找不到
+`vllm`，專案 `.venv/bin/python` 為 Python 3.14.10，其套件 metadata 中沒有
+`vllm`、`torch` 或 `transformers`。這不排除其他環境已安裝，也不是 compute-node 驗證。
+`uv sync` 只同步專案宣告的依賴；目前 `pyproject.toml` 未宣告這些 runtime 套件。
+
+vLLM 套件與模型權重是兩件事：前者提供 serving 程式，後者必須另行取得或由已存在的
+模型目錄載入。使用模型 repository ID 啟動時可能觸發下載，因此準備階段應明確解析
+revision、完成權重取得並驗證路徑，不把下載時間隱藏在正式 A/B 測量中。
+
+| 環境 | 選擇方式與責任 |
+| --- | --- |
+| Mirage／被測 PyTorch | 沿用 `MIRAGE_PYTHON` 指定已準備且 compute node 可讀的環境；固定被測 stable 或 nightly 版本 |
+| vLLM serving | 擬新增 `MIRAGE_SERVE_PYTHON`，指定獨立且相容的 serving 環境；不讓其依賴改動被測 PyTorch |
+| 現有安裝 | 先檢查使用者提供或環境中可發現的 interpreter、版本與路徑，再於 Slurm allocation 驗證 GPU serving |
+| 缺少安裝 | 列出相容版本與安裝位置後，在獲准的環境準備範圍內安裝套件／取得權重；不要求使用者必須親自下載 |
+
+不自動安裝 Python，也不假定 vLLM 支援目前 Mirage 的 Python 版本。
+Serving 可使用另一個既有、相容的 Python interpreter；若找不到，需先解決環境選擇。
+正式 job 缺少必要環境或權重時明確失敗，不在執行途中隱式安裝或替換依賴。
+
+### 14.3 Slurm 配置與服務生命週期
+
+「常駐」指模型在本次 job 的服務階段載入一次，持續接受多個請求；不是永久服務。
+Job 結束、取消、逾時或發生不可恢復錯誤時，服務與其子程序都必須結束。
+
+1. 在同一 allocation 內，以兩個可同時執行的 `srun` step 分別啟動 serving 與
+   Mirage controller。每個 step 只分配一張 GPU，CPU 也須分配在 allocation 額度內。
+   驗證 step isolation 與同時啟動行為，避免其中一個 step 佔滿資源而讓另一個等待。
+2. 保留 Slurm 管理的 GPU visibility，不硬編碼實體 GPU 編號。Mirage 子程序繼承
+   測試 step 的 GPU；serving GPU 不可出現在測試 worker 的可見裝置中。
+3. 等待有期限的 health check，確認服務可用及 model ID 正確，再發送生成請求。
+   保存 job ID、host、port、模型 revision、啟動參數與環境版本。
+4. HTTP provider 使用 job 內部 endpoint。每次 provider 子程序只送出 HTTP 請求，
+   不重新載入模型。請求逾時受整體剩餘預算約束，排隊時間也計入。
+5. 驗證 HTTP 斷線／取消後 serving 是否真的停止相應工作；不能把 client timeout
+   當成 server 已取消的證據。追蹤未完成請求，避免超時工作持續佔用生成配額。
+6. 接近 allocation 結束時停止派發，預留保存證據、停止 worker 與關閉服務的時間。
+   使用 trap 保留失敗 exit status，輸出開始／結束／耗時與退出狀態。
+
+整合 job 放在 `sbatch/experiments/`，驗證 job 放在 `sbatch/validation/`，
+重播放在 `sbatch/replay/`；共用服務啟停邏輯放在 `sbatch/lib/`。
+若提供獨立 serving 入口，新增 `sbatch/serving/` 分類並同步文件；整合方案直接呼叫
+共用 helper，不透過巢狀 `sbatch` 取得另一個 allocation。
+
+### 14.4 HTTP provider 與平行執行
+
+在既有 Python provider protocol 上新增 OpenAI-compatible HTTP adapter，傳入
+四階段 prompt、上下文及修正診斷，將回應轉為現有 `Response`／`Usage`。
+保存模型識別、完整請求與回應、生成參數、延遲及可取得的 token usage；未知值仍為 unknown。
+JSON schema 約束只處理回應格式，不能取代程式 AST、runtime、state 與 MR 驗證。
+連線失敗、服務崩潰、格式錯誤、生成程式不合法分開記錄，不把服務故障算作 framework bug。
+
+現有 `workflow.py` 逐案例執行；只啟動 vLLM 不會讓 Mirage 自動平行。
+新增有界排程，讓不同 experiment 同時推進，並遵守以下限制：
+
+- 每個 experiment 的 canonical、skeleton、transition、follow-up 與各階段驗證
+  保留依賴順序。每組 source／follow-up 初期仍依序執行。
+- 每個案例使用獨立程序、RNG 狀態、初始資料及 artifact 目錄，避免共享可變訓練狀態。
+- 生成請求與測試工作各有並行上限及有界等待佇列，避免大量排隊耗盡記憶體或時間。
+- Controller 統一派發並提交 coverage 更新；in-flight 計畫與已驗證 coverage 分開。
+  保存抽樣時的 coverage snapshot、派發／完成順序；相同 seed 不保證非同步完成順序相同。
+- 兩個 worker 共享測試 GPU，可能產生 OOM 或延遲，不能保證吞吐量提高。
+  記錄資源失敗；suspected failure 在其他 worker 停止佔用後獨占重播，再判斷是否穩定。
+- 重播繼續直接使用已保存程式及初始狀態，不依賴 vLLM，也不新增 LLM 呼叫。
+
+### 14.5 模型 A/B 比對
+
+先凍結一組涵蓋既有八個 API、四類 MR 候選的任務清單，保存可比較的初始條件、
+配置、seed、生成／修正限制及每模型預算。兩模型使用相同任務定義與 prompt 模板；
+各自的生成結果與後續修正診斷允許不同。MR applicability 仍須個別動態驗證。
+此階段不讓兩模型的自適應 coverage 抽樣改變任務集合，避免比較不同難度的工作。
+
+執行 A 後先排空請求、停止服務並確認釋放資源，再載入 B；保留 B 的預算，
+不能讓 A 用完全部 allocation。未完成的配對任務標記 incomplete，不補算成功。
+兩模型結果與 coverage 分開保存，不相加為一個覆蓋率。
+
+比較指標包含合法生成率、runtime 有效案例率、修正次數與 token 成本、MR applicability、
+單位時間的已驗證覆蓋及資源失敗率。模型載入、生成與測試成本分開記錄；
+同時報告總 wall-clock，不把重疊的 worker 時間相加當作總耗時。
+不以 suspected failure 數量直接判定模型較好，也不把不同量化／thinking 配置下的差異
+歸因為模型本身的純粹差異。
+
+### 14.6 儲存與配置紀錄
+
+| 資料 | 目標位置 |
+| --- | --- |
+| 固定 revision 的模型權重 | `/work/asciibase64/Mirage/models/<model>/<revision>/` |
+| 資料集 | `/work/asciibase64/Mirage/datasets/<dataset>/` |
+| Hugging Face／vLLM 等大型持久 cache | `/work/asciibase64/Mirage/cache/<purpose>/` |
+| 如需新增的 serving 套件環境 | `/work/asciibase64/Mirage/environments/vllm/<environment-id>/`，沿用既有 Python |
+| 驗證／探索／重播輸出 | `./result/<test-category>/<run-id>/` |
+| A/B 輸出 | `./result/comparison/<run-id>/<model-label>/` |
+| Slurm stdout／stderr 與服務日誌 | 對應 run 的結果目錄；提交前先建立 Slurm 日誌父目錄 |
+| 一次性編譯 cache | allocation 內的 job-specific local scratch；重播所需證據在清理前保存至結果目錄 |
+
+將模型與 cache 路徑明確傳入服務環境，避免大型下載落到預設 home cache。
+既有 sbatch helper 仍預設寫入 `artifacts/slurm/`；後續實作需同步調整 helper、
+提交命令與文件到上述分類路徑。本次未移動既有 artifacts，也未修改現有 scripts。
+
+### 14.7 預計程式範圍與驗收順序
+
+| 範圍 | 預計變更位置 |
+| --- | --- |
+| HTTP adapter 與生成紀錄 | 新增 `src/mirage/generator/http_provider.py`；按需要擴充 `generator/provider.py` 與生成 artifact |
+| 有界排程與集中 coverage 更新 | `src/mirage/workflow.py`、新增 `src/mirage/scheduler.py`、既有 coverage／runtime 程序管理 |
+| A/B 任務與報告 | 新增 `src/mirage/comparison.py`；更新 `cli.py` 與 `artifacts/report.py` |
+| Slurm 編排與路徑 | `sbatch/lib/`、`sbatch/experiments/`、`sbatch/validation/`、必要的 `sbatch/serving/` |
+| 測試與操作說明 | HTTP、排程及比較測試；`README.md`、`sbatch/README.md`，必要時更新 `AGENTS.md` 的分類說明 |
+
+此表是後續影響範圍提案，不代表本次已授權修改以上檔案。正式實作前依 repository
+流程列出確切檔案與對應驗證；程式使用英文註解、適當換行與既有模組邊界。
+
+1. 先驗證環境、模型載入、服務就緒與關閉，再接通 HTTP provider 的單 worker 流程。
+2. 用可控的 HTTP stub 驗證請求／回應、usage 缺失、格式錯誤、連線錯誤及逾時；
+   驗證故障分類與取消，不以真模型回覆取代控制流程測試。
+3. 驗證兩 worker 的並行上限、案例隔離、coverage 單次提交、取消清理及 evidence 保存。
+   同一固定案例集比較單／雙 worker 結果；排程改變不能改變 MR 判定條件。
+4. 在 Slurm allocation 執行真實模型 smoke、GPU 分工／資源競爭測試、完整整合與
+   無 LLM 重播。保存實際結果，不把服務 health 成功視為 Mirage 測試通過。
+5. 最後執行固定任務的模型 A/B，比對品質、吞吐量與成本，再決定並行度與 context 配置。
+
+輕量語法／靜態檢查可直接執行；`.sbatch` 使用 `bash -n` 與可用的
+`sbatch --test-only` 預檢。推論、編譯、完整整合及大量測試全部經 Slurm；
+預檢或提交成功均不代表 job 已執行，更不代表 MR Pass。
+
+模型與服務配置參考官方文件，實作時對固定版本再次確認：
+
+- [Qwen3-Coder-Next-FP8 model card](https://huggingface.co/Qwen/Qwen3-Coder-Next-FP8)
+- [Qwen3.8-27B model card](https://huggingface.co/Qwen/Qwen3.8-27B)
+- [vLLM Qwen3.8-27B recipe](https://recipes.vllm.ai/Qwen/Qwen3.8-27B)
+- [vLLM structured outputs](https://docs.vllm.ai/en/latest/features/structured_outputs/)
