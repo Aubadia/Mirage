@@ -25,36 +25,8 @@ mirage_setup
 mirage_check_environment
 
 budget="$(mirage_budget 600 300)"
-mirage_python -m mirage run \
-    --provider reference --apis torch.matmul --device cuda \
-    --backend eager --precision fp32 --cases 1 --updates 2 --seed 0 \
-    --time-limit "$budget" --worker-timeout 120 \
-    --output "${MIRAGE_JOB_DIR}/cases" > "${MIRAGE_JOB_DIR}/run.json"
-
-manifest="$("$MIRAGE_PYTHON" - "${MIRAGE_JOB_DIR}/run.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as stream:
-    result = json.load(stream)
-case = result["experiments"][0]
-if case["status"] != "executed" or case["verdict"] != "pass":
-    raise SystemExit(f"Smoke case did not pass: {case}")
-print(case["artifact"])
-PY
-)"
-
-replay_timeout="$(mirage_budget 120 120 2)"
-mirage_python -m mirage replay "$manifest" \
-    --worker-timeout "$replay_timeout" > "${MIRAGE_JOB_DIR}/replay.json"
-
-"$MIRAGE_PYTHON" - "${MIRAGE_JOB_DIR}/replay.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as stream:
-    result = json.load(stream)
-if result["verdict"] != "pass" or result["provider_calls"] != 0 or result["environment_changes"]:
-    raise SystemExit(f"Smoke replay did not reproduce the expected result: {result}")
-print("Smoke run and LLM-free replay passed.")
-PY
+timeout --signal=TERM --kill-after=30s "${budget}s" \
+    srun --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" \
+    "$MIRAGE_PYTHON" -m unittest discover -s tests -p test_program.py -v \
+    > "${MIRAGE_JOB_DIR}/tests.log" 2>&1
+cat "${MIRAGE_JOB_DIR}/tests.log"

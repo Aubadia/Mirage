@@ -1,24 +1,4 @@
-"""Differentiable representation changes with explicit within-run storage relations."""
-
-
-def construct(parameter, representation: str):
-    import torch
-
-    # The mutable API operand is never a leaf or a view of the trainable leaf.
-    anchor = parameter * 1.0
-    if representation in ("contiguous", "shared"):
-        value = anchor
-    elif representation == "strided":
-        value = anchor.t().contiguous().t()
-    elif representation == "offset":
-        prefix = torch.zeros((1, parameter.shape[1]), device=parameter.device, dtype=parameter.dtype)
-        value = torch.cat((prefix, anchor), dim=0)[1:]
-    elif representation == "clone":
-        value = anchor.clone()
-    else:
-        raise ValueError(f"Unsupported representation: {representation}")
-    weight = value.detach() if representation == "shared" else value.detach().clone()
-    return value, weight, anchor
+"""Record within-execution tensor metadata and storage relationships."""
 
 
 def metadata(tensors: dict) -> dict:
@@ -36,16 +16,3 @@ def metadata(tensors: dict) -> dict:
             "grad_fn": type(tensor.grad_fn).__name__ if tensor.grad_fn is not None else None,
         }
     return result
-
-
-def representation_matches(observed: dict, representation: str) -> bool:
-    x, weight, anchor = (observed[name] for name in ("x", "weight", "anchor"))
-    if representation == "strided":
-        return not x["contiguous"] and x["offset"] == 0
-    if representation == "offset":
-        return x["contiguous"] and x["offset"] > 0
-    if representation == "clone":
-        return x["contiguous"] and x["storage_group"] != anchor["storage_group"]
-    if representation == "shared":
-        return x["storage_group"] == weight["storage_group"]
-    return x["contiguous"] and x["offset"] == 0 and x["storage_group"] == anchor["storage_group"]

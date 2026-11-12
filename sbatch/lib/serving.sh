@@ -34,6 +34,7 @@ mirage_start_service() {
     export MIRAGE_SERVE_PYTHON MIRAGE_MODEL_PATH MIRAGE_MODEL_REVISION
     export MIRAGE_VLLM_MODEL="${MIRAGE_VLLM_MODEL:-Qwen/Qwen3-Coder-Next-FP8}"
     export MIRAGE_MAX_MODEL_LEN="${MIRAGE_MAX_MODEL_LEN:-16384}"
+    export MIRAGE_MAX_TOKENS="${MIRAGE_MAX_TOKENS:-4096}"
     export MIRAGE_GENERATION_CONCURRENCY="${MIRAGE_GENERATION_CONCURRENCY:-2}"
     export MIRAGE_VLLM_PORT="${MIRAGE_VLLM_PORT:-8000}"
     export MIRAGE_VLLM_BASE_URL="http://127.0.0.1:${MIRAGE_VLLM_PORT}/v1"
@@ -153,8 +154,9 @@ mirage_parallel_run() {
         case "$argument" in
             --apis|--apis=*|--cases|--cases=*|--seed|--seed=*|\
             --backend|--backend=*|--precision|--precision=*|\
-            --updates|--updates=*|--size|--size=*|--epsilon|--epsilon=*|\
-            --warmup-steps|--warmup-steps=*|--replay-failures|--replay-failures=*) ;;
+            --size|--size=*|--epsilon|--epsilon=*|--replay-failures|--replay-failures=*|\
+            --canonicals-per-api|--canonicals-per-api=*|--targets-per-canonical|--targets-per-canonical=*|\
+            --paths-per-target|--paths-per-target=*|--forward-only) ;;
             --*) echo "Unsupported or managed option: ${argument}" >&2; return 2 ;;
         esac
     done

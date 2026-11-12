@@ -1,6 +1,4 @@
-"""The approved API pool and the controlled training-program grammar."""
-
-from dataclasses import dataclass
+"""Acceptance examples and open public API path validation."""
 
 API_IDS = (
     "torch.matmul",
@@ -13,51 +11,31 @@ API_IDS = (
     "Tensor.mul_",
 )
 
-
-@dataclass(frozen=True)
-class APIProfile:
-    api: str
-    expression: str
-    mutation: bool = False
-    stochastic: bool = False
-    uses_weight: bool = False
-    input_constraint: str = "square rank-two FP32 trainable input; size >= 2"
-    backward_required: bool = True
-
-    @property
-    def source(self) -> str:
-        return (
-            "def forward(x, weight, bias):\n"
-            f"    return {self.expression}\n\n\n"
-            "def training_loss(output):\n"
-            "    return output.float().square().mean()\n"
-        )
+ACCEPTANCE_APIS = API_IDS + (
+    "torch.addmm", "torch.bmm", "torch.nn.functional.conv2d", "torch.sum",
+    "torch.mean", "torch.gather", "torch.max", "torch.nn.functional.log_softmax",
+)
 
 
-PROFILES = {
-    p.api: p for p in (
-        APIProfile(API_IDS[0], "torch.matmul(x, weight)", uses_weight=True),
-        APIProfile(API_IDS[1], "torch.nn.functional.linear(x, weight, bias)", uses_weight=True),
-        APIProfile(API_IDS[2], "torch.nn.functional.layer_norm(x, (x.shape[-1],))"),
-        APIProfile(API_IDS[3], "torch.nn.functional.gelu(x)"),
-        APIProfile(API_IDS[4], "torch.nn.functional.softmax(x, dim=-1)"),
-        APIProfile(API_IDS[5], "torch.nn.functional.dropout(x, p=0.25, training=True)", stochastic=True),
-        APIProfile(API_IDS[6], "x.add_(bias)", mutation=True),
-        APIProfile(API_IDS[7], "x.mul_(bias)", mutation=True),
-    )
-}
+def validate_api_name(api: str) -> str:
+    """Validate a public path without importing the tested framework on login nodes."""
+    parts = api.split(".") if isinstance(api, str) else []
+    if len(parts) < 2 or parts[0] not in ("torch", "Tensor"):
+        raise ValueError("Expected a torch.* or Tensor.* API path")
+    if any(not part.isidentifier() or part.startswith("_") for part in parts):
+        raise ValueError("Expected a public API path")
+    return api
 
 
 def select_apis(values: list[str] | None = None) -> tuple[str, ...]:
     """Validate a CLI subset, preserving order and removing duplicates."""
     if values is None:
-        return API_IDS
+        return ACCEPTANCE_APIS
 
     if not values:
         raise ValueError("At least one API is required")
 
-    unknown = set(values).difference(API_IDS)
-    if unknown:
-        raise ValueError(f"Unknown API(s): {', '.join(sorted(unknown))}")
+    for value in values:
+        validate_api_name(value)
 
     return tuple(dict.fromkeys(values))

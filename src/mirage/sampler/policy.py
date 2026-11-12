@@ -4,7 +4,9 @@ import math
 import random
 from collections.abc import Mapping
 
-from mirage.contracts.models import Candidate
+from typing import Hashable
+
+Candidate = Hashable
 
 
 class Sampler:

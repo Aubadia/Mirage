@@ -1,287 +1,85 @@
 # Mirage
 
-Mirage tests PyTorch tensor memory representations and training states using
-conditional metamorphic relations (MRs). It preserves the generated programs,
-actual initial state, runtime traces and comparison evidence needed to replay
-an experiment without calling an LLM.
+Mirage explores PyTorch tensor representations and training states with LLM-generated
+programs and conditional metamorphic relations. API names are resolved in the tested
+installation; the 16-API acceptance list is not a generation whitelist.
 
-The MVP includes eight API profiles, representation and checkpoint transitions,
-Adam training, FP32/AMP, eager and compiled execution, bounded generation repair,
-coverage feedback, immutable artifacts, replay and manual minimization support.
-See [the MVP specification](doc/MVP.md) for the research goals and exclusions.
+The LLM receives the installed API signature and documentation, then produces
+`build(device, seed)`, `forward(ctx)`, `loss(output)`, and optionally
+`sample_loss(output)`. Initialization registers inputs, trainable parameters,
+optimizer, sample axes, and optional modules. The runner owns state transitions,
+actual API/backward observation, conditional comparisons, and evidence storage.
 
-## Environment
+See [the implementation roadmap](docs/roadmap-002-general-api-state-mrs.md) for the
+approved scope, exact contracts, validation results, and limitations. The original
+[MVP roadmap](docs/roadmap-001-mvp.md) is historical; its old execution contracts and
+legacy replay are no longer supported.
 
-Use Python **3.14 or later**. The execution interpreter must have the PyTorch
-version being tested and its required dependencies available. The project now
-declares `torch>=2.15.0`, so `uv sync` includes PyTorch.
-Select and record the actual version for each experiment; stable and nightly
-validation should use separately prepared environments. vLLM and model weights
-are not installed by `uv sync` or experiment jobs. Use the explicit
-[`serving/prepare.sbatch`](sbatch/serving/prepare.sbatch) preparation job to install
-a separate vLLM environment and download a fixed model snapshot.
+## Execution
 
-Workers use `sys.executable`, inherit `PYTHONPATH` and CUDA visibility, and run
-on CPU or one visible GPU. `--workers` bounds concurrent experiments; operations
-within each experiment remain ordered. Multiple workers share the testing GPU.
-On Nano4, Slurm assigns GPU visibility; do not override physical GPU indices.
-FP16 uses autocast with FP32 parameters and GradScaler;
-BF16 uses autocast with FP32 parameters. The actual output dtype is recorded.
+This workspace is on Nano4. Run inference, runtime tests, compilation, exploration,
+and reproduction through Slurm. Use the existing Python/PyTorch environment.
+vLLM and model weights are separate, prepared resources; experiment jobs do not
+install them. Large persistent resources belong under `/work/asciibase64/Mirage/`.
 
-This workspace is on **Nano4**. Submit all computational work through the
-categorized scripts in [`sbatch/`](sbatch/README.md), including full tests,
-training, compilation, experiments and replay. Direct shell work is limited to
-lightweight inspection and static checks. The scripts use the existing Python
-installation; a login host's `/tmp` dependencies are not a shared environment.
+See [Slurm instructions](sbatch/README.md) for prepared environment selection,
+interactive development, resource assignments, and cleanup.
 
-## Running a batch
+Inside an allocated testing step, a small exploration is:
 
 ```bash
-mkdir -p result/experiments/logs result/validation/logs result/replay/logs
-export MIRAGE_PYTHON=/shared/path/to/prepared/environment/bin/python
-export MIRAGE_PROVIDER=my_provider:create_provider
-sbatch sbatch/experiments/run.sbatch \
-  --apis torch.matmul torch.nn.functional.linear \
-  --backend inductor --precision fp16 --cases 100
+python -m mirage run --provider vllm --device cuda \
+  --apis torch.matmul torch.nn.functional.conv2d \
+  --canonicals-per-api 1 --targets-per-canonical 12 --paths-per-target 2 \
+  --cases 48 --workers 2 --generation-concurrency 2 \
+  --time-limit 1800 --output result/experiments/example
 ```
 
-The default API pool also includes `layer_norm`, `gelu`, `softmax`, `dropout`,
-`Tensor.add_` and `Tensor.mul_`. API arguments use their full identifiers shown
-by `src/mirage/contracts/apis.py`. Backends are `eager`, `compile_eager`,
-`aot_eager` and `inductor`; precision modes are `fp32`, `fp16` and `bf16`.
+`--cases` caps planned state/path attempts. Canonical generation has its own
+`--canonicals-per-api` budget. `--size` is an input-size hint, not a fixed tensor
+shape. Workers share the testing GPU. `--epsilon` controls the uniform component
+of inverse-attempt-count target sampling. All targets are provisional until their
+runtime predicates are verified.
 
-Other CLI controls include `--seed`, `--updates` (default 3), `--size` (square input
-width, default 4), `--warmup-steps` (default 1), `--epsilon` (default 0.10) and
-`--replay-failures` (default 1). All generation, initialization, warm-up,
-compilation and execution consume the batch budget. Workers and providers have
-externally enforced deadlines; timeout kills their subprocess group.
-The Slurm wrapper caps the application budget against the remaining allocation
-time and reserves time for saving results. See the batch documentation for
-`MIRAGE_TIME_LIMIT`, `MIRAGE_WORKER_TIMEOUT` and persistent output paths.
+`--forward-only` explicitly removes the requirement for a backward path through
+the target API, allowing nondifferentiable targets such as tensor shape queries
+inside a training program. The training loss still needs a valid backward path;
+the LLM cannot silently disable target-backward validation on ordinary runs.
 
-For an integration smoke test, use the explicit deterministic fixture:
+## Metamorphic rules
+
+The six families are layout, storage, checkpoint, mutation, saved-tensor lossless
+roundtrip, and gradient accumulation. Each requires valid executions, its own
+preconditions and input relation, and aligned semantic checkpoints before outputs
+are compared. Unknown operator capabilities retain coverage-only execution rather
+than being assumed compatible with an MR.
+
+The accumulation rule initially certifies deterministic FP32 per-sample computation
+with explicit sample axes and correctly normalized losses. Saved-tensor roundtrip
+uses same-device lossless copies. CPU offload, distributed execution, sparse and
+quantized tensor adapters, and automatic arbitrary-program minimization are outside
+this implementation. Compiled-path evidence is conservative; unsupported graph
+correspondence or operand capture is reported instead of claiming correctness.
+
+Outputs distinguish invalid executions, inapplicable relations, Pass, suspected
+failure, and correctness unassessed. Nonfinite observations require a more specific
+numerical policy and are not automatically reported as bugs. Numerical thresholds
+are screening policies, not proof of a defect.
+
+## Evidence and reproduction
+
+Each generated program retains API context, prompts, repairs, initial tensor storage
+relationships, plans, runtime traces, environment, code snapshot, comparison results,
+and measured resource usage. A canonical is reused across multiple targets and paths.
 
 ```bash
-sbatch sbatch/validation/smoke.sbatch
+python -m mirage inspect result/experiments/example/CASE.json
+python -m mirage report result/experiments/example
+python -m mirage replay result/experiments/example/CASE.json
 ```
 
-`reference` is **not an LLM**. It runs real PyTorch cases but supplies fixed
-programs, reports zero generated tokens, and is labelled in every artifact.
-Mirage never silently substitutes it for an unavailable model.
-
-## Python LLM provider
-
-`--provider module:factory` imports a zero-argument factory inside an isolated
-provider process. The returned object implements:
-
-```python
-from mirage.generator.provider import Request, Response, Usage
-
-
-class LocalProvider:
-    def generate(self, request: Request, *, deadline: float | None) -> Response:
-        # Call your local model here and honor the monotonic deadline.
-        text, input_tokens, output_tokens = call_your_model(request, deadline)
-        return Response(text, Usage(input_tokens, output_tokens), model="your-model")
-
-
-def create_provider():
-    return LocalProvider()
-```
-
-Each request contains the generation stage, prompt, API profile, supported
-program grammar, configuration, ordered actions, previous program and MR.
-Return JSON with exactly `source` (Python text) and `actions` (an array of
-strings). Unknown usage is `None`, not zero. Each invocation gets a fresh
-process; persist any model-service state outside that short-lived provider or
-implement model loading in the factory. The bundled `--provider vllm` adapter
-uses an external service and does not reload model weights for each request.
-
-The four stages are canonical, skeleton, transition and follow-up. Each accepted
-stage executes in a worker and must provide runtime evidence. Syntax and missing
-paths can be repaired at most twice. Unsupported grammar and unexplained
-exceptions are retained without speculative repair; suspected failures never
-enter the repair loop.
-
-## vLLM and parallel experiments
-
-The built-in `vllm` provider uses `/v1/chat/completions` with a JSON schema for
-`source` and `actions`. It preserves raw requests/responses, sampling settings,
-model identity, latency and available token usage. Existing grammar, runtime and
-MR checks still decide whether a generated case is legal and comparable.
-
-For a prepared Qwen3-Coder-Next-FP8 environment, the integrated job reserves
-**two GPUs on one node**: one for serving and one shared by the testing workers.
-The two Slurm steps each receive four CPUs, one GPU and half the allocated host
-memory. Both per-node GPU counts and step memory are explicit; runtime UUID checks
-verify that their GPUs differ. See [serving configuration](sbatch/README.md#vllm-serving-and-parallel-testing).
-No A/B comparison or model switching is implemented.
-
-```bash
-export MIRAGE_SERVE_PYTHON=/work/asciibase64/Mirage/environments/vllm/ENV/bin/python
-export MIRAGE_MODEL_PATH=/work/asciibase64/Mirage/models/Qwen3-Coder-Next-FP8/REVISION
-export MIRAGE_MODEL_REVISION=REVISION
-export MIRAGE_PYTHON="$PWD/.venv/bin/python"
-
-# First verify one worker and replay, then run parallel experiments.
-sbatch sbatch/validation/vllm_smoke.sbatch
-sbatch sbatch/experiments/parallel.sbatch --apis torch.matmul --cases 10
-```
-
-These are configuration examples, not installed paths. Jobs require existing
-packages and local weights; offline mode prevents implicit downloads. The
-service stays loaded only during its job and shuts down when the job ends.
-
-The integrated job defaults to two workers and two concurrent generation
-requests. The CLI defaults to one worker. Dispatch has no unbounded backlog;
-coverage is committed centrally once per experiment. Reports preserve dispatch,
-selection snapshots and completion order. A shared seed does not guarantee the
-same adaptive selection order under concurrency.
-
-On a suspected failure, dispatch pauses, active cases drain, and replay runs
-without other cases using the testing GPU. HTTP errors are service outcomes,
-not illegal programs or framework defects. If remote cancellation cannot be
-confirmed after a connection failure or timeout, new work stops and the
-integrated job shuts down the service. Such failures return a nonzero CLI/job
-status. A successful CLI exit alone is still not an MR Pass.
-
-## Supported generation and state space
-
-The harness owns training lifecycle and instrumentation. Generated code supplies
-the profiled single target operation and the loss, with no arbitrary Python
-side effects. Canonical generation can choose supported literal options for
-dropout probability, softmax dimension, GELU approximation and layer-norm epsilon.
-Skeleton and transition stages preserve that computation. A legal follow-up
-that changes it cannot receive an MR pass because the input relation includes
-the normalized program. This controlled grammar bounds the MVP's exploration;
-it is not a general-purpose arbitrary-model fuzzer.
-
-The trainable FP32 parameter is a square tensor. Every iteration constructs a
-nonleaf API operand from it. Binary API weights are a detached value copy or a
-detached alias of that operand; bias is a fixed saved tensor. Gradients are
-compared in the trainable parameter's logical coordinates, including when
-in-place view rebasing changes the autograd graph.
-
-Representations include contiguous, transposed-stride, contiguous nonzero-offset,
-an additional clone, and shared operand/weight storage. Storage groups are
-relationships within an execution; cross-process pointers are never compared.
-The alias MR is restricted to pure operations. Mutation pairs keep the same
-alias topology and compare eager against a selected compiled backend.
-
-Targets combine representation, checkpointing, first/final iteration,
-`before_api`/`after_backward`/`after_update`, precision, backend and warm-up
-history. Warm-up can be absent, use the tested representation, or an alternate
-representation. It runs inside the same worker and compiled callable as training;
-parameters, gradients, Adam, scaler and RNG are then restored and verified.
-
-Dropout layout changes are retained for coverage without an equality oracle.
-Dropout checkpoint equivalence requires the same backend and representation,
-saved RNG and the controlled side-effect-free computation. RNG state after
-each iteration is included in its output comparison.
-
-## Verdicts and coverage
-
-Execution outcomes (`completed`, `exception`, `crash`, `oom`, `timeout`) are
-separate from MR verdicts:
-
-| Verdict | Meaning |
-| --- | --- |
-| Invalid | Required API/backward/action/state evidence disproves validity |
-| Inapplicable | Valid executions fail MR conditions or checkpoint alignment |
-| Pass | Applicable MR satisfies its output relation |
-| Suspected Failure | Applicable MR violates its output relation |
-| Unassessed | Coverage-only, incomplete execution, or insufficient evidence |
-
-Inputs, initial training/RNG state, permitted configuration differences and
-normalized computations are checked before comparing outputs. Successful Adam
-update counts must align. Shape, dtype, discrete state and nonfinite values have
-explicit checks; NaN is not automatically equal to NaN.
-
-Tolerance policy version 1 is in `rules/tolerances.py` and is saved in each
-experiment. FP32/FP16/BF16, API reduction behavior, backend and observable select
-different thresholds. Optimizer steps and scaler state compare exactly. These
-are screening thresholds for bounded workloads; suspected failures require
-numerical revalidation and independent evidence. Replay rejects an edited or
-unsupported tolerance policy.
-
-Coverage counts only verified evidence and lists the complete declared candidate
-universe. API coverage may survive a later failure; state and combination coverage
-require their own evidence. Applicability includes unknown cases in its explicit
-denominator. Generation failures and unresolved plans remain separate statuses.
-Candidate fractions are not estimates of exhaustive theoretical coverage.
-
-## Artifacts, replay and minimization
-
-Each experiment has an immutable JSON manifest and a sibling bundle containing:
-
-- Generated sources, prompts, responses, repair diagnostics and token usage.
-- Shared initial tensor/RNG state, reconstruction actions and pair configurations.
-- A snapshot of the Mirage Python engine used to execute the case.
-- Worker requests, append-only traces, partial observations, stdout/stderr,
-  complete observations, environment and process resource measurements.
-- MR definition, tolerance policy, inspection and content hashes for every file.
-
-Batch reports preserve candidate sets, selection counts, outcomes, coverage,
-generation/execution costs and stop reasons. Immutable progress reports are
-published after each attempted experiment. Missing token usage and resource
-measurements remain unknown. Generation timing includes stage validation;
-provider time and execution time are also reported separately, so do not sum
-overlapping timing categories.
-
-```bash
-python -m mirage inspect result/experiments/JOB_ID/cases/EXPERIMENT.json
-python -m mirage report result/experiments/JOB_ID/cases
-sbatch sbatch/replay/replay.sbatch result/experiments/JOB_ID/cases/EXPERIMENT.json
-```
-
-Replay verifies bundle hashes, uses saved programs, initial state, engine and
-policy, and makes **zero provider calls**. A new child manifest links to the
-original; original evidence is never overwritten. A version/environment mismatch
-remains unassessed unless explicitly requested as cross-environment validation:
-
-```bash
-export MIRAGE_PYTHON=/shared/path/to/nightly/bin/python
-sbatch sbatch/replay/replay.sbatch result/experiments/JOB_ID/cases/EXPERIMENT.json \
-  --allow-environment-change
-```
-
-Use another prepared interpreter with Mirage/PyTorch available; the flag does
-not install nightly. Both old and new environments are retained.
-
-Manual minimization supports smaller saved tensors and fewer updates. Explicitly
-move the target iteration if removing its original iteration:
-
-```bash
-sbatch sbatch/replay/replay.sbatch result/experiments/JOB_ID/cases/EXPERIMENT.json \
-  --size 2 --updates 1 --iteration 0
-```
-
-`--source-program` and `--followup-program` accept separately edited source files.
-They must still satisfy the supported grammar; altered computations invalidate
-the MR input relation. Keep original bundle files intact and supply modifications
-through these options. Automatic minimization and automatic issue submission are
-outside the MVP. A repeated violation alone is not a confirmed framework defect.
-
-## Validation
-
-On Nano4, submit the full suite through Slurm after selecting a prepared
-Python/PyTorch environment and creating the scheduler log directory:
-
-```bash
-sbatch sbatch/validation/full_suite.sbatch
-```
-
-The job enables compilation, CUDA and end-to-end tests. Lightweight syntax and
-scheduler preflight can run directly:
-
-```bash
-bash -n sbatch/validation/full_suite.sbatch
-sbatch --test-only sbatch/validation/full_suite.sbatch
-```
-
-These check all eight APIs, MR positives and injected negatives, independent
-scalar matmul gradients, mutation backward evidence, checkpoint RNG, warm-up,
-precision/backend paths, deadlines, bundle integrity, LLM-free replay and
-minimization. GPU tests use the available GPU; they do not substitute for the
-specified Nano4/H200 acceptance run. Finding and confirming two previously
-unreported framework bugs remains a separate research milestone.
+Reproduction runs through Slurm, uses the saved engine and initial data, and makes
+no provider calls. Environment changes are reported and suppress a same-environment
+verdict unless `--allow-environment-change` is explicit. Suspected failures trigger
+bounded reproduction controlled by `--replay-failures`; no result is automatically
+promoted to a confirmed framework defect.

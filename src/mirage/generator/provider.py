@@ -7,9 +7,7 @@ from typing import Protocol
 
 class Stage(StrEnum):
     CANONICAL = "canonical"
-    SKELETON = "skeleton"
     TRANSITION = "transition"
-    FOLLOWUP = "followup"
 
 
 @dataclass(frozen=True)
@@ -61,31 +59,16 @@ class Provider(Protocol):
         ...
 
 
-class ReferenceProvider:
-    """Deterministic integration fixture, explicitly not an LLM provider."""
-
-    def generate(self, request: Request, *, deadline: float | None) -> Response:
-        import json
-        from mirage.contracts.apis import PROFILES
-
-        source = request.context.get("previous_program") or PROFILES[request.context["api"]].source
-        return Response(json.dumps({"source": source,
-                                    "actions": request.context["actions"]}),
-                        Usage(0, 0), "reference-fixture")
-
-
 def load_provider(specification: str, *, directory=None) -> Provider:
     import importlib
 
-    if specification == "reference":
-        return ReferenceProvider()
     if specification == "vllm":
         from mirage.generator.http_provider import HTTPProvider
 
         return HTTPProvider.from_environment(directory=directory)
     module_name, separator, attribute = specification.partition(":")
     if not separator or not module_name or not attribute:
-        raise ValueError("Provider must be 'module:factory' or explicit 'reference' fixture")
+        raise ValueError("Provider must be 'module:factory' or 'vllm'")
     factory = getattr(importlib.import_module(module_name), attribute)
     provider = factory()
     if not callable(getattr(provider, "generate", None)):

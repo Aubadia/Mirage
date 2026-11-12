@@ -33,9 +33,7 @@ for argument in "$@"; do
             echo "Use MIRAGE_WORKER_TIMEOUT to set the replay worker limit." >&2
             exit 2
             ;;
-        --allow-environment-change|--source-program|--source-program=*|\
-        --followup-program|--followup-program=*|--size|--size=*|\
-        --updates|--updates=*|--iteration|--iteration=*|--help)
+        --allow-environment-change|--help)
             ;;
         --*)
             echo "Unsupported or abbreviated option: ${argument}" >&2

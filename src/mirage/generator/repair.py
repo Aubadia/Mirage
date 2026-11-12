@@ -20,6 +20,7 @@ class DiagnosticKind(StrEnum):
     UNSUPPORTED = "unsupported"
     UNRESOLVED_PLAN = "unresolved_plan"
     STATE_NOT_REACHED = "state_not_reached"
+    CONTRACT = "contract_violation"
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class GenerationResult:
 
 
 REPAIRABLE = frozenset((
+    DiagnosticKind.CONTRACT,
     DiagnosticKind.SYNTAX,
     DiagnosticKind.CONFIRMED_ILLEGAL,
     DiagnosticKind.MISSING_PATH,

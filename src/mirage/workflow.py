@@ -1,269 +1,391 @@
-"""Batch orchestration; generation, execution and correctness remain separate."""
+"""Canonical reuse, bounded LLM plans, and evidence-backed exploration batches."""
 
-from dataclasses import asdict, replace
 from collections import Counter
-import importlib.util
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict
 import json
+import os
 from pathlib import Path
-import time
+import shutil
 import signal
 import threading
+import time
 import uuid
 
-from mirage.artifacts.bundle import inventory, load_tensor_record, snapshot_engine
+from mirage.artifacts.bundle import inventory, load_tensor_record, snapshot_engine, verify
 from mirage.artifacts.store import ArtifactStore, json_value
-from mirage.contracts.models import Candidate, Experiment
-from mirage.contracts.programs import CaseConfig
-from mirage.generator.pipeline import generate_stage
-from mirage.generator.provider import IsolatedProvider, Stage
-from mirage.generator.repair import Diagnostic, DiagnosticKind
-from mirage.inspector.oracle import inspect
-from mirage.inspector.validation import assess
-from mirage.rules.registry import RULES
-from mirage.rules.tolerances import policy
-from mirage.runtime.process import cancellation_scope, run_worker
-from mirage.sampler.candidates import candidates, pair_configs
-from mirage.scheduler import LimitedProvider, Scheduler
+from mirage.contracts.exploration import targets, source_config, validate_history, history_request
+from mirage.generator.program import analyze, request, ContractError
+from mirage.generator.provider import IsolatedProvider
+from mirage.generator.repair import generate, Diagnostic, DiagnosticKind
+from mirage.rules.conditional import inspect, RULE_VERSION
+from mirage.runtime.process import run_worker
+from mirage.sampler.policy import Sampler
 
 
-def require_torch() -> None:
-    if importlib.util.find_spec("torch") is None:
-        raise ValueError("PyTorch is unavailable in this Python environment; select the prepared PyTorch environment")
+def write_json(path, value):
+    path.write_text(json.dumps(json_value(value), indent=2, allow_nan=False), encoding="utf-8")
 
 
-def execute_case(program, config, initial, directory, timeout, engine=None, *, cancel=None):
-    result = run_worker({"mode": "execute", "config": asdict(config), "program": asdict(program),
-                         "initial": str(initial.resolve()), "engine": str(engine) if engine else None}, directory, timeout, cancel=cancel)
-    record_path = directory / "result.pt"
-    record = load_tensor_record(record_path) if result.outcome == "completed" and record_path.exists() else None
-    if record is None and (directory / "trace.jsonl").exists():
-        events = []
-        for line in (directory / "trace.jsonl").read_text(encoding="utf-8").splitlines():
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                break
-        record = {"events": events, "snapshots": []}
-    return result, record
+def base_config(api, options, seed):
+    return {"api": api, "seed": seed, "device": options.device, "backend": options.backend,
+            "precision": options.precision, "representation": "contiguous", "input_name": "",
+            "gradient_state": "none", "optimizer_steps": 0, "graph_mode": "fresh",
+            "checkpoint": False, "saved_tensors": False, "microbatches": 1,
+            "accumulation_source": False, "requires_backward": not options.forward_only}
 
 
-def _run_experiment(options, root, batch_id, index, api_draw, scheduler):
-    store = ArtifactStore(root)
-    deadline = scheduler.deadline
-    stages = []
-    resource_records = []
-    api_observations = []
-    executions = ()
-    inspection = None
-    execution_seconds = 0.0
-    generation_cost = {"seconds": 0.0, "input_tokens": 0, "output_tokens": 0,
-                       "unknown_usage_attempts": 0, "attempts": 0}
-
-    def remaining():
-        if scheduler.cancel.is_set():
-            raise TimeoutError("Batch cancelled")
-        budget = min(options.worker_timeout, deadline - time.monotonic())
-        if budget <= 0:
-            raise TimeoutError("Batch wall-clock budget exhausted")
-        return budget
-
-    experiment_id = f"{batch_id}-{index:04d}"
-    bundle = root / experiment_id
-    bundle.mkdir()
-    snapshot_engine(bundle / "engine")
-    # The first draw chooses only the API. State/MR selection follows canonical validation.
-    base = CaseConfig(api_draw.api, (options.seed + index) % (2 ** 63), options.device,
-                      options.backend, options.precision, options.size, options.updates,
-                      options.warmup_steps)
-    experiment = None
-    payload = {"batch_id": batch_id, "index": index, "api": base.api,
-               "provider": options.provider, "status": "unresolved", "generation": [],
-               "bundle": experiment_id, "executions": [], "inspection": None,
-               "canonical_config": asdict(base), "initial": "initialize/initial.pt"}
-    payload["engine"] = "engine"
-    isolated = IsolatedProvider(options.provider, bundle, options.worker_timeout, cancel=scheduler.cancel)
-    provider = LimitedProvider(isolated, scheduler)
-    validation_number = 0
-
-    def validate_runtime(program, config, stage_directory):
-        nonlocal validation_number, execution_seconds
-        validation_number += 1
-        process, record = execute_case(program, config, bundle / payload["initial"],
-                                       stage_directory / f"validation-{validation_number:03d}", remaining(), bundle / "engine", cancel=scheduler.cancel)
-        execution_seconds += process.elapsed_seconds
-        resource_records.append({"stage": "validation", **asdict(process)})
-        intended = Experiment("validation", Candidate(config.api, config.target.key, config.target.checkpoint,
-                                                      ">".join(config.actions), None, config.backend, config.precision), config.seed)
-        execution = assess(intended, "validation", "followup", config, process, record)
-        api_observations.append((config.api, execution))
-        if process.outcome != "completed" or record is None:
-            return Diagnostic(DiagnosticKind.UNKNOWN_EXCEPTION, process.error or process.outcome), (process, record)
-        evidence = execution.evidence
-        if evidence.api_executed is not True or evidence.backward_executed is not True:
-            return Diagnostic(DiagnosticKind.MISSING_PATH, "Required API/backward evidence is missing"), (process, record)
-        if evidence.actions_completed is not True:
-            return Diagnostic(DiagnosticKind.UNRESOLVED_PLAN, "Transition actions were not verified in order"), (process, record)
-        if evidence.target_state_reached is not True:
-            return Diagnostic(DiagnosticKind.STATE_NOT_REACHED, "Runtime did not attain the requested predicate"), (process, record)
-        return Diagnostic(DiagnosticKind.ACCEPTED), (process, record)
-
-    def stage(kind, config, previous=None, mr=None):
-        program, generation, validation = generate_stage(
-            provider, kind, config, bundle / kind.value, deadline, validate_runtime, previous, mr)
-        stages.append(generation)
-        payload["generation"].append({"stage": kind.value, "status": generation.status})
-        if program is None:
-            payload["status"] = f"generation_{generation.status}"
-            raise GenerationStopped()
-        return program, validation
-
-    try:
-        initialized = run_worker({"mode": "initialize", "config": asdict(base), "engine": str(bundle / "engine")},
-                                 bundle / "initialize", remaining(), cancel=scheduler.cancel)
-        execution_seconds += initialized.elapsed_seconds
-        resource_records.append({"stage": "initialize", **asdict(initialized)})
-        if initialized.outcome != "completed":
-            payload.update(status="initialization_failed", error=initialized.error, outcome=initialized.outcome)
-            raise GenerationStopped()
-        canonical, _ = stage(Stage.CANONICAL, base)
-        skeleton, _ = stage(Stage.SKELETON, base, canonical)
-        selected, verified_counts = scheduler.select(base.api, index)
-        experiment = Experiment(experiment_id, selected, base.seed)
-        configs = pair_configs(selected, base)
-        payload.update(experiment=asdict(experiment), selection={
-            "api_draw": asdict(api_draw), "candidate": asdict(selected),
-            "verified_counts": verified_counts,
-            "seed": options.seed, "index": index,
-        })
-        transition, _ = stage(Stage.TRANSITION, configs[1], skeleton, selected.mr)
-        followup, followup_result = stage(Stage.FOLLOWUP, configs[1], transition, selected.mr)
-        source = replace(canonical, actions=configs[0].actions)
-        source_result = execute_case(source, configs[0], bundle / payload["initial"], bundle / "source", remaining(), bundle / "engine", cancel=scheduler.cancel)
-        execution_seconds += source_result[0].elapsed_seconds
-        resource_records.append({"stage": "source", **asdict(source_result[0])})
-        processes, records = tuple(zip(source_result, followup_result))
-        executions = tuple(assess(experiment, f"{experiment_id}-{role}", role, config, process, record)
-                           for role, config, process, record in zip(("source", "followup"), configs, processes, records))
-        inspection, comparison = inspect(experiment, executions, configs, records)
-        payload.update(status="executed", programs=[asdict(source), asdict(followup)],
-                       configs=[asdict(c) for c in configs], executions=[asdict(e) for e in executions],
-                       result_directories=[str(Path(p.directory).relative_to(bundle)) for p in processes],
-                       inspection=asdict(inspection) if inspection else None, comparison=comparison,
-                       rule=RULES[selected.mr].as_dict() if selected.mr else None,
-                       tolerance_policy=policy(selected.api, selected.precision, selected.backend, selected.mr) if selected.mr else None)
-    except GenerationStopped:
-        pass
-    except TimeoutError as error:
-        payload.update(status="budget_exhausted", error=str(error))
-    except KeyboardInterrupt:
-        payload.update(status="interrupted")
-        scheduler.stop("interrupted")
-    except Exception as error:
-        payload.update(status="controller_error", error=f"{type(error).__name__}: {error}")
-        scheduler.stop("controller_error")
-    finally:
-        resource_records.extend({"stage": "provider", **asdict(p)} for p in isolated.processes)
-        for generation in stages:
-            for attempt in generation.attempts:
-                generation_cost["attempts"] += 1
-                generation_cost["seconds"] += attempt.elapsed_seconds
-                usage = attempt.response.usage if attempt.response else None
-                if usage is None or usage.input_tokens is None or usage.output_tokens is None:
-                    generation_cost["unknown_usage_attempts"] += 1
-                for name in ("input_tokens", "output_tokens"):
-                    value = getattr(usage, name, None)
-                    if value is not None:
-                        generation_cost[name] += value
-        payload["files"] = inventory(bundle)
-        path = store.write(experiment_id, "experiment", payload)
-        summary = {"artifact": str(path), "status": payload["status"],
-                   "verdict": payload["inspection"]["verdict"] if payload["inspection"] else None}
-    return {"index": index, "summary": summary, "experiment": experiment,
-            "executions": executions, "inspection": inspection,
-            "api_observations": api_observations, "resources": resource_records,
-            "generation": generation_cost, "execution_seconds": execution_seconds}
+def execute(source, config, initial, directory, budget, engine=None, cancel=None):
+    process = run_worker({"mode": "execute_program", "source": source, "config": config,
+                          "initial": str(Path(initial).resolve()),
+                          "engine": str(engine) if engine else None}, directory, budget, cancel=cancel)
+    path = directory / "result.pt"
+    record = load_tensor_record(path) if process.outcome == "completed" and path.exists() else None
+    return process, record
 
 
 def run(options, apis):
-    require_torch()
     root = Path(options.output).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    store = ArtifactStore(root)
     batch_id = f"batch-{uuid.uuid4().hex[:16]}"
-    universe = candidates(apis, options.backend, options.precision, options.updates)
     started = time.monotonic()
-    scheduler = Scheduler(universe, seed=options.seed, epsilon=options.epsilon,
-                          workers=options.workers, generation_concurrency=options.generation_concurrency,
-                          deadline=started + options.time_limit)
-    summaries = []
+    deadline = started + options.time_limit
+    cancel = threading.Event()
+    gate = threading.BoundedSemaphore(options.generation_concurrency)
     resources = []
-    reproduction_queue = []
-    execution_seconds = 0.0
-    generation_cost = {"seconds": 0.0, "input_tokens": 0, "output_tokens": 0,
-                       "unknown_usage_attempts": 0, "attempts": 0}
-
-    def report(status):
-        coverage = scheduler.coverage.report()
-        generation = dict(generation_cost)
-        if generation["unknown_usage_attempts"]:
-            generation.update(input_tokens=None, output_tokens=None)
-        coverage["cost"] = {
-            "execution_seconds": execution_seconds, "generation": generation,
-            "wall_seconds": time.monotonic() - started,
-            "generation_time_includes_validation": True,
-            "provider_seconds": sum(p["elapsed_seconds"] for p in resources if p["stage"] == "provider"),
-            "resources": resources,
-        }
-        return {"batch_id": batch_id, "coverage": coverage, "candidates": universe,
-                "options": options, "experiments": summaries, "stop_reason": status,
-                "attempted_experiments": len(summaries), "schedule": list(scheduler.events),
-                "generation_outcomes": dict(Counter(item["status"] for item in summaries))}
-
-    def work(index, api_draw):
-        return _run_experiment(options, root, batch_id, index, api_draw, scheduler)
-
-    previous_handlers = {}
+    generations = []
+    cases = []
+    canonical_results = []
+    lock = threading.Lock()
+    api_locks = {api: threading.Lock() for api in apis}
+    metadata_cache = {}
+    target_attempts = Counter()
+    stop_reason = "completed"
+    reserved_cases = 0
+    old_signals = {}
     if threading.current_thread() is threading.main_thread():
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            previous_handlers[sig] = signal.getsignal(sig)
-            signal.signal(sig, lambda *_: scheduler.stop("interrupted"))
+        for number in (signal.SIGINT, signal.SIGTERM):
+            old_signals[number] = signal.signal(number, lambda *_: cancel.set())
+
+    def budget():
+        return max(0, min(options.worker_timeout, deadline - time.monotonic()))
+
+    class GatedProvider:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def generate(self, prompt, *, deadline):
+            while not cancel.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Generation budget exhausted")
+                if gate.acquire(timeout=min(0.2, remaining)):
+                    break
+            else:
+                raise TimeoutError("Batch cancelled")
+            try:
+                response = self.provider.generate(prompt, deadline=deadline)
+                return response
+            except Exception as error:
+                if getattr(error, "cancellation_uncertain", False):
+                    cancel.set()
+                    session = os.environ.get("MIRAGE_SESSION_DIR")
+                    if session:
+                        (Path(session) / "cancellation-unconfirmed").write_text(str(error))
+                raise
+            finally:
+                gate.release()
+
+    def canonical(api, index):
+        nonlocal reserved_cases
+        identifier = f"{batch_id}-{apis.index(api):03d}-{index:02d}"
+        directory = root / identifier
+        directory.mkdir()
+        snapshot_engine(directory / "engine")
+        config = base_config(api, options, options.seed + 1009 * apis.index(api) + index)
+        processes = []
+        isolated = IsolatedProvider(options.provider, directory, options.worker_timeout, cancel=cancel)
+        provider = GatedProvider(isolated)
+        entry = {"id": identifier, "api": api, "status": "unresolved", "cases": []}
+        try:
+            with api_locks[api]:
+                if api not in metadata_cache:
+                    metadata_process = run_worker({"mode": "api_metadata", "api": api}, directory / "api", budget(), cancel=cancel)
+                    processes.append(metadata_process)
+                    if metadata_process.outcome != "completed":
+                        entry.update(status="api_unavailable", error=metadata_process.error)
+                        return entry
+                    metadata_cache[api] = json.loads((directory / "api/summary.json").read_text())
+                metadata = metadata_cache[api]
+            write_json(directory / "api-context.json", metadata)
+            selected = {}
+            attempt_number = 0
+
+            def validate(content):
+                nonlocal attempt_number
+                attempt_number += 1
+                attempt_dir = directory / f"canonical-{attempt_number:02d}"
+                attempt_dir.mkdir()
+                try:
+                    value = json.loads(content)
+                    if not isinstance(value, dict) or set(value) != {"source"}:
+                        raise ContractError("Return JSON with exactly source")
+                    graph = analyze(value["source"])
+                except SyntaxError as error:
+                    return Diagnostic(DiagnosticKind.SYNTAX,
+                                      f"Python syntax error on line {error.lineno}: {error.msg}; "
+                                      f"line text: {error.text!r}. Remove unmatched braces from the Python source; "
+                                      "JSON closing braces must not be included inside the source string.")
+                except (ValueError, TypeError) as error:
+                    return Diagnostic(DiagnosticKind.CONTRACT, str(error))
+                source = value["source"]
+                (attempt_dir / "program.py").write_text(source, encoding="utf-8")
+                init = run_worker({"mode": "initialize_program", "source": source, "config": config},
+                                  attempt_dir / "initialize", budget(), cancel=cancel)
+                processes.append(init)
+                if init.outcome != "completed":
+                    kind = DiagnosticKind.CONTRACT if (init.error or "").startswith("ContractError:") else DiagnosticKind.UNKNOWN_EXCEPTION
+                    return Diagnostic(kind, init.error or init.outcome)
+                initial = attempt_dir / "initialize/initial.pt"
+                execution, record = execute(source, config, initial, attempt_dir / "validation",
+                                            budget(), directory / "engine", cancel)
+                processes.append(execution)
+                if record is None:
+                    kind = DiagnosticKind.CONTRACT if (execution.error or "").startswith("ContractError:") else DiagnosticKind.UNKNOWN_EXCEPTION
+                    return Diagnostic(kind, execution.error or execution.outcome)
+                if not record["api_executed"] or config["requires_backward"] and not record["backward_executed"]:
+                    return Diagnostic(DiagnosticKind.UNKNOWN_EXCEPTION, "Target API/backward execution not verified")
+                selected.update(source=source, initial=initial, graph=graph,
+                                metadata=json.loads((attempt_dir / "initialize/summary.json").read_text()),
+                                record=record)
+                return Diagnostic(DiagnosticKind.ACCEPTED)
+
+            saved_attempts = []
+
+            def save_attempt(attempt):
+                saved_attempts.append(attempt)
+                write_json(directory / f"attempt-{len(saved_attempts):02d}.json", asdict(attempt))
+
+            generation = generate(provider, request(metadata, config["seed"], options.device, options.size,
+                                                    config["requires_backward"]),
+                                  validate, deadline=deadline, record=save_attempt)
+            write_json(directory / "generation.json", asdict(generation))
+            with lock:
+                generations.append(generation)
+            if generation.status != "accepted":
+                entry["status"] = f"generation_{generation.status}"
+                return entry
+            entry.update(status="validated", graph=selected["graph"],
+                         canonical_api_verified=True,
+                         canonical_backward_verified=selected["record"]["backward_executed"])
+            consumed = set().union(*(set(call.get("input_names", []))
+                                     for call in selected["record"]["target_calls"]))
+            operand_metadata = {name: value for name, value in selected["metadata"]["metadata"].items()
+                                if name.removeprefix(".0.") in consumed}
+            choices = targets(config, operand_metadata, None)
+            if not selected["graph"]["sample_loss"] or not selected["metadata"]["batch_axes"]:
+                choices = [(rule, target) for rule, target in choices if rule != "accumulation"]
+            entry["declared_targets"] = len(choices)
+            remaining_targets = list(range(len(choices)))
+            for target_index in range(min(options.targets_per_canonical, len(choices))):
+                keys = {i: json.dumps({k: v for k, v in choices[i][1].items() if k != "seed"}, sort_keys=True)
+                        for i in remaining_targets}
+                with lock:
+                    sampler = Sampler(tuple(remaining_targets), seed=config["seed"] + target_index, epsilon=options.epsilon)
+                    chosen = sampler.sample({i: target_attempts[key] for i, key in keys.items()})
+                    target_attempts[keys[chosen]] += 1
+                remaining_targets.remove(chosen)
+                rule, followup = choices[chosen]
+                if (rule in ("layout", "storage", "checkpoint", "saved_tensor")
+                        and not selected["record"]["pure"]
+                        or rule in ("layout", "storage", "saved_tensor") and selected["record"]["stochastic"]):
+                    # Keep the legal state trajectory when this oracle is unavailable.
+                    rule = None
+                for path_index in range(options.paths_per_target):
+                    if cancel.is_set() or budget() <= 0:
+                        return entry
+                    with lock:
+                        if reserved_cases >= options.cases:
+                            return entry
+                        reserved_cases += 1
+                    case_id = f"{identifier}-t{target_index:02d}-p{path_index}"
+                    bundle = root / case_id
+                    bundle.mkdir()
+                    plan = {}
+
+                    def validate_plan(content):
+                        try:
+                            value = json.loads(content)
+                            if not isinstance(value, dict) or set(value) != {"actions"}:
+                                raise ContractError("Return exactly actions")
+                            plan["history"] = list(validate_history(value["actions"], followup))
+                        except (ValueError, TypeError) as error:
+                            return Diagnostic(DiagnosticKind.CONTRACT, str(error))
+                        return Diagnostic(DiagnosticKind.ACCEPTED)
+
+                    planned = generate(provider, history_request(followup, selected["source"], path_index),
+                                       validate_plan, deadline=deadline)
+                    write_json(bundle / "generation.json", asdict(planned))
+                    with lock:
+                        generations.append(planned)
+                    if planned.status != "accepted":
+                        item = {"id": case_id, "api": api, "status": f"plan_{planned.status}"}
+                        entry["cases"].append(item)
+                        with lock:
+                            cases.append(item)
+                        continue
+                    followup = dict(followup, **plan)
+                    source = source_config(rule, followup)
+                    shutil.copyfile(selected["initial"], bundle / "initial.pt")
+                    (bundle / "program.py").write_text(selected["source"], encoding="utf-8")
+                    shutil.copytree(directory / "engine", bundle / "engine")
+                    write_json(bundle / "api.json", metadata)
+                    configs = [source, followup] if rule else [followup]
+                    records = []
+                    results = []
+                    for role, case_config in zip(("source", "followup") if rule else ("followup",), configs):
+                        result, record = execute(selected["source"], case_config, bundle / "initial.pt",
+                                                 bundle / role, budget(), bundle / "engine", cancel)
+                        processes.append(result)
+                        results.append(result)
+                        records.append(record)
+                    inspection = inspect(rule, *(records if rule else [None, records[0]]))
+                    verified = all(r and r["api_executed"] and (not config["requires_backward"] or r["backward_executed"])
+                                   and r["target_state_reached"] for r in records)
+                    payload = {"generation_contract_version": 3, "bundle": case_id,
+                               "status": "executed", "api": api, "canonical": identifier,
+                               "rule": rule, "rule_version": RULE_VERSION, "configs": configs,
+                               "results": [asdict(p) for p in results], "inspection": inspection,
+                               "verified": verified, "files": inventory(bundle)}
+                    manifest = ArtifactStore(root).write(case_id, "experiment", payload)
+                    item = {"id": case_id, "api": api, "status": "executed", "rule": rule,
+                            "verified": verified, "verdict": inspection.get("verdict"),
+                            "outcomes": [result.outcome for result in results],
+                            "state": {k: v for k, v in followup.items() if k not in ("seed", "history")},
+                            "path": plan["history"], "manifest": str(manifest)}
+                    item["transition"] = records[-1].get("transition", []) if records[-1] else []
+                    if inspection.get("verdict") == "suspected_failure":
+                        item["reproductions"] = []
+                        for _ in range(options.replay_failures):
+                            if budget() <= 0 or cancel.is_set():
+                                break
+                            reproduction = replay(manifest, timeout=budget(), deadline=deadline, cancel=cancel)
+                            with lock:
+                                resources.extend(reproduction["resources"])
+                            item["reproductions"].append(reproduction)
+                    entry["cases"].append(item)
+                    with lock:
+                        cases.append(item)
+            return entry
+        except Exception as error:
+            entry.update(status="unresolved", error=f"{type(error).__name__}: {error}")
+            return entry
+        finally:
+            write_json(directory / "canonical.json", entry)
+            with lock:
+                resources.extend(asdict(p) for p in processes + isolated.processes)
+
     try:
-        for completed in scheduler.execute(options.cases, work):
-            if completed is None:
-                # No other experiment can use the test GPU during reproduction.
-                from mirage.artifacts.replay import replay
-
-                for summary in reproduction_queue:
-                    summary["reproductions"] = []
-                    for _ in range(options.replay_failures):
-                        if scheduler.cancel.is_set() or time.monotonic() >= scheduler.deadline:
-                            break
-                        with cancellation_scope(scheduler.cancel):
-                            reproduction = replay(Path(summary["artifact"]), timeout=options.worker_timeout,
-                                                  deadline=scheduler.deadline)
-                        execution_seconds += reproduction["execution_seconds"]
-                        summary["reproductions"].append(reproduction)
-                reproduction_queue.clear()
-                continue
-            scheduler.commit(completed)
-            summaries.append(completed["summary"])
-            resources.extend(completed["resources"])
-            execution_seconds += completed["execution_seconds"]
-            for key, value in completed["generation"].items():
-                generation_cost[key] += value
-            if completed["summary"]["verdict"] == "suspected_failure" and options.replay_failures:
-                reproduction_queue.append(completed["summary"])
-                scheduler.paused = True
-            store.write(f"{batch_id}-progress-{len(summaries):04d}", "report", report("in_progress"))
+        tasks = [(api, index) for index in range(options.canonicals_per_api) for api in apis]
+        with ThreadPoolExecutor(max_workers=options.workers) as executor:
+            # Limit submitted tasks too; deadlines must not leave a large queued batch.
+            futures = {}
+            iterator = iter(tasks)
+            for _ in range(options.workers):
+                item = next(iterator, None)
+                if item:
+                    futures[executor.submit(canonical, *item)] = item
+            while futures:
+                done = next(as_completed(futures))
+                futures.pop(done)
+                canonical_results.append(done.result())
+                item = next(iterator, None)
+                if item and not cancel.is_set() and budget() > 0:
+                    futures[executor.submit(canonical, *item)] = item
     finally:
-        for sig, handler in previous_handlers.items():
-            signal.signal(sig, handler)
-    if time.monotonic() >= scheduler.deadline and scheduler.stop_reason == "case_limit":
-        scheduler.stop_reason = "time_limit"
-    result = report(scheduler.stop_reason)
-    report_path = store.write(batch_id, "report", result)
-    return {"report": str(report_path), **json_value(result)}
+        for number, handler in old_signals.items():
+            signal.signal(number, handler)
+    if cancel.is_set():
+        stop_reason = "interrupted_or_provider_cancellation_unconfirmed"
+    elif time.monotonic() >= deadline:
+        stop_reason = "time_limit"
+    attempts = [attempt for generation in generations for attempt in generation.attempts]
+    verified_cases = [case for case in cases if case.get("verified")]
+    report = {
+        "batch_id": batch_id, "generation_contract_version": 3, "stop_reason": stop_reason,
+        "wall_seconds": time.monotonic() - started, "options": asdict(options),
+        "canonicals": canonical_results, "experiments": cases,
+        "case_statuses": dict(Counter(case["status"] for case in cases)),
+        "verdicts": dict(Counter(case.get("verdict") or "unassessed" for case in cases if case["status"] == "executed")),
+        "runtime_outcomes": dict(Counter(outcome for case in cases for outcome in case.get("outcomes", []))),
+        "generation": {"calls": len(attempts), "repairs": sum(max(0, len(g.attempts) - 1) for g in generations),
+                       "input_tokens": sum(a.response.usage.input_tokens or 0 for a in attempts if a.response),
+                       "output_tokens": sum(a.response.usage.output_tokens or 0 for a in attempts if a.response),
+                       "unknown_usage": sum(a.response is None or a.response.usage.input_tokens is None
+                                            or a.response.usage.output_tokens is None for a in attempts)},
+        "coverage": {"api": {"covered": len({c["api"] for c in canonical_results if c.get("canonical_api_verified")}),
+                             "total": len(apis)},
+                     "verified_cases": len(verified_cases),
+                     "verified_coverage_only": sum(case["rule"] is None for case in verified_cases),
+                     "unique_verified_states": len({json.dumps(c["state"], sort_keys=True) for c in verified_cases}),
+                     "unique_verified_paths": len({tuple(c["path"]) for c in verified_cases}),
+                     "unique_verified_transitions": len({tuple(c["transition"]) for c in verified_cases}),
+                     "declared_program_targets": sum(c.get("declared_targets", 0) for c in canonical_results),
+                     "api_mr": {"applicable": len({(c["api"], c["rule"]) for c in cases
+                                                     if c.get("verdict") in ("pass", "suspected_failure")}),
+                                "declared": len(apis) * 6},
+                     "candidate_basis": "bounded declared targets; feasibility is established only by execution"},
+        "resources": resources,
+    }
+    ArtifactStore(root).write(f"{batch_id}-report", "report", report)
+    return report
 
 
-class GenerationStopped(Exception):
-    """Expected generation or initialization outcome already preserved in artifacts."""
+def replay(manifest_path, *, timeout=600, allow_environment_change=False, deadline=None, cancel=None):
+    path = Path(manifest_path).resolve()
+    original = ArtifactStore(path.parent).read(path.stem)
+    payload = original["payload"]
+    if payload.get("generation_contract_version") != 3:
+        raise ValueError("Legacy reproduction is no longer supported")
+    source = path.parent / payload["bundle"]
+    verify(source, payload["files"])
+    identifier = f"replay-{uuid.uuid4().hex[:16]}"
+    directory = path.parent / identifier
+    directory.mkdir()
+    shutil.copytree(source / "engine", directory / "engine")
+    shutil.copyfile(source / "initial.pt", directory / "initial.pt")
+    code = (source / "program.py").read_text()
+    results, records = [], []
+    deadline = deadline if deadline is not None else time.monotonic() + 3 * timeout
+    for index, config in enumerate(payload["configs"]):
+        process, record = execute(code, config, directory / "initial.pt", directory / f"execution-{index}",
+                                  max(0, min(timeout, deadline - time.monotonic())), directory / "engine", cancel)
+        results.append(asdict(process))
+        records.append(record)
+    record_paths = [str(directory / f"execution-{index}" / "result.pt") if record else None
+                    for index, record in enumerate(records)]
+    inspection_process = run_worker({"mode": "inspect_pair", "rule": payload["rule"],
+                                     "records": record_paths if len(records) == 2 else [None, record_paths[0]],
+                                     "engine": str(directory / "engine")}, directory / "inspection",
+                                    max(0, min(timeout, deadline - time.monotonic())), cancel=cancel)
+    if inspection_process.outcome == "completed":
+        inspection = json.loads((directory / "inspection/summary.json").read_text())
+    else:
+        inspection = {"verdict": None, "reason": inspection_process.error or inspection_process.outcome}
+    environment_changes = []
+    for index, (record, role) in enumerate(zip(records, ("source", "followup") if payload["rule"] else ("followup",))):
+        previous_path = source / role / "result.pt"
+        if record and previous_path.exists():
+            previous = load_tensor_record(previous_path)
+            if previous["environment"] != record["environment"]:
+                environment_changes.append(index)
+    if environment_changes and not allow_environment_change:
+        inspection = {"verdict": None, "reason": "Environment changed; cross-environment comparison was not requested"}
+    replay_resources = [*results, asdict(inspection_process)]
+    result = {"generation_contract_version": 3, "provider_calls": 0, "results": results,
+              "resources": replay_resources,
+              "inspection": inspection, "environment_changes": environment_changes,
+              "bundle": identifier, "files": inventory(directory)}
+    manifest = ArtifactStore(path.parent).write(identifier, "execution", result, parent_id=original["artifact_id"])
+    return {"artifact": str(manifest), "verdict": inspection.get("verdict"), "provider_calls": 0,
+            "environment_changes": environment_changes, "resources": replay_resources}

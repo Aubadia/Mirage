@@ -29,6 +29,6 @@ timeout --signal=TERM --kill-after=30s "${budget}s" \
     srun --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" \
     env PYTHONPATH="${PYTHONPATH}:${MIRAGE_PROJECT_ROOT}/tests" \
     "$MIRAGE_PYTHON" -m unittest -v \
-    test_http_provider test_scheduler test_runtime test_cli test_sbatch \
+    test_http_provider test_cli test_sbatch test_artifacts \
     > "${MIRAGE_JOB_DIR}/tests.log" 2>&1
 cat -- "${MIRAGE_JOB_DIR}/tests.log"

@@ -23,7 +23,7 @@ source "${mirage_root}/sbatch/lib/environment.sh"
 MIRAGE_CATEGORY=experiments
 mirage_setup
 
-: "${MIRAGE_PROVIDER:?Set MIRAGE_PROVIDER=module:factory, or explicitly choose reference}"
+: "${MIRAGE_PROVIDER:?Set MIRAGE_PROVIDER=vllm or module:factory}"
 for argument in "$@"; do
     case "$argument" in
         --provider|--provider=*|--device|--device=*|\
@@ -34,8 +34,9 @@ for argument in "$@"; do
             ;;
         --apis|--apis=*|--cases|--cases=*|--seed|--seed=*|\
         --backend|--backend=*|--precision|--precision=*|\
-        --updates|--updates=*|--size|--size=*|--epsilon|--epsilon=*|\
-        --warmup-steps|--warmup-steps=*|\
+        --size|--size=*|--epsilon|--epsilon=*|\
+        --canonicals-per-api|--canonicals-per-api=*|--targets-per-canonical|--targets-per-canonical=*|\
+        --paths-per-target|--paths-per-target=*|--forward-only|\
         --workers|--workers=*|--generation-concurrency|--generation-concurrency=*|\
         --replay-failures|--replay-failures=*|--help)
             ;;

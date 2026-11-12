@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
+import shutil
 import tempfile
 import unittest
 
@@ -11,6 +13,46 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ServingShellTests(unittest.TestCase):
+    def test_development_failure_preserves_service_and_snapshots(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "project"
+            session = Path(temporary) / "session"
+            for path in (project / "src", project / "tests", project / "sbatch/lib", session):
+                path.mkdir(parents=True, exist_ok=True)
+            (project / "src/marker.py").write_text("VALUE = 1\n")
+            shutil.copyfile(ROOT / "sbatch/lib/environment.sh", project / "sbatch/lib/environment.sh")
+            script = r'''
+set -uo pipefail
+source "$1/sbatch/lib/development.sh"
+export MIRAGE_PROJECT_ROOT="$2" MIRAGE_SESSION_DIR="$3" MIRAGE_PYTHON="$4"
+export SLURM_JOB_ID=fixture SLURM_STEP_ID=fixture MIRAGE_TEST_CACHE_DIR="$3/cache"
+squeue() { echo '10:00'; }
+sleep 60 &
+service=$!
+trap 'kill "$service" 2>/dev/null; wait "$service" 2>/dev/null || true' EXIT
+status=0
+mirage_iteration -c 'import marker; print(marker.VALUE); raise SystemExit(17)' || status=$?
+[[ "$status" == 17 ]] || exit 1
+kill -0 "$service" || exit 1
+echo 'VALUE = 2' > "$MIRAGE_PROJECT_ROOT/src/marker.py"
+mirage_iteration -c 'import marker; print(marker.VALUE)' || exit 1
+kill -0 "$service" || exit 1
+'''
+            result = subprocess.run(["bash", "-c", script, "test", str(ROOT), str(project), str(session), sys.executable],
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            outputs = sorted((path / "stdout.log").read_text().strip() for path in session.glob("iteration-*"))
+            self.assertEqual(outputs, ["1", "2"])
+
+    def test_unconfirmed_cancellation_blocks_session_reuse(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / "cancellation-unconfirmed").touch()
+            result = subprocess.run(["bash", "-c",
+                                     'source "$1/sbatch/lib/development.sh"; MIRAGE_SESSION_DIR="$2"; SLURM_STEP_ID=test; mirage_iteration -c pass',
+                                     "test", str(ROOT), temporary], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unconfirmed", result.stderr)
+
     def test_memory_is_divided_instead_of_inheriting_the_whole_job(self):
         script = r'''
 set -euo pipefail

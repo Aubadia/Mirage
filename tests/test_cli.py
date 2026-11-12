@@ -35,7 +35,6 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(main(["report", temporary]), 0)
             self.assertEqual(json.loads(output.getvalue())["coverage"], {"experiments": 1})
 
-    def test_replay_has_explicit_cross_version_and_minimization_controls(self):
-        arguments = parser().parse_args(["replay", "case.json", "--allow-environment-change", "--size", "2"])
+    def test_replay_has_explicit_environment_control(self):
+        arguments = parser().parse_args(["replay", "case.json", "--allow-environment-change"])
         self.assertTrue(arguments.allow_environment_change)
-        self.assertEqual(arguments.size, 2)

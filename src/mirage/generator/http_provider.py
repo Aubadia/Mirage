@@ -29,7 +29,7 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 class HTTPConfig:
     base_url: str
     model: str = "Qwen/Qwen3-Coder-Next-FP8"
-    max_tokens: int = 2048
+    max_tokens: int = 4096
     temperature: float = 0.0
     top_p: float = 1.0
     timeout: float = 120.0
@@ -62,13 +62,19 @@ class HTTPProvider:
         return cls(HTTPConfig(
             base_url=base_url,
             model=os.environ.get("MIRAGE_VLLM_MODEL", "Qwen/Qwen3-Coder-Next-FP8"),
-            max_tokens=int(os.environ.get("MIRAGE_MAX_TOKENS", "2048")),
+            max_tokens=int(os.environ.get("MIRAGE_MAX_TOKENS", "4096")),
             temperature=float(os.environ.get("MIRAGE_TEMPERATURE", "0")),
             top_p=float(os.environ.get("MIRAGE_TOP_P", "1")),
             timeout=float(os.environ.get("MIRAGE_HTTP_TIMEOUT", "120")),
         ), directory=directory)
 
     def _payload(self, request: Request) -> dict:
+        contract = request.context.get("contract")
+        field = {"training-program": "source", "state-plan": "actions"}.get(contract)
+        schema = PROGRAM_SCHEMA if field is None else {
+            "type": "object", "properties": {field: PROGRAM_SCHEMA["properties"][field]},
+            "required": [field], "additionalProperties": False,
+        }
         messages = [
             {"role": "system", "content": "Follow the supplied testing contract. Return only the requested JSON object."},
             {"role": "user", "content": request.prompt + "\nContext:\n" + json.dumps(request.context)},
@@ -87,7 +93,7 @@ class HTTPProvider:
             "stream": False,
             "response_format": {
                 "type": "json_schema",
-                "json_schema": {"name": "mirage_program", "strict": True, "schema": PROGRAM_SCHEMA},
+                "json_schema": {"name": "mirage_program", "strict": True, "schema": schema},
             },
         }
         seed = request.context.get("configuration", {}).get("seed")

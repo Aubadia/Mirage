@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 from mirage.artifacts.store import ArtifactStore
-from mirage.contracts.apis import select_apis
+from mirage.contracts.apis import select_apis, ACCEPTANCE_APIS
 from mirage.artifacts.report import summarize
 
 
@@ -35,26 +35,23 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--backend", choices=("eager", "compile_eager", "aot_eager", "inductor"), default="eager")
     run.add_argument("--precision", choices=("fp32", "fp16", "bf16"), default="fp32")
-    run.add_argument("--provider", help="vllm, Python module:factory, or reference integration fixture")
+    run.add_argument("--provider", help="vllm or Python module:factory")
     run.add_argument("--output", type=Path, default=Path("result/experiments"))
     run.add_argument("--workers", type=positive_integer, default=1)
     run.add_argument("--generation-concurrency", type=positive_integer, default=2)
+    run.add_argument("--canonicals-per-api", type=positive_integer, default=3)
+    run.add_argument("--targets-per-canonical", type=positive_integer, default=12)
+    run.add_argument("--paths-per-target", type=positive_integer, default=2)
+    run.add_argument("--forward-only", action="store_true", help="Do not require a backward path through the target API")
     run.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
-    run.add_argument("--updates", type=positive_integer, default=3)
     run.add_argument("--size", type=positive_integer, default=4)
     run.add_argument("--epsilon", type=float, default=0.1)
-    run.add_argument("--warmup-steps", type=positive_integer, default=1)
     run.add_argument("--replay-failures", type=int, default=1)
 
     replay = commands.add_parser("replay", help="Execute a saved pair without calling an LLM")
     replay.add_argument("manifest", type=Path)
     replay.add_argument("--worker-timeout", type=positive_integer, default=600)
     replay.add_argument("--allow-environment-change", action="store_true")
-    replay.add_argument("--source-program", type=Path)
-    replay.add_argument("--followup-program", type=Path)
-    replay.add_argument("--size", type=positive_integer)
-    replay.add_argument("--updates", type=positive_integer)
-    replay.add_argument("--iteration", type=int)
     return result
 
 
@@ -65,21 +62,20 @@ def main(argv: list[str] | None = None) -> int:
             from mirage.contracts.programs import RunOptions
             from mirage.workflow import run
 
-            apis = select_apis(args.apis)
+            apis = select_apis(args.apis or list(ACCEPTANCE_APIS))
             if not args.provider:
-                raise ValueError("--provider module:factory is required; use --provider reference only for fixture runs")
+                raise ValueError("--provider vllm or module:factory is required")
             values = vars(args).copy()
             for key in ("command", "apis"):
                 values.pop(key)
             values["output"] = str(values["output"])
+            values["contract_version"] = 3
             output = run(RunOptions(**values), apis)
         elif args.command == "replay":
-            from mirage.artifacts.replay import replay
+            from mirage.workflow import replay
 
             output = replay(args.manifest, timeout=args.worker_timeout,
-                            allow_environment_change=args.allow_environment_change,
-                            source_program=args.source_program, followup_program=args.followup_program,
-                            size=args.size, updates=args.updates, iteration=args.iteration)
+                            allow_environment_change=args.allow_environment_change)
         elif args.command == "inspect":
             if args.manifest.suffix != ".json":
                 raise ValueError("Expected a .json manifest")
@@ -93,7 +89,10 @@ def main(argv: list[str] | None = None) -> int:
             output = summarize(manifests)
         print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
         if args.command == "run":
-            if output["stop_reason"] in ("interrupted", "controller_error", "provider_cancellation_unconfirmed"):
+            if output["stop_reason"] in ("interrupted", "controller_error", "provider_cancellation_unconfirmed",
+                                       "interrupted_or_provider_cancellation_unconfirmed"):
+                return 1
+            if any(item["status"] != "validated" for item in output.get("canonicals", [])):
                 return 1
             if any(case["status"].startswith("generation_provider_") for case in output["experiments"]):
                 return 1

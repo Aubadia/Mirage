@@ -142,8 +142,9 @@ LLM 使用可替換的 Python provider 介面。第一版不綁模型、不實�
 介面應傳入生成階段、結構化上下文與診斷，回傳生成內容及可取得的 usage 資訊。
 Provider 未提供 token 使用量時記錄 unknown，不填成零。
 
-LLM 參與 canonical program、training skeleton、transition plan 及 follow-up program
-生成。增量注入後檢查語法、合法性、必要路徑與靜態 MR 條件。
+第一版以四階段 provider 介面串接生成。第 16 節的 A＋B 更新改為由 LLM 生成
+canonical 計算圖與 transition plan，framework 綁定 skeleton 並組裝 follow-up；
+每次生成後檢查語法、合法性、必要路徑與靜態 MR 條件。
 
 ### 生成程式修正
 
@@ -339,7 +340,8 @@ Distributed training 與單一測試跨 GPU 執行仍不在範圍內。
 Binary API 的 weight 為該 operand 的 detached copy 或 detached alias，bias 是保存的固定值。
 對齊 parameter 的邏輯座標比較梯度，避免 leaf／view 或 in-place rebasing 造成假性缺失。
 
-LLM 生成程式須符合可驗證的單一目標運算與 loss grammar，可選擇合法的 dropout p、
+此節記錄 version-one 實作界線；現行 version-two 以第 16 節為準。
+第一版 LLM 生成程式須符合可驗證的單一目標運算與 loss grammar，可選擇合法的 dropout p、
 softmax dim、GELU approximate 或 layer-norm eps。Skeleton／transition 保留 canonical
 計算；follow-up 的合法計算差異會使 MR input relation 不成立，仍保存執行覆蓋。
 任意模型、任意 Python 副作用與全新的 LLM 自創 oracle 不在此 grammar 內。
@@ -616,3 +618,160 @@ sbatch sbatch/experiments/parallel.sbatch --apis torch.matmul --cases 10
 
 這個 job 會啟動模型服務、執行案例並在結束時停止服務。無需重新下載模型；
 啟動等待時間仍受 allocation 剩餘時間約束。
+
+## 16. A + B：計算圖生成與狀態轉換計畫
+
+本節是現行 generation contract version 2，取代第 13～15 節的四次模板生成流程。
+LLM 每個正常案例呼叫兩次：canonical 計算圖生成及 transition 計畫生成；每次最多
+兩次修正。Framework 綁定訓練迴圈、組裝 source／follow-up、執行並判定 MR。
+不進行模型 A/B 對比，也不新增 optimizer、scheduler、offloading 或 distributed 維度。
+
+### 16.1 A：受控計算圖
+
+`graph-v2` 請求回傳 `{"source": "..."}`。只允許
+`forward(x, weight, bias)` 與 `training_loss(output)`，使用單次賦值的局部變數及 return。
+目標 API 必須是 forward 的第一個運算，直接使用既有 API profile 指定的 operands；
+這保證 harness 建立的 stride／offset／alias 表示直接送入目標呼叫。
+
+目標結果之後可由模型組合分支、合併、常數縮放及非線性運算。白名單為：
+
+- Tensor 加、減、乘；有限數值常數範圍 `[-2, 2]`。
+- `torch.tanh`、`torch.sigmoid`、`torch.relu`、單參數的 `torch.nn.functional.gelu`。
+- Tensor `float()`、`square()`；loss 另允許 `mean()`。
+- 目標之後連同 loss 最多 12 個運算，source 最多 12000 字元；forward 保持 rank two，
+  loss 必須是 scalar。運算必須依賴目標／output，局部變數不得重複賦值或閒置。
+
+額外 mutation、隨機操作、detach、迴圈、外部狀態與任意 Python 不在此語言內。
+目標 API 本身既有的 mutation／stochastic 性質仍保留，限制對應 MR 的 applicability。
+Prompt 提供契約及探索偏好，不提供完整答案；允許模型選擇拓撲、係數與 loss。
+Reference provider 仍是明確標示的確定性測試 fixture，不計為 LLM 能力證據。
+
+Framework 將驗證過的程式拆成 target call、graph tail 與 loss。`api_enter/api_exit`
+包住實際 target call，before_api snapshot 取得其真正 operands 的 metadata，並在
+目標結果上另掛 gradient hook。新版 backward 證據要求 input、target、output 三條
+hook 證據；沒有目標梯度證據即不可視為有效的 backward 測試。
+
+Compiled 模式將 target 與 tail 分別編譯，保留明確觀測邊界；這一版不測跨兩段邊界
+的整圖 fusion。編譯圖節點、實際 compiled call 完成事件、目標呼叫事件及梯度證據
+共同驗證路徑，不能僅憑設定旗標或圖中節點存在給予有效覆蓋。
+
+### 16.2 B：可執行計畫
+
+`plan-v2` 請求回傳 `{"actions": [...]}`。框架提供已驗證的計算圖、目標 predicate、
+配置、MR 與 action 契約，不提供完整 action 答案。此版計畫語言為：
+
+1. `restore_initial_state`。
+2. 零個或多個 `warmup:REP`，每個 action 真正執行一次 forward／backward／Adam。
+   REP 可為 contiguous、strided、offset、clone、shared，模型選擇次數、表示及順序。
+3. `restore_training_state`，恢復 parameter、gradient、optimizer、AMP scaler 與 RNG。
+4. `checkpoint:0` 或 `checkpoint:1`，符合 target 的 checkpointing 條件。
+5. 恰好 `updates` 個 `train:REP`，REP 必須等於 target.representation。
+
+`target.warmup=none` 要求零次 warm-up；`same` 要求所有 warm-up 都使用目標表示；
+`alternate` 要求至少一次使用不同表示。有 warm-up 時，模型可選 1 至
+`2 * warmup_steps` 次。正式訓練的基本依賴順序保持固定，並非任意訓練程式規劃器。
+
+執行器逐一解讀計畫，完成 action 後才發出帶 index 的 `plan_action` 事件。
+Inspector 同時檢查計畫合法性、完整的 action 完成序列，以及指定 checkpoint 的
+實際 metadata、warm-up 歷史類別與 gradient 證據。計畫存在不代表狀態已到達。
+
+Source／follow-up 使用相同計算圖。Layout／storage source 使用沒有 warm-up 的
+contiguous 配置；checkpoint 配對保留相同 warm-up 計畫，只切換 checkpointing。
+Mutation source 沿用既有 eager 配置；若 warm-up 等條件不滿足既有 input relation，
+保留 coverage 並標為 inapplicable，不放寬 MR 前提以追求 Pass。
+
+### 16.3 錯誤、版本與統計
+
+靜態語法錯誤與明確 graph／plan contract violation 可回傳模型修正；此分類不宣稱
+原程式是非法 PyTorch。原因未明的 runtime exception、runtime unresolved plan、
+未達狀態與 MR 違反不進行猜測式修正。Suspected failure 仍需重播及獨立證據。
+已通過結構檢查的新版圖若缺少 runtime API／backward 證據，也保留為待查的
+unknown exception，不要求模型改寫；可能的執行器／framework 異常不得被生成修正掩蓋。
+原有數值容差繼續作為 screening threshold；擴大計算圖後的條件數與數值誤差需要
+逐案例複核，不能僅由閾值超出確認 framework defect，也不自動放寬閾值。
+
+- Program 及 execution record 以 `version=2` 識別；舊版省略 version 時視為 1。
+- Bundle 保留生成 source、實際 actions、原始請求／回覆、修正歷史、執行證據及 engine。
+- 新 controller 重播舊 artifact 時仍使用其保存的 engine，送入舊版支援的欄位。
+- Eager 候選也納入 none／same／alternate，coverage 使用 `candidate_schema_version=2`。
+  `transition` 仍計算宣告候選中的抽象轉換模板，不代表所有具體路徑。
+- `diversity` 另列 accepted／verified graph、unique graph、verified plan instance、
+  unique verified plan 與修正次數。具體路徑沒有已證明的全集分母，只報計數。
+- Graph fingerprint 正規化局部變數名稱並保留常數；改名不算新圖，改係數可能算新圖。
+  這不是通用語意等價判斷。Plan fingerprint 基於實際 action 序列。
+- 不同版本／不同候選集合的覆蓋比例不相加；跨 target 的不同 plan 也不等同於
+  在相同 predicate 下找到不同路徑，分析時應保留配置與目標條件。
+
+### 16.4 驗證與執行
+
+```bash
+export MIRAGE_PYTHON="$PWD/.venv/bin/python"
+mkdir -p result/validation/logs
+sbatch sbatch/validation/generation_planning.sbatch \
+  test_graph_generation test_transition_planning
+sbatch sbatch/validation/full_suite.sbatch
+
+source result/serving/761235/serving.env
+sbatch sbatch/validation/llm_graph_plans.sbatch
+```
+
+真模型 job 使用兩張 GPU、兩個 worker、12 個 matmul 案例；要求有效案例、實際圖與
+計畫多樣性，並在關閉模型服務後重播一個適用 MR 的案例。另記錄正式訓練各步
+梯度都為零的案例作為生成品質觀察；零梯度合法，不自動視為程式錯誤或 MR 違反。
+測試失敗會保留日誌及
+非零退出碼，不改用 reference provider。所有運算由 Slurm 派發。
+
+已取得的驗證證據：
+
+- `761553`：A 初版 7 項測試通過，涵蓋八個目標 API、CUDA、三個 compile backend、
+  MR 與缺少 target gradient 的否定案例，36.406 秒。
+- `761564`：圖、計畫、生成修正與 HTTP 相關共 30 項測試通過，34.886 秒。
+  包含獨立 scalar chain-rule 梯度檢查、不同 warm-up 路徑與缺少恢復步驟的否定案例。
+- `761586`：使用新 controller 重播舊版真模型案例，MR Pass，兩個 execution completed、
+  provider calls 0、environment changes 為空。
+- `761568`：完整 92 項測試通過，零跳過，246.549 秒；包含單／雙 worker、
+  模擬 HTTP、CUDA、compile、生成計畫與無 LLM 重播／縮小。
+- `761638`：補充的 11 項圖／計畫測試通過，38.721 秒，包含新版圖的 FP16／BF16、
+  三個 compile backend 下的 checkpoint／mutation，以及不同 warm-up 歷史。
+- `761642`：最後的 grammar／provider／pipeline 11 項檢查通過，0.524 秒，
+  包含重複目標呼叫的拒絕案例。
+- `761681`：缺少 runtime API／backward 證據的故障注入測試通過，確認只呼叫一次
+  provider，保存 unknown 診斷而不進行改寫，9.399 秒。
+- `761576`：真模型生成暴露 prompt／diagnostic 問題：模型在目標之後引用 `bias`，
+  原本泛用的錯誤訊息未能協助修正。4 個案例 repair_exhausted 後主動中止，另 2 個
+  initialization_failed 來自中止中的初始化；stop_reason=interrupted，未得到 MR 結果。
+  這輪不計為驗收通過，完整紀錄保留。
+- 修正為包含名稱、行號與可用 locals 的具體診斷，並在 prompt 明確禁止目標後的
+  bias 存取；未放寬 grammar。
+- 重試 `761776` 明確使用 `--nodelist=25a-hgpn057`（scheduler preflight 通過），
+  保持 8gpus 分區、兩張 GPU 與其餘資源。12 案例中 11 個 executed（8 Pass、3 unassessed），
+  1 個超出圖運算上限且 repair_exhausted；嚴格驗收退出碼 1，未記為通過。
+- 再將運算上限診斷改為實際 forward／loss 計數與需刪減的數量，prompt 建議較短的
+  輸入相依計算圖；grammar 上限仍為 12。`761813` 的 12 項測試通過，41.366 秒。
+- 最後重試 `761814` 使用相同明確節點與資源，COMPLETED、退出碼 0，總耗時 429 秒。
+  12 個案例全部 executed，10 個 MR Pass、2 個 coverage-only／unassessed；24 個配對
+  execution 均 completed，API、backward、actions 與 target-state 證據均為 true。
+- 得到 11 種 graph fingerprint、12 種已驗證 plan；graph 重複比例約 8.33%。此批次
+  的 target predicates 均不同，不能宣稱找到同一 predicate 的 12 條不同路徑；
+  同一 predicate 下的不同路徑執行能力另由 `test_transition_planning` 驗證。
+- 實際 32 次模型呼叫（正常 24 次＋8 次修正），16896 input tokens、2375 output tokens，
+  無 unknown usage；80 筆初始化／provider／驗證／執行子程序紀錄均 completed。
+  案例批次 wall time 約 235.43 秒，provider 子程序累計約 25.47 秒；重疊時間不可相加。
+- 已驗證 state 12/90、抽象 transition 12/15、API × MR 3/3、組合 12/126。
+  這些分母屬於新版宣告候選，不代表所有理論可行狀態或路徑。
+- `0004` 案例的正式訓練梯度各步皆為零，列入 `zero_gradient_cases`；不把結構多樣性
+  當成每個程式都有同等測試價值，也不把合法零梯度直接判為錯誤。
+- 關閉模型服務後重播得到 MR Pass，兩個 execution completed、provider calls 0、
+  environment changes 為空。驗收結束後不保留模型常駐工作。
+
+[最終驗收摘要](../result/validation/761814/validation.json)、
+[完整批次報告](../result/validation/761814/run.json)、
+[無 LLM 重播](../result/validation/761814/replay.json)。
+
+實際模型產物可直接檢查：
+
+- [計算圖與 loss 範例](../result/validation/761814/cases/batch-2717b824c0b74e4e-0000/canonical/program.py)：
+  matmul 後接 tanh、縮放、sigmoid、平移及 ReLU，loss 為平移後的平方平均。
+- [兩步 warm-up 計畫](../result/validation/761814/cases/batch-2717b824c0b74e4e-0001/transition/program.json)：
+  contiguous → offset warm-up，恢復訓練狀態，再使用 offset 正式訓練。這份 action
+  序列由模型選擇並實際執行，並非 prompt 提供的完整答案。

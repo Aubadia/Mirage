@@ -78,6 +78,8 @@ Previous testing approaches include API/model-input fuzzing, model architecture 
 - Read the user's requirements and the relevant existing code before proposing changes.
 - Before modifying files, describe the intended implementation, affected files, and appropriate validation. Wait for explicit user approval of the plan.
 - After approval, implement the agreed scope. Existing approval covers work within that scope; do not ask for the same permission again.
+- After each user approval to begin execution, first create or update a roadmap in `docs/` recording the approved scope, implementation steps, and validation plan; update it with progress and validation results as work proceeds.
+- Number roadmap files sequentially using `roadmap-NNN-<topic>.md`, starting with `docs/roadmap-001-mvp.md`. Related roadmaps or roadmaps for small changes may be merged; retain the existing roadmap number when merging and use the next available number for a new roadmap.
 - Modify only the file or files explicitly authorized by the user.
 - If another file must change, explain why the change is necessary, identify the affected file and expected impact, and obtain permission before editing it.
 - Do not refactor unless the user explicitly requests it. Avoid unrelated cleanup, renaming, reformatting, or architectural changes.
@@ -115,6 +117,16 @@ Previous testing approaches include API/model-input fuzzing, model architecture 
 - Keep logs and artifacts on compute-node-accessible persistent storage. Use job-specific local scratch for disposable compilation caches. Bound application work by the allocation's remaining time and reserve time to save evidence before Slurm termination.
 - Lightweight file inspection, syntax/static checks, and scheduler queries may run directly. Validate batch scripts with `bash -n` and, when supported, `sbatch --test-only`; distinguish submission preflight from an executed job. Report scheduler rejection explicitly instead of bypassing Slurm or silently changing partitions or resource counts.
 - Consult `sbatch/README.md` for environment variables, log-directory preparation, submission commands, and monitoring. Do not interpret a successful submission or Slurm job completion as an MR Pass without reviewing the actual test or experiment results.
+
+### Interactive Development and vLLM Reuse
+
+- During a development task that requires repeated real-model validation, reuse one Slurm allocation and one healthy vLLM service across edit-and-test iterations. Use an interactive terminal attached to the allocation for test commands; launch computational work with `srun`. Prepare code and run appropriate lightweight checks before loading the model.
+- Keep inference and test execution in separate Slurm steps with explicit resource assignments. When using the two-GPU development configuration, assign one GPU to vLLM and the other to testing, respecting Slurm-managed GPU visibility and the resource rules above.
+- Ordinary test failures must preserve their logs and nonzero exit status without automatically stopping the healthy vLLM service. Fix the code and start a fresh test process against the same service. Restart vLLM when the service fails or changes to its model, environment, or serving configuration require a restart.
+- Give each test iteration a separate artifact directory and preserve the exact code and configuration used for that run. Do not allow edits during an execution to change its code. Confirm outstanding inference requests have completed or been cancelled before reusing the session after an interrupted test; closing a client connection alone is not proof of cancellation.
+- Reuse is limited to the current user-requested task. Before reporting that task complete, stop its test processes and inference service, release its Slurm allocation, close interactive terminal connections, and verify that its owned jobs and steps have exited. Do not leave vLLM running between completed tasks or stop unrelated jobs.
+- Provide cleanup for normal exit, interruption, and termination, with the Slurm time limit as a final bound. Reserve time to save evidence and shut down. If cleanup cannot be verified, report the remaining job or step identifiers and the unresolved condition explicitly.
+- Record service startup time, per-iteration test time, restart count, and allocated resource time separately so that reuse benefits can be measured. Do not report allocated GPU time as GPU utilization or add overlapping durations as wall time.
 
 ## Current Repository Context
 

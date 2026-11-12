@@ -7,7 +7,6 @@ import unittest
 
 from mirage.artifacts.store import ArtifactStore
 from mirage.cli import main
-from mirage.contracts.models import Candidate, Experiment
 
 
 class ArtifactTests(unittest.TestCase):
@@ -17,7 +16,7 @@ class ArtifactTests(unittest.TestCase):
         self.store = ArtifactStore(self.directory.name)
 
     def test_round_trip_and_derivation_preserve_original(self):
-        experiment = Experiment("e", Candidate("torch.matmul", "offset", "before", "slice", "layout"), 9)
+        experiment = {"api": "torch.matmul", "seed": 9, "rule": "layout"}
         original = self.store.write("original", "experiment", {"experiment": experiment})
         before = original.read_bytes()
         self.store.write("child", "experiment", {"program": "modified"}, parent_id="original")

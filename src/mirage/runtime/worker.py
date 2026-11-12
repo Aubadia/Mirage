@@ -24,27 +24,31 @@ def dispatch(request: dict, directory: Path) -> None:
         return
 
     import torch
-    from mirage.contracts.programs import CaseConfig, Program
-    from mirage.runtime.environment import configure, describe
+    if mode == "inspect_pair":
+        from mirage.artifacts.bundle import load_tensor_record
+        from mirage.rules.conditional import inspect
 
-    config = CaseConfig.from_dict(request["config"])
-    configure()
-    if mode == "initialize":
-        from mirage.runtime.state import make_initial
-
-        environment = describe(config.device)
-        torch.save(make_initial(config), directory / "initial.pt")
-        (directory / "environment.json").write_text(json.dumps(environment, indent=2), encoding="utf-8")
-    elif mode == "execute":
-        from mirage.runtime.harness import execute
+        records = [load_tensor_record(Path(path)) if path else None for path in request["records"]]
+        result = inspect(request["rule"], *records)
+        (directory / "summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        return
+    if mode in ("api_metadata", "initialize_program", "execute_program"):
+        from mirage.runtime.api_metadata import describe as api_description
+        from mirage.runtime.program import initialize, run
         from mirage.runtime.probes import Recorder
 
-        program = Program.from_dict(request["program"])
-        initial = torch.load(request["initial"], map_location="cpu", weights_only=True)
-        result = execute(program, config, initial, Recorder(directory / "trace.jsonl"), directory / "partial.pt")
-        torch.save(result, directory / "result.pt")
-    else:
-        raise ValueError(f"Unknown worker mode: {mode}")
+        if mode == "api_metadata":
+            result = api_description(request["api"])
+        elif mode == "initialize_program":
+            result = initialize(request["source"], request["config"], directory / "initial.pt")
+        else:
+            result = run(request["source"], request["config"], request["initial"],
+                         Recorder(directory / "trace.jsonl"))
+            torch.save(result, directory / "result.pt")
+            result = {key: result[key] for key in ("api_executed", "backward_executed", "target_state_reached")}
+        (directory / "summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        return
+    raise ValueError(f"Unknown worker mode: {mode}")
 
 
 def main() -> int:

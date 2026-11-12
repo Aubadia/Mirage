@@ -7,7 +7,7 @@ def differences(left, right, tolerance: dict | None = None, path: str = "value")
     import torch
 
     tolerance = tolerance or {"atol": 0.0, "rtol": 0.0}
-    if path.endswith(".step") or ".optimizer.param_groups" in path:
+    if path.endswith(".step") or ".optimizer.param_groups" in path or path.startswith("optimizer.param_groups"):
         tolerance = {"atol": 0.0, "rtol": 0.0}
     if isinstance(left, torch.Tensor) or isinstance(right, torch.Tensor):
         if not isinstance(left, torch.Tensor) or not isinstance(right, torch.Tensor):
