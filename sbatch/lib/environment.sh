@@ -4,9 +4,11 @@
 mirage_finish() {
     local status="$1"
     local ended_at
-    ended_at="$(date +%s)"
-
     trap - EXIT
+    if declare -F mirage_stop_service >/dev/null; then
+        mirage_stop_service || status=1
+    fi
+    ended_at="$(date +%s)"
     echo "========================================"
     echo "End Time: $(date '+%Y-%m-%d %H:%M:%S')"
     echo "Total Cost: $((ended_at - MIRAGE_STARTED_AT)) s"
@@ -52,7 +54,7 @@ mirage_setup() {
     export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
     export TORCHINDUCTOR_COMPILE_THREADS="$SLURM_CPUS_PER_TASK"
 
-    MIRAGE_JOB_DIR="${MIRAGE_OUTPUT_ROOT:-${MIRAGE_PROJECT_ROOT}/artifacts/slurm}/${SLURM_JOB_ID}"
+    MIRAGE_JOB_DIR="${MIRAGE_OUTPUT_ROOT:-${MIRAGE_PROJECT_ROOT}/result/${MIRAGE_CATEGORY:-experiments}}/${SLURM_JOB_ID}"
     mkdir -p -- "$MIRAGE_JOB_DIR"
     MIRAGE_JOB_DIR="$(cd -- "$MIRAGE_JOB_DIR" && pwd -P)"
 
@@ -69,8 +71,32 @@ mirage_setup() {
 }
 
 mirage_python() {
-    srun --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" \
+    local memory_args=()
+    if [[ -n "${MIRAGE_STEP_MEMORY_MB:-}" ]]; then
+        memory_args=(--mem="${MIRAGE_STEP_MEMORY_MB}M")
+    fi
+    srun --exclusive --exact --ntasks=1 --gpus-per-node=1 --gpus-per-task=1 \
+        --cpus-per-task="${MIRAGE_STEP_CPUS:-$SLURM_CPUS_PER_TASK}" \
+        "${memory_args[@]}" \
         "$MIRAGE_PYTHON" "$@"
+}
+
+mirage_split_resources() {
+    # Step defaults can reserve both GPUs and all host memory despite --exact.
+    local total_memory="${SLURM_MEM_PER_NODE:-}"
+    if [[ -z "$total_memory" && "${SLURM_MEM_PER_GPU:-}" =~ ^[1-9][0-9]*$ ]]; then
+        total_memory=$((SLURM_MEM_PER_GPU * 2))
+    fi
+    if [[ -z "$total_memory" && "${SLURM_MEM_PER_CPU:-}" =~ ^[1-9][0-9]*$ ]]; then
+        total_memory=$((SLURM_MEM_PER_CPU * SLURM_CPUS_PER_TASK))
+    fi
+    if [[ ! "$total_memory" =~ ^[1-9][0-9]*$ || "$total_memory" -lt 2 ]]; then
+        echo "Cannot divide the allocation's memory between concurrent steps." >&2
+        return 2
+    fi
+    MIRAGE_STEP_CPUS=4
+    MIRAGE_STEP_MEMORY_MB=$((total_memory / 2))
+    printf 'Per-step CPUs: %s; memory: %s MiB\n' "$MIRAGE_STEP_CPUS" "$MIRAGE_STEP_MEMORY_MB"
 }
 
 mirage_check_environment() {

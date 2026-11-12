@@ -5,7 +5,7 @@
 
 需求範圍已確認，後續實作範圍與檔案已獲使用者核准。本文保留原始需求與
 階段提案以利追溯；目前交付內容與驗證限制見第 13 節。
-後續 vLLM serving、平行 worker 與模型比對方案見第 14 節，尚未實作。
+vLLM serving 與平行 worker 的實作／配置見第 14 節；A/B 模型比對依使用者指示延後。
 軟體功能與研究成果分開驗收，不因實作完成而宣稱已找到新 bug。
 
 ## 1. 目標與驗收
@@ -138,7 +138,7 @@ storage 換成 clone，並假設結果不變。相同 seed 也不足以建立跨
 ```
 
 LLM 使用可替換的 Python provider 介面。第一版不綁模型、不實作 HTTP adapter。
-第 14 節規劃在此介面上新增 vLLM HTTP adapter，保留既有 provider 的使用方式。
+第 14 節在此介面上新增 vLLM HTTP adapter，保留既有 provider 的使用方式。
 介面應傳入生成階段、結構化上下文與診斷，回傳生成內容及可取得的 usage 資訊。
 Provider 未提供 token 使用量時記錄 unknown，不填成零。
 
@@ -374,169 +374,245 @@ CUDA／Inductor／FP16 的 shared-storage MR 與 alternate warm-up，批次及�
 均得到 Pass，重播 provider calls 為 0，環境比對一致。這些結果不代表完整
 PyTorch API 或全部狀態組合已被覆蓋。
 
-目前仍未取得 Nano4 H200、另一個 nightly 環境或真實 LLM provider 的整合驗收證據。
+截至前一階段，仍未取得 Nano4 H200、另一個 nightly 環境或真實 LLM provider 的整合驗收證據；
+本次新增的 H200 與模擬 HTTP 整合驗證見第 14 節。
 `reference` provider 僅用於確定性的整合驗證，並非 LLM。尚未完成兩個新 bug 的
 探索、最小化、獨立佐證及查重；這些仍是研究成果驗收，不能由軟體測試通過替代。
 
-## 14. 待實作：vLLM serving、平行 worker 與模型比對
+## 14. vLLM serving 與平行 worker
 
-本節記錄後續實作／配置方案。本次僅更新文件，未安裝套件、下載模型、啟動服務、
-提交 Slurm job 或修改程式。以下新增配置名稱與檔案均為提案，不能當作現有功能使用。
+本次實作以 `Qwen/Qwen3-Coder-Next-FP8` 為預設服務模型，增加 HTTP provider、
+有界 experiment 排程及 Slurm 服務編排。依使用者後續決定，**A/B 比對延後**：
+不新增 Qwen3.8 載入、模型切換、比較命令或比較報告。
 
-### 14.1 已選方向與初始配置
+### 14.1 程式分工與執行語意
 
-使用者選擇以 Qwen3-Coder-Next 為主並進行模型比對、多個 Mirage worker 平行執行，
-以及同一個 Slurm job 配置兩張 GPU。主模型沿用前述 FP8 版本；對照模型採
-Qwen3.8-27B。具體 revision、相容套件版本及資源限制需在準備環境時確認並固定。
-
-| 項目 | 配置方案 |
+| 檔案／範圍 | 實作責任 |
 | --- | --- |
-| 主模型 | `Qwen/Qwen3-Coder-Next-FP8` |
-| 對照模型 | `Qwen/Qwen3.8-27B`，先以 BF16 作為對照配置 |
-| 模型比對 | 依序載入 A、B；單一 serving GPU 同時只保留一個模型 |
-| Slurm allocation | 同一節點、兩張 GPU；一張 serving、一張執行 Mirage 測試 |
-| 其餘 job 預設 | account `ACD115198`、partition `8gpus`、8 CPUs、4 小時，沿用使用者 template |
-| Mirage worker 數 | 建議初始值 2，共享測試 GPU；保留降為 1 的配置 |
-| 同時生成請求數 | 建議初始上限 2，與測試 worker 數分開配置 |
-| Model context | 建議從 16,384 tokens 起驗證；輸入與最大輸出合計不得超過此值 |
-| Generation settings | 保存 temperature、top-p、seed、有限輸出 token 上限與 chat template 設定；具體值於整合測試固定 |
-| Thinking | 對照模型先使用關閉 thinking 的配置，實際支援方式以固定版本驗證 |
-| 時間預算 | 模型載入、兩輪比較、生成、測試與清理共用 allocation 的 4 小時 |
+| `generator/http_provider.py` | 標準函式庫 HTTP client、JSON schema、取樣設定、原始請求／回應及 usage 保存 |
+| `generator/provider.py`、`repair.py` | `vllm` provider 選擇、跨 subprocess 回應 metadata／服務錯誤分類，服務錯誤不進入程式修正 |
+| `scheduler.py` | 有界 experiment 數、獨立生成配額、集中抽樣與 coverage 提交、暫停／取消及順序紀錄 |
+| `workflow.py` | 每案例隔離、四階段生成與驗證、完成後提交 coverage、排空工作後獨占重播 |
+| `runtime/process.py`、`worker.py` | 取消 token、逾時終止 process group、保留程序與 provider 錯誤證據 |
+| `contracts/programs.py`、`cli.py` | worker／生成並行上限與參數驗證、服務故障的非零退出狀態 |
+| `sbatch/lib/serving.sh`、`environment.sh` | 服務啟停、環境／就緒檢查、GPU 隔離、時間預算與輸出配置 |
+| `sbatch/experiments/parallel.sbatch` | 同一 allocation 內啟動 serving 與 Mirage 測試 |
+| `sbatch/validation/` | 控制流程測試、真模型 smoke、完整 PyTorch 整合測試 |
 
-兩張 GPU 是針對此方案明確調整原本單 GPU 的 template。模型能否在單張 H200
-以指定 context／並行度運作，仍須實際驗證，不能僅由參數量推定。
-若不相容或記憶體不足，保存原因並回報；不自行增加 GPU 或更換量化版本。
+HTTP adapter 透過 `/v1/chat/completions` 要求包含 `source` 與 `actions` 的 JSON。
+格式約束不取代既有 AST、target API／backward、state 與 MR 條件檢查。
+Canonical、skeleton、transition、follow-up 依既有順序執行，每個 accepted stage 都驗證。
+同一組 source／follow-up 依序執行；不同 experiment 才會平行推進。
 
-### 14.2 環境準備與安裝責任
+每案例有自己的 subprocess、初始值／RNG、engine snapshot 與輸出目錄。
+Controller 在完成時統一提交 coverage，仍由 Coverage 拒絕重複 experiment；
+在途計畫不能計入已驗證覆蓋。Report 保存 dispatch、selection 的 coverage snapshot
+與 completion 順序；同 seed 不保證非同步抽樣順序一致。
 
-不預設 vLLM 已安裝。2026-11-12 的唯讀檢查結果：目前 shell 的 `PATH` 找不到
-`vllm`，專案 `.venv/bin/python` 為 Python 3.14.10，其套件 metadata 中沒有
-`vllm`、`torch` 或 `transformers`。這不排除其他環境已安裝，也不是 compute-node 驗證。
-`uv sync` 只同步專案宣告的依賴；目前 `pyproject.toml` 未宣告這些 runtime 套件。
+疑似失敗會暫停新派發，等所有在途案例結束後獨占測試 GPU 重播；重播不呼叫 LLM。
+OOM／timeout 保留為執行結果，不直接宣稱 framework defect。成本分別記錄
+wall-clock、各程序時間與生成時間，重疊的時間類別不得相加當作總耗時。
 
-vLLM 套件與模型權重是兩件事：前者提供 serving 程式，後者必須另行取得或由已存在的
-模型目錄載入。使用模型 repository ID 啟動時可能觸發下載，因此準備階段應明確解析
-revision、完成權重取得並驗證路徑，不把下載時間隱藏在正式 A/B 測量中。
+### 14.2 配置與資源
 
-| 環境 | 選擇方式與責任 |
+| 配置 | 預設／行為 |
 | --- | --- |
-| Mirage／被測 PyTorch | 沿用 `MIRAGE_PYTHON` 指定已準備且 compute node 可讀的環境；固定被測 stable 或 nightly 版本 |
-| vLLM serving | 擬新增 `MIRAGE_SERVE_PYTHON`，指定獨立且相容的 serving 環境；不讓其依賴改動被測 PyTorch |
-| 現有安裝 | 先檢查使用者提供或環境中可發現的 interpreter、版本與路徑，再於 Slurm allocation 驗證 GPU serving |
-| 缺少安裝 | 列出相容版本與安裝位置後，在獲准的環境準備範圍內安裝套件／取得權重；不要求使用者必須親自下載 |
+| Provider | CLI 明確指定 `--provider vllm`；保留 `module:factory` 與 `reference` |
+| CLI workers | `--workers 1`，可調整；整合 Slurm job 預設 2 |
+| 生成上限 | `--generation-concurrency 2`；與 worker 數獨立配置，無無界排隊 |
+| Slurm | account `ACD115198`、partition `8gpus`、1 node、8 CPUs、4 小時 |
+| 整合 job GPU | 明確由原 template 的 1 張改成 2 張；serving／testing 各 1 張 |
+| Step 分工 | 兩個 `srun --exclusive --exact` step，各 4 CPUs、1 GPU 與半數 allocation 主記憶體；保留 Slurm GPU visibility |
+| 模型 | `Qwen/Qwen3-Coder-Next-FP8`；只使用已準備的本機權重 |
+| Context | `MIRAGE_MAX_MODEL_LEN=16384`；輸入與輸出總長需在此上限內 |
+| 輸出／取樣 | `MIRAGE_MAX_TOKENS=2048`、temperature 0、top-p 1；每請求帶案例 seed |
+| HTTP deadline | `MIRAGE_HTTP_TIMEOUT=120` 秒，另受 worker 與 batch 剩餘時間約束 |
+| 就緒期限 | `MIRAGE_SERVE_START_TIMEOUT=900` 秒，受 allocation 剩餘時間約束 |
 
-不自動安裝 Python，也不假定 vLLM 支援目前 Mirage 的 Python 版本。
-Serving 可使用另一個既有、相容的 Python interpreter；若找不到，需先解決環境選擇。
-正式 job 缺少必要環境或權重時明確失敗，不在執行途中隱式安裝或替換依賴。
+完整環境變數與提交方式見 [sbatch/README.md](../sbatch/README.md)。
+兩個 Mirage worker 共享測試 GPU，可能增加記憶體壓力，不保證提高吞吐量。
+單張 H200 是否能載入指定模型並以此 context／並行度運作，仍待真模型驗證；
+不能由參數量或腳本存在推定已成功，失敗時不自行改變量化或增加 GPU。
 
-### 14.3 Slurm 配置與服務生命週期
+每個 step 明確指定 `--gpus-per-node=1`、`--gpus-per-task=1` 與 `--mem`。
+實測僅設定 `--gpus-per-task=1` 仍會繼承 job 的 GPU／記憶體配置，阻塞另一個 step；
+`mirage_split_resources` 依 Slurm 的 allocation 記憶體環境變數平分，不額外申請資源。
 
-「常駐」指模型在本次 job 的服務階段載入一次，持續接受多個請求；不是永久服務。
-Job 結束、取消、逾時或發生不可恢復錯誤時，服務與其子程序都必須結束。
+### 14.3 環境與儲存
 
-1. 在同一 allocation 內，以兩個可同時執行的 `srun` step 分別啟動 serving 與
-   Mirage controller。每個 step 只分配一張 GPU，CPU 也須分配在 allocation 額度內。
-   驗證 step isolation 與同時啟動行為，避免其中一個 step 佔滿資源而讓另一個等待。
-2. 保留 Slurm 管理的 GPU visibility，不硬編碼實體 GPU 編號。Mirage 子程序繼承
-   測試 step 的 GPU；serving GPU 不可出現在測試 worker 的可見裝置中。
-3. 等待有期限的 health check，確認服務可用及 model ID 正確，再發送生成請求。
-   保存 job ID、host、port、模型 revision、啟動參數與環境版本。
-4. HTTP provider 使用 job 內部 endpoint。每次 provider 子程序只送出 HTTP 請求，
-   不重新載入模型。請求逾時受整體剩餘預算約束，排隊時間也計入。
-5. 驗證 HTTP 斷線／取消後 serving 是否真的停止相應工作；不能把 client timeout
-   當成 server 已取消的證據。追蹤未完成請求，避免超時工作持續佔用生成配額。
-6. 接近 allocation 結束時停止派發，預留保存證據、停止 worker 與關閉服務的時間。
-   使用 trap 保留失敗 exit status，輸出開始／結束／耗時與退出狀態。
+不預設 vLLM 已安裝。使用者已補上 PyTorch：目前專案宣告 `torch>=2.15.0`，
+`.venv` 可找到 PyTorch 2.15.0，實際 compute-node 版本以 job 的 `environment.json` 為準。
+該階段尚未在測試環境找到 `vllm` 與 `transformers`，因此先完成程式與模擬服務測試。
+後續經使用者核准的獨立 serving 環境與模型準備見第 15 節；被測環境及使用者的
+依賴／lockfile 不因 serving 安裝而變更。
 
-整合 job 放在 `sbatch/experiments/`，驗證 job 放在 `sbatch/validation/`，
-重播放在 `sbatch/replay/`；共用服務啟停邏輯放在 `sbatch/lib/`。
-若提供獨立 serving 入口，新增 `sbatch/serving/` 分類並同步文件；整合方案直接呼叫
-共用 helper，不透過巢狀 `sbatch` 取得另一個 allocation。
-
-### 14.4 HTTP provider 與平行執行
-
-在既有 Python provider protocol 上新增 OpenAI-compatible HTTP adapter，傳入
-四階段 prompt、上下文及修正診斷，將回應轉為現有 `Response`／`Usage`。
-保存模型識別、完整請求與回應、生成參數、延遲及可取得的 token usage；未知值仍為 unknown。
-JSON schema 約束只處理回應格式，不能取代程式 AST、runtime、state 與 MR 驗證。
-連線失敗、服務崩潰、格式錯誤、生成程式不合法分開記錄，不把服務故障算作 framework bug。
-
-現有 `workflow.py` 逐案例執行；只啟動 vLLM 不會讓 Mirage 自動平行。
-新增有界排程，讓不同 experiment 同時推進，並遵守以下限制：
-
-- 每個 experiment 的 canonical、skeleton、transition、follow-up 與各階段驗證
-  保留依賴順序。每組 source／follow-up 初期仍依序執行。
-- 每個案例使用獨立程序、RNG 狀態、初始資料及 artifact 目錄，避免共享可變訓練狀態。
-- 生成請求與測試工作各有並行上限及有界等待佇列，避免大量排隊耗盡記憶體或時間。
-- Controller 統一派發並提交 coverage 更新；in-flight 計畫與已驗證 coverage 分開。
-  保存抽樣時的 coverage snapshot、派發／完成順序；相同 seed 不保證非同步完成順序相同。
-- 兩個 worker 共享測試 GPU，可能產生 OOM 或延遲，不能保證吞吐量提高。
-  記錄資源失敗；suspected failure 在其他 worker 停止佔用後獨占重播，再判斷是否穩定。
-- 重播繼續直接使用已保存程式及初始狀態，不依賴 vLLM，也不新增 LLM 呼叫。
-
-### 14.5 模型 A/B 比對
-
-先凍結一組涵蓋既有八個 API、四類 MR 候選的任務清單，保存可比較的初始條件、
-配置、seed、生成／修正限制及每模型預算。兩模型使用相同任務定義與 prompt 模板；
-各自的生成結果與後續修正診斷允許不同。MR applicability 仍須個別動態驗證。
-此階段不讓兩模型的自適應 coverage 抽樣改變任務集合，避免比較不同難度的工作。
-
-執行 A 後先排空請求、停止服務並確認釋放資源，再載入 B；保留 B 的預算，
-不能讓 A 用完全部 allocation。未完成的配對任務標記 incomplete，不補算成功。
-兩模型結果與 coverage 分開保存，不相加為一個覆蓋率。
-
-比較指標包含合法生成率、runtime 有效案例率、修正次數與 token 成本、MR applicability、
-單位時間的已驗證覆蓋及資源失敗率。模型載入、生成與測試成本分開記錄；
-同時報告總 wall-clock，不把重疊的 worker 時間相加當作總耗時。
-不以 suspected failure 數量直接判定模型較好，也不把不同量化／thinking 配置下的差異
-歸因為模型本身的純粹差異。
-
-### 14.6 儲存與配置紀錄
-
-| 資料 | 目標位置 |
+| 位置／變數 | 用途 |
 | --- | --- |
-| 固定 revision 的模型權重 | `/work/asciibase64/Mirage/models/<model>/<revision>/` |
-| 資料集 | `/work/asciibase64/Mirage/datasets/<dataset>/` |
-| Hugging Face／vLLM 等大型持久 cache | `/work/asciibase64/Mirage/cache/<purpose>/` |
-| 如需新增的 serving 套件環境 | `/work/asciibase64/Mirage/environments/vllm/<environment-id>/`，沿用既有 Python |
-| 驗證／探索／重播輸出 | `./result/<test-category>/<run-id>/` |
-| A/B 輸出 | `./result/comparison/<run-id>/<model-label>/` |
-| Slurm stdout／stderr 與服務日誌 | 對應 run 的結果目錄；提交前先建立 Slurm 日誌父目錄 |
-| 一次性編譯 cache | allocation 內的 job-specific local scratch；重播所需證據在清理前保存至結果目錄 |
+| `MIRAGE_PYTHON` | compute node 可讀的 Python >=3.14 與被測 PyTorch 環境 |
+| `MIRAGE_SERVE_PYTHON` | 獨立且相容的既有 serving Python；同目錄需有 `vllm` executable |
+| `MIRAGE_MODEL_PATH` | `/work/asciibase64/Mirage/models/<model>/<revision>/` 的已準備權重 |
+| `MIRAGE_MODEL_REVISION` | 明確記錄使用者準備的 snapshot revision；不是權重來源的自動驗證 |
+| Serving 環境若需另建 | `/work/asciibase64/Mirage/environments/vllm/<environment-id>/`，沿用既有 Python |
+| 持久 cache | `/work/asciibase64/Mirage/cache/huggingface/` 與 `cache/vllm/` |
+| 測試／探索／重播結果 | `./result/<category>/<job-id>/` |
+| Slurm 日誌 | `./result/<category>/logs/<job-name>-<job-id>.out`／`.err`；提交前建立父目錄 |
+| 一次性編譯 cache | job-specific local scratch；必要證據保存到結果目錄 |
 
-將模型與 cache 路徑明確傳入服務環境，避免大型下載落到預設 home cache。
-既有 sbatch helper 仍預設寫入 `artifacts/slurm/`；後續實作需同步調整 helper、
-提交命令與文件到上述分類路徑。本次未移動既有 artifacts，也未修改現有 scripts。
+vLLM 套件與模型權重需分別準備。腳本不自動安裝 Python／套件，並以 offline mode
+載入本機模型，避免正式工作觸發隱含下載。Serving 與被測 PyTorch 分開，避免 vLLM
+依賴替換測試版本。`uv sync` 會依現有專案依賴安裝 PyTorch，但不會安裝 vLLM 或權重。
 
-### 14.7 預計程式範圍與驗收順序
+### 14.4 服務生命週期與故障語意
 
-| 範圍 | 預計變更位置 |
-| --- | --- |
-| HTTP adapter 與生成紀錄 | 新增 `src/mirage/generator/http_provider.py`；按需要擴充 `generator/provider.py` 與生成 artifact |
-| 有界排程與集中 coverage 更新 | `src/mirage/workflow.py`、新增 `src/mirage/scheduler.py`、既有 coverage／runtime 程序管理 |
-| A/B 任務與報告 | 新增 `src/mirage/comparison.py`；更新 `cli.py` 與 `artifacts/report.py` |
-| Slurm 編排與路徑 | `sbatch/lib/`、`sbatch/experiments/`、`sbatch/validation/`、必要的 `sbatch/serving/` |
-| 測試與操作說明 | HTTP、排程及比較測試；`README.md`、`sbatch/README.md`，必要時更新 `AGENTS.md` 的分類說明 |
+「常駐」只指本次 allocation 內載入一次、持續接受請求；job 結束即停止。
+短命的 provider subprocess 只送 HTTP，不載入模型。
 
-此表是後續影響範圍提案，不代表本次已授權修改以上檔案。正式實作前依 repository
-流程列出確切檔案與對應驗證；程式使用英文註解、適當換行與既有模組邊界。
+1. 檢查 interpreter、本機模型路徑、context／output 限制與可用 port。
+2. 啟動 serving step，保存套件版本、宣告 revision、config hash、host、job／step ID
+   與 GPU UUID；等待 health 與 model ID 就緒。
+3. 在 testing step 確認 PyTorch、單張可見 GPU，並用 UUID 驗證與 serving GPU 不同。
+4. 啟動受剩餘時間約束的 Mirage batch；保留保存證據與關閉服務所需時間。
+5. 完成、取消或服務故障時停止子程序與 serving，保留非零錯誤退出狀態及日誌。
 
-1. 先驗證環境、模型載入、服務就緒與關閉，再接通 HTTP provider 的單 worker 流程。
-2. 用可控的 HTTP stub 驗證請求／回應、usage 缺失、格式錯誤、連線錯誤及逾時；
-   驗證故障分類與取消，不以真模型回覆取代控制流程測試。
-3. 驗證兩 worker 的並行上限、案例隔離、coverage 單次提交、取消清理及 evidence 保存。
-   同一固定案例集比較單／雙 worker 結果；排程改變不能改變 MR 判定條件。
-4. 在 Slurm allocation 執行真實模型 smoke、GPU 分工／資源競爭測試、完整整合與
-   無 LLM 重播。保存實際結果，不把服務 health 成功視為 Mirage 測試通過。
-5. 最後執行固定任務的模型 A/B，比對品質、吞吐量與成本，再決定並行度與 context 配置。
+HTTP status error、連線失敗、逾時、錯誤回應格式與截斷回應各自分類，
+不自動解讀成生成程式非法。原始請求／回應與可取得的 usage 保留；缺失 usage 是 unknown。
+HTTP timeout 不等於 server 已取消：無法確認取消時停止派發，整合 job 隨後關閉服務。
+若使用外部 endpoint，Mirage 不關閉他人管理的服務，報告取消未確認並停止自己的工作。
 
-輕量語法／靜態檢查可直接執行；`.sbatch` 使用 `bash -n` 與可用的
-`sbatch --test-only` 預檢。推論、編譯、完整整合及大量測試全部經 Slurm；
-預檢或提交成功均不代表 job 已執行，更不代表 MR Pass。
+### 14.5 驗證與尚未驗收項目
 
-模型與服務配置參考官方文件，實作時對固定版本再次確認：
+- `test_http_provider.py`：真實 HTTP stub 的請求內容、修正上下文、usage、錯誤模型、
+  截斷回應、格式／HTTP 錯誤、逾時與跨 subprocess metadata／故障分類。
+- `test_scheduler.py`：experiment 並行上限、獨立生成上限、排空後獨占工作、取消、
+  規劃不算覆蓋，以及 coverage 單次提交。
+- `test_runtime.py`、`test_cli.py`：取消後程序退出與證據保留、並行參數與服務故障退出碼。
+- `test_sbatch.py`：服務清理、測試 step 非零退出碼傳遞、受管參數拒絕與主記憶體分配。
+- `test_parallel_workflow.py`：模擬 HTTP 服務搭配真實 PyTorch，以單／雙 worker 執行、
+  檢查不同案例初始狀態隔離、相同案例初始值一致、artifact 完整性、零 LLM 呼叫重播，
+  並驗證 HTTP timeout 後不再派發案例。
+- `provider_scheduler.sbatch` 執行不需模型的控制流程測試；`full_suite.sbatch` 執行
+  CUDA、compile、端到端測試；`vllm_smoke.sbatch` 留待 serving 環境與權重就緒後執行。
+
+語法／靜態與 `sbatch --test-only` 可直接檢查；運算密集工作全部透過 Slurm。
+模擬 HTTP 服務不代表真實 LLM。雙 step GPU 隔離已另以 PyTorch 驗證；
+後續真模型載入與 smoke 結果見第 15 節。全面吞吐量評估與單一 HTTP 請求的
+服務端取消確認仍未驗收；無法確認取消時仍停止派發並關閉整合服務。
+
+### 14.6 本次執行證據
+
+所有運算測試都由 Slurm 派發，未下載模型或安裝套件。被測環境為既有 Python
+3.14.10、使用者安裝的 PyTorch 2.15.0+cu132、CUDA runtime 13.2 與 NVIDIA H200。
+
+- Job `761134`：完整 77 項測試通過，零跳過，耗時 338.105 秒；包含 CUDA、compile、
+  模擬 HTTP＋真實 PyTorch 單／雙 worker，以及無 LLM 重播。
+  [完整測試日誌](../result/validation/761134/tests.log)
+- Job `761162`：兩個同時執行的 step 各取得一張不同 UUID 的 GPU，退出碼 0；
+  各 4 CPUs、204800 MiB 主記憶體。這是 step 隔離驗證，沒有載入 vLLM。
+  [隔離驗證日誌](../result/validation/logs/mirage-step-isolation-761162.out)
+- Job `761171`：最終 HTTP／排程／取消／CLI／shell 控制流程 26 項測試全部通過，
+  包含服務清理、非零退出碼傳遞與主記憶體平分。
+  [控制流程日誌](../result/validation/761171/tests.log)
+- 59 個 Python 檔案 AST 語法檢查、所有 batch／helper 的 `bash -n` 與
+  `git diff --check` 通過；整合 serving 與真模型 smoke 的 scheduler preflight 通過。
+
+先前 job `761112` 發現新測試錯誤要求 coverage-only 案例也必須得到 MR Pass；
+修正測試後才得到上述通過結果。Coverage-only 正確性仍為 unassessed。
+初始 step 配置阻塞第二個 step 的驗證已中止並保留日誌；上述 `761162` 使用修正配置。
+不把失敗／中止的驗證記為通過，也不以測試通過宣稱找到新的 framework bug。
+
+官方配置參考：
 
 - [Qwen3-Coder-Next-FP8 model card](https://huggingface.co/Qwen/Qwen3-Coder-Next-FP8)
-- [Qwen3.8-27B model card](https://huggingface.co/Qwen/Qwen3.8-27B)
-- [vLLM Qwen3.8-27B recipe](https://recipes.vllm.ai/Qwen/Qwen3.8-27B)
+- [vLLM online serving](https://docs.vllm.ai/en/latest/serving/online_serving/)
 - [vLLM structured outputs](https://docs.vllm.ai/en/latest/features/structured_outputs/)
+
+## 15. 獨立 serving 環境與模型準備
+
+使用者核准後，以 `sbatch/serving/prepare.sbatch` 派發準備工作；沿用既有 Python，
+不另行安裝 Python，不向 Mirage `.venv` 加入 vLLM 依賴。
+
+Job `761235` 在 H200 compute node 成功完成安裝、kernels 準備、固定 revision
+下載及模型 index 所列分片存在性檢查，耗時 478 秒、退出碼 0。
+這些檢查不等同於模型載入或 MR 測試通過。
+
+| 項目 | 實際準備結果 |
+| --- | --- |
+| Serving Python | 既有 Python 3.14.10 |
+| vLLM | 0.33.0 |
+| Serving PyTorch | 2.14.0+cu132；與被測 PyTorch 2.15.0+cu132 分開 |
+| Transformers | 5.20.2 |
+| FlashInfer | 0.7.2.post1，另安裝匹配的 cubin 與 cu130 JIT cache wheels |
+| 模型 | `Qwen/Qwen3-Coder-Next-FP8` |
+| Revision | `da6e2ed27304dd39abadd9c82ef50e8de67bdd4c` |
+| 權重 | 40 個 safetensors 分片，約 74.9 GiB |
+| Serving interpreter | `/work/asciibase64/Mirage/environments/vllm/qwen3-coder-next/bin/python` |
+| 模型目錄 | `/work/asciibase64/Mirage/models/Qwen3-Coder-Next-FP8/da6e2ed27304dd39abadd9c82ef50e8de67bdd4c/` |
+
+安裝與 kernels 的下載 cache 都在 `/work/asciibase64/Mirage/cache/` 下分類保存。
+服務執行時也明確設定 `FLASHINFER_WORKSPACE_BASE`，避免新建的 kernel cache 落到 home。
+重跑準備 job 可指定 `MIRAGE_MODEL_REVISION`，沿用固定 snapshot；正式模型服務採 offline mode。
+
+可追溯紀錄：
+
+- [準備 metadata](../result/serving/761235/preparation.json)
+- [完整 serving 套件版本](../result/serving/761235/serving-requirements.txt)
+- [可直接載入的環境配置](../result/serving/761235/serving.env)
+
+使用方式：
+
+```bash
+source result/serving/761235/serving.env
+export MIRAGE_PYTHON="$PWD/.venv/bin/python"
+sbatch sbatch/validation/vllm_smoke.sbatch
+```
+
+真模型 smoke 以 `afterok:761235` 相依條件提交為 job `761273`，已完成：
+
+- Qwen3-Coder-Next-FP8 以 TP=1、16K context、最大 2 個生成 sequence 載入單張 H200。
+  首次啟動包含 torch.compile、CUDA graph capture 與 DeepGEMM 暖機，快取保存在 `/work`。
+- Serving 與 Mirage 使用不同 GPU，保留各自的 Python／PyTorch 環境。
+- Canonical、skeleton、transition、follow-up 四次生成全部 accepted，沒有修正重試；
+  此案例記錄 2021 input tokens、345 output tokens，MR 判定 Pass。
+- 關閉模型服務後執行重播：兩次 execution completed、MR Pass、provider calls 0，
+  environment changes 為空。
+- Job 整體退出碼 0、耗時 660 秒；serving step 的 cancelled 狀態來自測試完成後
+  明確停止常駐服務，不代表 job 失敗。
+
+[真模型案例報告](../result/validation/761273/run.json)、
+[無 LLM 重播報告](../result/validation/761273/replay.json)、
+[服務環境紀錄](../result/validation/761273/serving/environment.json)。
+
+平行驗證 job `761321` 在另一節點啟動較慢，900 秒 readiness 期限到達時
+仍在載入權重（85%），因此退出碼為 1，尚未執行案例。此結果記為服務啟動逾時，
+不記為 MR 違反。保留原始日誌後，明確設定 `MIRAGE_SERVE_START_TIMEOUT=1800`，
+以 job `761383` 重試相同的 2 workers、2 個生成配額、10 個 `torch.matmul` 案例；
+GPU 數量、分區與模型設定不變。重試已完成，結果如下：
+
+- Job 退出碼 0，總耗時 509 秒；案例批次本身約 306.86 秒。
+- 10 個案例全部 executed：8 個 MR Pass，2 個 coverage-only／unassessed。
+  8 組 MR 均通過動態 applicability 檢查，沒有 suspected failure。
+- 排程事件中的同時在途案例峰值為 2，最後所有案例均完成；服務與測試的 GPU
+  隔離檢查通過。這是平行流程驗證，並非單／雙 worker 吞吐量對照實驗。
+- 40 次生成，19978 input tokens、3454 output tokens，沒有修正重試或未知用量；
+  100 筆 provider／初始化／驗證／執行子程序紀錄均為 completed。
+- 覆蓋 API 1/1、state 9/30、transition 5/5、API × MR 3/3、組合 10/42。
+  分母為本次宣告的候選集合，並非完整理論空間，也未證明所有候選均可達。
+- 工作結束時停止 serving step；不保留常駐 GPU 工作。
+
+[平行批次報告](../result/experiments/761383/run.json)、
+[平行服務環境](../result/experiments/761383/serving/environment.json)。
+
+後續從專案根目錄提交相同配置：
+
+```bash
+source result/serving/761235/serving.env
+export MIRAGE_PYTHON="$PWD/.venv/bin/python"
+export MIRAGE_WORKERS=2
+export MIRAGE_GENERATION_CONCURRENCY=2
+export MIRAGE_SERVE_START_TIMEOUT=1800
+mkdir -p result/experiments/logs
+sbatch sbatch/experiments/parallel.sbatch --apis torch.matmul --cases 10
+```
+
+這個 job 會啟動模型服務、執行案例並在結束時停止服務。無需重新下載模型；
+啟動等待時間仍受 allocation 剩餘時間約束。

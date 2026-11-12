@@ -3,12 +3,22 @@ from io import StringIO
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mirage.artifacts.store import ArtifactStore
 from mirage.cli import main, parser
 
 
 class CLITests(unittest.TestCase):
+    def test_parallel_options_and_service_failure_exit_status(self):
+        arguments = parser().parse_args(["run", "--provider", "vllm", "--workers", "2",
+                                        "--generation-concurrency", "1"])
+        self.assertEqual(arguments.workers, 2)
+        self.assertEqual(arguments.generation_concurrency, 1)
+        report = {"stop_reason": "provider_cancellation_unconfirmed", "experiments": []}
+        with patch("mirage.workflow.run", return_value=report), redirect_stdout(StringIO()):
+            self.assertEqual(main(["run", "--provider", "vllm"]), 1)
+
     def test_provider_is_explicit_and_limits_are_validated(self):
         for arguments in (["run"], ["run", "--provider", "reference", "--epsilon", "nan"],
                           ["run", "--provider", "reference", "--replay-failures", "-1"]):

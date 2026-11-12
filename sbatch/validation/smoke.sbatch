@@ -7,8 +7,8 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --time=4:00:00
 #SBATCH --job-name=mirage-smoke
-#SBATCH --output=artifacts/slurm/logs/%x-%j.out
-#SBATCH --error=artifacts/slurm/logs/%x-%j.err
+#SBATCH --output=result/validation/logs/%x-%j.out
+#SBATCH --error=result/validation/logs/%x-%j.err
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     echo "Submit this script with sbatch from the Mirage repository." >&2
@@ -20,6 +20,7 @@ set -euo pipefail
 
 mirage_root="${MIRAGE_PROJECT_ROOT:-${SLURM_SUBMIT_DIR:?}}"
 source "${mirage_root}/sbatch/lib/environment.sh"
+MIRAGE_CATEGORY=validation
 mirage_setup
 mirage_check_environment
 

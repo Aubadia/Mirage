@@ -13,13 +13,19 @@ See [the MVP specification](doc/MVP.md) for the research goals and exclusions.
 ## Environment
 
 Use Python **3.14 or later**. The execution interpreter must have the PyTorch
-version being tested and its required dependencies available. Mirage deliberately
-does not install or upgrade PyTorch: stable and nightly belong to separately
-prepared environments. `uv sync` installs Mirage, but does not install PyTorch.
+version being tested and its required dependencies available. The project now
+declares `torch>=2.15.0`, so `uv sync` includes PyTorch.
+Select and record the actual version for each experiment; stable and nightly
+validation should use separately prepared environments. vLLM and model weights
+are not installed by `uv sync` or experiment jobs. Use the explicit
+[`serving/prepare.sbatch`](sbatch/serving/prepare.sbatch) preparation job to install
+a separate vLLM environment and download a fixed model snapshot.
 
 Workers use `sys.executable`, inherit `PYTHONPATH` and CUDA visibility, and run
-sequentially on CPU or one visible GPU. On Nano4, Slurm assigns GPU visibility;
-do not override it with physical GPU indices. FP16 uses autocast with FP32 parameters and GradScaler;
+on CPU or one visible GPU. `--workers` bounds concurrent experiments; operations
+within each experiment remain ordered. Multiple workers share the testing GPU.
+On Nano4, Slurm assigns GPU visibility; do not override physical GPU indices.
+FP16 uses autocast with FP32 parameters and GradScaler;
 BF16 uses autocast with FP32 parameters. The actual output dtype is recorded.
 
 This workspace is on **Nano4**. Submit all computational work through the
@@ -31,7 +37,7 @@ installation; a login host's `/tmp` dependencies are not a shared environment.
 ## Running a batch
 
 ```bash
-mkdir -p artifacts/slurm/logs
+mkdir -p result/experiments/logs result/validation/logs result/replay/logs
 export MIRAGE_PYTHON=/shared/path/to/prepared/environment/bin/python
 export MIRAGE_PROVIDER=my_provider:create_provider
 sbatch sbatch/experiments/run.sbatch \
@@ -88,13 +94,56 @@ program grammar, configuration, ordered actions, previous program and MR.
 Return JSON with exactly `source` (Python text) and `actions` (an array of
 strings). Unknown usage is `None`, not zero. Each invocation gets a fresh
 process; persist any model-service state outside that short-lived provider or
-implement model loading in the factory. No HTTP adapter is bundled.
+implement model loading in the factory. The bundled `--provider vllm` adapter
+uses an external service and does not reload model weights for each request.
 
 The four stages are canonical, skeleton, transition and follow-up. Each accepted
 stage executes in a worker and must provide runtime evidence. Syntax and missing
 paths can be repaired at most twice. Unsupported grammar and unexplained
 exceptions are retained without speculative repair; suspected failures never
 enter the repair loop.
+
+## vLLM and parallel experiments
+
+The built-in `vllm` provider uses `/v1/chat/completions` with a JSON schema for
+`source` and `actions`. It preserves raw requests/responses, sampling settings,
+model identity, latency and available token usage. Existing grammar, runtime and
+MR checks still decide whether a generated case is legal and comparable.
+
+For a prepared Qwen3-Coder-Next-FP8 environment, the integrated job reserves
+**two GPUs on one node**: one for serving and one shared by the testing workers.
+The two Slurm steps each receive four CPUs, one GPU and half the allocated host
+memory. Both per-node GPU counts and step memory are explicit; runtime UUID checks
+verify that their GPUs differ. See [serving configuration](sbatch/README.md#vllm-serving-and-parallel-testing).
+No A/B comparison or model switching is implemented.
+
+```bash
+export MIRAGE_SERVE_PYTHON=/work/asciibase64/Mirage/environments/vllm/ENV/bin/python
+export MIRAGE_MODEL_PATH=/work/asciibase64/Mirage/models/Qwen3-Coder-Next-FP8/REVISION
+export MIRAGE_MODEL_REVISION=REVISION
+export MIRAGE_PYTHON="$PWD/.venv/bin/python"
+
+# First verify one worker and replay, then run parallel experiments.
+sbatch sbatch/validation/vllm_smoke.sbatch
+sbatch sbatch/experiments/parallel.sbatch --apis torch.matmul --cases 10
+```
+
+These are configuration examples, not installed paths. Jobs require existing
+packages and local weights; offline mode prevents implicit downloads. The
+service stays loaded only during its job and shuts down when the job ends.
+
+The integrated job defaults to two workers and two concurrent generation
+requests. The CLI defaults to one worker. Dispatch has no unbounded backlog;
+coverage is committed centrally once per experiment. Reports preserve dispatch,
+selection snapshots and completion order. A shared seed does not guarantee the
+same adaptive selection order under concurrency.
+
+On a suspected failure, dispatch pauses, active cases drain, and replay runs
+without other cases using the testing GPU. HTTP errors are service outcomes,
+not illegal programs or framework defects. If remote cancellation cannot be
+confirmed after a connection failure or timeout, new work stops and the
+integrated job shuts down the service. Such failures return a nonzero CLI/job
+status. A successful CLI exit alone is still not an MR Pass.
 
 ## Supported generation and state space
 
@@ -180,9 +229,9 @@ provider time and execution time are also reported separately, so do not sum
 overlapping timing categories.
 
 ```bash
-python -m mirage inspect artifacts/EXPERIMENT.json
-python -m mirage report artifacts
-sbatch sbatch/replay/replay.sbatch artifacts/EXPERIMENT.json
+python -m mirage inspect result/experiments/JOB_ID/cases/EXPERIMENT.json
+python -m mirage report result/experiments/JOB_ID/cases
+sbatch sbatch/replay/replay.sbatch result/experiments/JOB_ID/cases/EXPERIMENT.json
 ```
 
 Replay verifies bundle hashes, uses saved programs, initial state, engine and
@@ -192,7 +241,7 @@ remains unassessed unless explicitly requested as cross-environment validation:
 
 ```bash
 export MIRAGE_PYTHON=/shared/path/to/nightly/bin/python
-sbatch sbatch/replay/replay.sbatch artifacts/EXPERIMENT.json \
+sbatch sbatch/replay/replay.sbatch result/experiments/JOB_ID/cases/EXPERIMENT.json \
   --allow-environment-change
 ```
 
@@ -203,7 +252,7 @@ Manual minimization supports smaller saved tensors and fewer updates. Explicitly
 move the target iteration if removing its original iteration:
 
 ```bash
-sbatch sbatch/replay/replay.sbatch artifacts/EXPERIMENT.json \
+sbatch sbatch/replay/replay.sbatch result/experiments/JOB_ID/cases/EXPERIMENT.json \
   --size 2 --updates 1 --iteration 0
 ```
 

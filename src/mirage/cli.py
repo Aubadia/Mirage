@@ -27,7 +27,7 @@ def parser() -> argparse.ArgumentParser:
     report = commands.add_parser("report", help="Show validated batch coverage and saved outcomes")
     report.add_argument("directory", type=Path)
 
-    run = commands.add_parser("run", help="Generate, execute and inspect a batch of candidates")
+    run = commands.add_parser("run", help="Generate, execute and inspect a batch of candidates", allow_abbrev=False)
     run.add_argument("--apis", nargs="+")
     run.add_argument("--cases", type=positive_integer, default=100)
     run.add_argument("--time-limit", type=positive_integer, default=14400)
@@ -35,8 +35,10 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--backend", choices=("eager", "compile_eager", "aot_eager", "inductor"), default="eager")
     run.add_argument("--precision", choices=("fp32", "fp16", "bf16"), default="fp32")
-    run.add_argument("--provider", help="Python module:factory, or 'reference' integration fixture")
-    run.add_argument("--output", type=Path, default=Path("artifacts"))
+    run.add_argument("--provider", help="vllm, Python module:factory, or reference integration fixture")
+    run.add_argument("--output", type=Path, default=Path("result/experiments"))
+    run.add_argument("--workers", type=positive_integer, default=1)
+    run.add_argument("--generation-concurrency", type=positive_integer, default=2)
     run.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     run.add_argument("--updates", type=positive_integer, default=3)
     run.add_argument("--size", type=positive_integer, default=4)
@@ -90,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
             manifests = ArtifactStore(args.directory).list_manifests()
             output = summarize(manifests)
         print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+        if args.command == "run":
+            if output["stop_reason"] in ("interrupted", "controller_error", "provider_cancellation_unconfirmed"):
+                return 1
+            if any(case["status"].startswith("generation_provider_") for case in output["experiments"]):
+                return 1
         return 0
     except (ValueError, OSError, TypeError) as error:
         print(f"mirage: {error}", file=sys.stderr)

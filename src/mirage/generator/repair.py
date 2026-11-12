@@ -7,7 +7,7 @@ import math
 import time
 from typing import Callable
 
-from mirage.generator.provider import Provider, Request, Response
+from mirage.generator.provider import Provider, ProviderFailure, Request, Response
 
 
 class DiagnosticKind(StrEnum):
@@ -97,6 +97,8 @@ def generate(
             save(Attempt(current, response, None, time.monotonic() - started,
                          f"{type(error).__name__}: {error}"))
             status = "timeout" if isinstance(error, TimeoutError) else "unresolved"
+            if isinstance(error, ProviderFailure):
+                status = f"provider_{error.category}"
             return GenerationResult(status, tuple(attempts))
 
         save(Attempt(current, response, diagnostic, time.monotonic() - started))

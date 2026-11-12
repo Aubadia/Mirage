@@ -41,3 +41,6 @@ coverage.xml
 Thumbs.db
 
 # Keep uv.lock and .python-version tracked for reproducibility.
+
+# Experiment Results
+result/

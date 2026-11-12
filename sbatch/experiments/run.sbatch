@@ -7,8 +7,8 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --time=4:00:00
 #SBATCH --job-name=mirage-run
-#SBATCH --output=artifacts/slurm/logs/%x-%j.out
-#SBATCH --error=artifacts/slurm/logs/%x-%j.err
+#SBATCH --output=result/experiments/logs/%x-%j.out
+#SBATCH --error=result/experiments/logs/%x-%j.err
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     echo "Submit this script with sbatch from the Mirage repository." >&2
@@ -20,6 +20,7 @@ set -euo pipefail
 
 mirage_root="${MIRAGE_PROJECT_ROOT:-${SLURM_SUBMIT_DIR:?}}"
 source "${mirage_root}/sbatch/lib/environment.sh"
+MIRAGE_CATEGORY=experiments
 mirage_setup
 
 : "${MIRAGE_PROVIDER:?Set MIRAGE_PROVIDER=module:factory, or explicitly choose reference}"
@@ -35,6 +36,7 @@ for argument in "$@"; do
         --backend|--backend=*|--precision|--precision=*|\
         --updates|--updates=*|--size|--size=*|--epsilon|--epsilon=*|\
         --warmup-steps|--warmup-steps=*|\
+        --workers|--workers=*|--generation-concurrency|--generation-concurrency=*|\
         --replay-failures|--replay-failures=*|--help)
             ;;
         --*)

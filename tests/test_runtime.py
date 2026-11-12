@@ -3,15 +3,39 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
 
 from mirage.generator.provider import Request, Stage
-from mirage.runtime.process import run_worker
+from mirage.runtime.process import cancellation_scope, run_worker
 
 
 class ProcessTests(unittest.TestCase):
+    def test_cancellation_stops_process_and_preserves_outcome(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "cancellable_provider.py").write_text(
+                "import time\nclass Provider:\n"
+                "    def generate(self, request, *, deadline):\n        time.sleep(60)\n")
+            cancelled = threading.Event()
+            timer = threading.Timer(0.3, cancelled.set)
+            timer.start()
+            started = time.monotonic()
+            try:
+                with patch.dict(os.environ, {"PYTHONPATH": temporary + os.pathsep + os.environ.get("PYTHONPATH", "")}):
+                    with cancellation_scope(cancelled):
+                        result = run_worker(self.provider_request("cancellable_provider:Provider"), root / "worker", 30)
+            finally:
+                timer.cancel()
+                timer.join()
+            self.assertEqual(result.outcome, "timeout")
+            self.assertIn("cancelled", result.error)
+            self.assertLess(time.monotonic() - started, 5)
+            saved = json.loads((root / "worker" / "process.json").read_text())
+            self.assertEqual(saved["outcome"], "timeout")
+
     def provider_request(self, specification):
         return {"mode": "provider", "provider": specification, "deadline": time.monotonic() + 10,
                 "request": asdict(Request(Stage.CANONICAL, "test", {"api": "torch.matmul", "actions": []}))}

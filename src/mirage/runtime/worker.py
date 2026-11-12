@@ -15,7 +15,8 @@ def dispatch(request: dict, directory: Path) -> None:
 
         value = dict(request["request"])
         value["stage"] = Stage(value["stage"])
-        response = load_provider(request["provider"]).generate(Request(**value), deadline=request["deadline"])
+        response = load_provider(request["provider"], directory=directory).generate(
+            Request(**value), deadline=request["deadline"])
         from mirage.generator.provider import Response
         if not isinstance(response, Response):
             raise TypeError("Provider must return Response")
@@ -62,6 +63,13 @@ def main() -> int:
         elif "torch" in sys.modules and isinstance(error, sys.modules["torch"].OutOfMemoryError):
             outcome = "oom"
         status = {"outcome": outcome, "error": f"{type(error).__name__}: {error}"}
+        from mirage.generator.provider import ProviderFailure
+
+        if isinstance(error, ProviderFailure):
+            status["provider_failure"] = {
+                "category": error.category,
+                "cancellation_uncertain": error.cancellation_uncertain,
+            }
     usage = resource.getrusage(resource.RUSAGE_SELF)
     status["resources"] = {"user_cpu_seconds": usage.ru_utime, "system_cpu_seconds": usage.ru_stime,
                            "peak_rss_bytes": usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024)}

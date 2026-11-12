@@ -1,6 +1,8 @@
 """Bounded subprocess execution with file-backed output and process-group cleanup."""
 
 from dataclasses import asdict, dataclass, field
+from contextlib import contextmanager
+from contextvars import ContextVar
 import json
 import os
 from pathlib import Path
@@ -8,6 +10,19 @@ import signal
 import subprocess
 import sys
 import time
+
+
+_cancellation = ContextVar("mirage_worker_cancellation", default=None)
+
+
+@contextmanager
+def cancellation_scope(cancel):
+    """Allow existing replay callers to share the controller's cancellation token."""
+    token = _cancellation.set(cancel)
+    try:
+        yield
+    finally:
+        _cancellation.reset(token)
 
 
 @dataclass(frozen=True)
@@ -20,12 +35,13 @@ class ProcessResult:
     resources: dict = field(default_factory=dict)
 
 
-def run_worker(request: dict, directory: Path, timeout: float) -> ProcessResult:
+def run_worker(request: dict, directory: Path, timeout: float, *, cancel=None) -> ProcessResult:
+    cancel = cancel if cancel is not None else _cancellation.get()
     directory.mkdir(parents=True, exist_ok=False)
     request_path = directory / "request.json"
     request_path.write_text(json.dumps(request, indent=2, allow_nan=False), encoding="utf-8")
-    if timeout <= 0:
-        result = ProcessResult("timeout", None, 0.0, str(directory), "Budget exhausted before worker launch")
+    if timeout <= 0 or (cancel is not None and cancel.is_set()):
+        result = ProcessResult("timeout", None, 0.0, str(directory), "Budget exhausted or batch cancelled before launch")
         (directory / "process.json").write_text(json.dumps(asdict(result), indent=2), encoding="utf-8")
         return result
     environment = dict(os.environ)
@@ -43,10 +59,23 @@ def run_worker(request: dict, directory: Path, timeout: float) -> ProcessResult:
                 stdout=stdout, stderr=stderr, env=environment, start_new_session=True,
             )
             try:
-                code = process.wait(timeout=timeout)
+                expires = started + timeout
+                while True:
+                    if cancel is not None and cancel.is_set():
+                        error = "Batch cancelled; worker process group terminated"
+                        raise subprocess.TimeoutExpired(process.args, timeout)
+                    remaining = expires - time.monotonic()
+                    if remaining <= 0:
+                        error = "Worker deadline expired"
+                        raise subprocess.TimeoutExpired(process.args, timeout)
+                    try:
+                        code = process.wait(timeout=min(remaining, 0.1))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
             except subprocess.TimeoutExpired:
                 outcome = "timeout"
-                os.killpg(process.pid, signal.SIGKILL)
+                _kill_group(process)
                 code = process.wait()
             else:
                 status_path = directory / "status.json"
@@ -60,9 +89,20 @@ def run_worker(request: dict, directory: Path, timeout: float) -> ProcessResult:
                     error = "Worker exited without a completion record"
         except BaseException:
             if process is not None and process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
+                _kill_group(process)
                 process.wait()
             raise
+        finally:
+            # Descendants can outlive a parent that returned or crashed.
+            if process is not None:
+                _kill_group(process)
     result = ProcessResult(outcome, code, time.monotonic() - started, str(directory), error, resources)
     (directory / "process.json").write_text(json.dumps(asdict(result), indent=2), encoding="utf-8")
     return result
+
+
+def _kill_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass

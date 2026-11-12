@@ -38,6 +38,16 @@ class Response:
     content: str
     usage: Usage = field(default_factory=Usage)
     model: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+class ProviderFailure(RuntimeError):
+    """A service failure, distinct from an invalid generated program."""
+
+    def __init__(self, category: str, message: str, *, cancellation_uncertain: bool = False):
+        super().__init__(message)
+        self.category = category
+        self.cancellation_uncertain = cancellation_uncertain
 
 
 class Provider(Protocol):
@@ -64,11 +74,15 @@ class ReferenceProvider:
                         Usage(0, 0), "reference-fixture")
 
 
-def load_provider(specification: str) -> Provider:
+def load_provider(specification: str, *, directory=None) -> Provider:
     import importlib
 
     if specification == "reference":
         return ReferenceProvider()
+    if specification == "vllm":
+        from mirage.generator.http_provider import HTTPProvider
+
+        return HTTPProvider.from_environment(directory=directory)
     module_name, separator, attribute = specification.partition(":")
     if not separator or not module_name or not attribute:
         raise ValueError("Provider must be 'module:factory' or explicit 'reference' fixture")
@@ -82,12 +96,13 @@ def load_provider(specification: str) -> Provider:
 class IsolatedProvider:
     """Enforce deadlines externally even when a provider ignores cancellation."""
 
-    def __init__(self, specification, directory, timeout):
+    def __init__(self, specification, directory, timeout, *, cancel=None):
         self.specification = specification
         self.directory = directory
         self.timeout = timeout
         self.calls = 0
         self.processes = []
+        self.cancel = cancel
 
     def generate(self, request: Request, *, deadline: float | None) -> Response:
         from dataclasses import asdict
@@ -102,11 +117,23 @@ class IsolatedProvider:
         directory = self.directory / f"provider-{self.calls:03d}"
         process = run_worker({"mode": "provider", "provider": self.specification,
                               "request": asdict(request), "deadline": time.monotonic() + remaining},
-                             directory, remaining)
+                             directory, remaining, cancel=self.cancel)
         self.processes.append(process)
         if process.outcome == "timeout":
+            if self.specification == "vllm":
+                raise ProviderFailure("timeout", process.error or "Provider deadline expired",
+                                      cancellation_uncertain=True)
             raise TimeoutError("Provider process exceeded its deadline")
         if process.outcome != "completed":
+            status_path = directory / "status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+            if "provider_failure" in status:
+                failure = status["provider_failure"]
+                raise ProviderFailure(failure["category"], process.error or process.outcome,
+                                      cancellation_uncertain=failure["cancellation_uncertain"])
+            if self.specification == "vllm":
+                raise ProviderFailure("process", process.error or process.outcome,
+                                      cancellation_uncertain=True)
             raise RuntimeError(process.error or "Provider process failed")
         value = json.loads((directory / "response.json").read_text(encoding="utf-8"))
         value["usage"] = Usage(**value["usage"])

@@ -89,9 +89,13 @@ class RunOptions:
     epsilon: float = 0.1
     warmup_steps: int = 1
     replay_failures: int = 1
+    workers: int = 1
+    generation_concurrency: int = 2
 
     def __post_init__(self) -> None:
         positive(self.cases, "cases")
+        positive(self.workers, "workers")
+        positive(self.generation_concurrency, "generation_concurrency")
         for name in ("time_limit", "worker_timeout"):
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
