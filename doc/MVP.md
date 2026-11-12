@@ -3,8 +3,9 @@
 本文件整理使用者在 28 題範圍訪談中確認的需求。Mirage 是 PyTorch
 軟體測試框架，探索 tensor memory representation 與 training state。
 
-需求範圍已確認；本文的具體檔案配置、參數預設值與實作細節是待核准提案。
-文件不代表功能已完成或 bug 已找到。
+需求範圍已確認，後續實作範圍與檔案已獲使用者核准。本文保留原始需求與
+階段提案以利追溯；目前交付內容與驗證限制見第 13 節。
+軟體功能與研究成果分開驗收，不因實作完成而宣稱已找到新 bug。
 
 ## 1. 目標與驗收
 
@@ -296,8 +297,7 @@ LLM provider、worker 與批次時間都計入成本；provider 的取消／逾�
 - FP32／AMP、Adam／GradScaler、各 compile backend 與 warm-up。
 - 同環境重播、人工修改後重新驗證及跨版本複驗。
 
-目前開發機確認有 Python 3.14，未安裝 PyTorch；尚無 H200 或 nightly 執行證據。
-未執行的檢查不標示通過。
+實際驗證環境與尚未執行的檢查見第 13 節；未執行的檢查不標示通過。
 
 ## 12. 參考文件
 
@@ -308,3 +308,63 @@ LLM provider、worker 與批次時間都計入成本；provider 的取消／逾�
 - [PyTorch checkpoint 文件](https://docs.pytorch.org/docs/stable/checkpoint.html)
 
 線上文件可能隨版本變動；實驗契約以固定環境對應的文件與 runtime evidence 為準。
+
+## 13. 已核准實作與交付邊界
+
+實作保留既有七個 package，並以 `workflow.py` 連接三層流程。
+使用方式與 provider 契約詳見 [README](../README.md)。
+
+| 範圍 | 實作內容 |
+| --- | --- |
+| API profiles | 八個 API、必要 backward、輸入限制及受控 forward／loss grammar |
+| 抽樣 | 明確候選集合、API 邊際選擇、canonical 驗證後的 state／MR 選擇、反比計數與均勻探索 |
+| 狀態 | contiguous、strided、nonzero offset、clone、shared storage；checkpoint、首輪／末輪、三個語意 checkpoint、warm-up 歷史 |
+| 生成 | Python provider factory、四階段生成、每階段執行驗證、最多兩次修正、完整歷史及 unknown usage |
+| Runtime | 獨立 subprocess、同 worker warm-up／compile、外部逾時與 process-group 清理、部分 trace 保存 |
+| 訓練 | Adam、FP32、FP16 autocast＋GradScaler、BF16 autocast、四種 backend、實際輸出 dtype |
+| MR | Layout／offset、storage identity／alias、checkpoint、mutation eager／compiled，依前提限制 applicability |
+| Inspector | 執行與 backward 證據、state／action 驗證、初始狀態與程式關係、checkpoint 對齊、條件式數值比較 |
+| Artifacts | 初始 tensor／RNG、alias 重建 recipe、engine 原始碼快照、trace、observables、環境、hash、時間與可取得的資源用量 |
+| Replay | 無 LLM 重播、跨環境差異記錄、人工縮小 shape／update／iteration、修改程式後重新驗證、衍生 artifact |
+| CLI | `run`、`replay`、`inspect`、`report`；批次與逐案例進度報告 |
+
+### 具體探索界線
+
+第一版以 square rank-two FP32 parameter 為可訓練張量，從它建立 nonleaf API operand。
+Binary API 的 weight 為該 operand 的 detached copy 或 detached alias，bias 是保存的固定值。
+對齊 parameter 的邏輯座標比較梯度，避免 leaf／view 或 in-place rebasing 造成假性缺失。
+
+LLM 生成程式須符合可驗證的單一目標運算與 loss grammar，可選擇合法的 dropout p、
+softmax dim、GELU approximate 或 layer-norm eps。Skeleton／transition 保留 canonical
+計算；follow-up 的合法計算差異會使 MR input relation 不成立，仍保存執行覆蓋。
+任意模型、任意 Python 副作用與全新的 LLM 自創 oracle 不在此 grammar 內。
+
+State key 明確包含 representation、checkpointing、iteration 及 warm-up；另以
+checkpoint、backend、precision 區分覆蓋。Device 固定於單一 batch 並存於配置，
+報告不將不同 batch 的覆蓋比例相加。候選集合不是已證實可達的全集。
+
+容差 policy version 1 按 API、精度、backend、MR 及 observable 保存，拒絕 NaN／Inf
+自動等價；Adam step 與 scaler state 使用精確比較。這些是篩查容差，實際失敗仍須
+重新驗證數值條件，不能因為容差比較失敗就確認 framework defect。
+
+### 驗證環境與研究工作
+
+使用現有 `.venv` 的 Python 3.14.10，未另行安裝 Python。PyTorch 2.15.0+cu132
+與驗證依賴放於 `/tmp/mirage-validation-deps`，未修改 `pyproject.toml` 或使用者的
+`uv.lock`。可用 GPU 為 NVIDIA H100 NVL，driver 580.65.06。
+
+驗證包含資料契約、抽樣、修正邊界、subprocess timeout、四類 MR、刻意注入的負例、
+獨立 scalar matmul 梯度公式、checkpoint RNG、warm-up 還原、CPU／CUDA、AMP、
+compile，以及完整生成／保存／無 LLM 重播／人工縮小流程。實際執行結果以交付時
+測試輸出為準；跳過或失敗的項目不能宣稱已通過。
+
+本次交付啟用 `MIRAGE_TEST_COMPILE=1`、`MIRAGE_TEST_CUDA=1` 與
+`MIRAGE_TEST_E2E=1`，61 個 unittest 全部通過，沒有跳過項目；Ruff F／E9、
+53 個 Python 檔案的語法解析與 `git diff --check` 亦通過。另以 CLI 實跑
+CUDA／Inductor／FP16 的 shared-storage MR 與 alternate warm-up，批次及重播
+均得到 Pass，重播 provider calls 為 0，環境比對一致。這些結果不代表完整
+PyTorch API 或全部狀態組合已被覆蓋。
+
+目前仍未取得 Nano4 H200、另一個 nightly 環境或真實 LLM provider 的整合驗收證據。
+`reference` provider 僅用於確定性的整合驗證，並非 LLM。尚未完成兩個新 bug 的
+探索、最小化、獨立佐證及查重；這些仍是研究成果驗收，不能由軟體測試通過替代。

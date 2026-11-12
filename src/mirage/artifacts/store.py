@@ -1,7 +1,7 @@
 """Versioned, immutable JSON manifests with atomic publication.
 
-Tensor payloads and executable replay bundles belong to the runtime batch.
-This store deliberately only accepts portable JSON data.
+Tensor payloads and executable replay material live in sibling bundles.
+This manifest store deliberately only accepts portable JSON data.
 """
 
 from dataclasses import asdict, is_dataclass

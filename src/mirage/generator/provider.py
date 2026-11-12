@@ -49,3 +49,65 @@ class Provider(Protocol):
         stop an arbitrary implementation; the caller also checks on return.
         """
         ...
+
+
+class ReferenceProvider:
+    """Deterministic integration fixture, explicitly not an LLM provider."""
+
+    def generate(self, request: Request, *, deadline: float | None) -> Response:
+        import json
+        from mirage.contracts.apis import PROFILES
+
+        source = request.context.get("previous_program") or PROFILES[request.context["api"]].source
+        return Response(json.dumps({"source": source,
+                                    "actions": request.context["actions"]}),
+                        Usage(0, 0), "reference-fixture")
+
+
+def load_provider(specification: str) -> Provider:
+    import importlib
+
+    if specification == "reference":
+        return ReferenceProvider()
+    module_name, separator, attribute = specification.partition(":")
+    if not separator or not module_name or not attribute:
+        raise ValueError("Provider must be 'module:factory' or explicit 'reference' fixture")
+    factory = getattr(importlib.import_module(module_name), attribute)
+    provider = factory()
+    if not callable(getattr(provider, "generate", None)):
+        raise TypeError("Provider factory must return an object with generate()")
+    return provider
+
+
+class IsolatedProvider:
+    """Enforce deadlines externally even when a provider ignores cancellation."""
+
+    def __init__(self, specification, directory, timeout):
+        self.specification = specification
+        self.directory = directory
+        self.timeout = timeout
+        self.calls = 0
+        self.processes = []
+
+    def generate(self, request: Request, *, deadline: float | None) -> Response:
+        from dataclasses import asdict
+        import json
+        import time
+        from mirage.runtime.process import run_worker
+
+        remaining = self.timeout if deadline is None else min(self.timeout, deadline - time.monotonic())
+        if remaining <= 0:
+            raise TimeoutError("Provider budget exhausted")
+        self.calls += 1
+        directory = self.directory / f"provider-{self.calls:03d}"
+        process = run_worker({"mode": "provider", "provider": self.specification,
+                              "request": asdict(request), "deadline": time.monotonic() + remaining},
+                             directory, remaining)
+        self.processes.append(process)
+        if process.outcome == "timeout":
+            raise TimeoutError("Provider process exceeded its deadline")
+        if process.outcome != "completed":
+            raise RuntimeError(process.error or "Provider process failed")
+        value = json.loads((directory / "response.json").read_text(encoding="utf-8"))
+        value["usage"] = Usage(**value["usage"])
+        return Response(**value)

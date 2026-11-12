@@ -54,6 +54,14 @@ class SamplingTests(unittest.TestCase):
         self.assertEqual(coverage.report()["state"]["covered"], 0)
         self.assertEqual(coverage.report()["verdicts"], {"unassessed": 1})
 
+    def test_canonical_api_survives_later_generation_failure(self):
+        coverage = Coverage((self.a,))
+        coverage.observe_api(self.a.api, self.source)
+        self.assertEqual(coverage.report()["api"]["covered"], 1)
+        self.assertEqual(coverage.report()["state"]["covered"], 0)
+        self.assertEqual(coverage.report()["experiments"], 0)
+        self.assertEqual(coverage.counts, {})
+
     def test_inapplicable_retains_state_but_not_api_mr(self):
         coverage = Coverage((self.a,))
         result = Inspection("e", ("s", "f"), Verdict.INAPPLICABLE, True, False)

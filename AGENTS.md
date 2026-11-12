@@ -99,6 +99,17 @@ Previous testing approaches include API/model-input fuzzing, model architecture 
 - Never claim validation passed unless it was actually run and passed. State any unavailable checks and their limitations.
 - When finished, summarize what changed, how it was validated, and any remaining limitations or decisions requiring user input.
 
+## Nano4 and Slurm Execution
+
+- This workspace is on Nano4. All compute-intensive work must be dispatched through Slurm, including GPU work, training, LLM inference, compilation, full integration suites, large CPU workloads, batch experiments, and compute-intensive replay or minimization. Do not run these directly from an interactive agent shell without a Slurm allocation.
+- Store job scripts under categorized subdirectories of `sbatch/`: `validation/` for smoke and integration tests, `experiments/` for exploration, and `replay/` for reproduction and manual minimization. Do not place `.sbatch` files directly in `sbatch/` or scatter them elsewhere. Shared shell setup belongs in `sbatch/lib/`.
+- Use the user's Nano4 template as the default: `--account=ACD115198`, `--partition=8gpus`, `--nodes=1`, `--cpus-per-task=8`, `--gpus-per-node=1`, and `--time=4:00:00`. Resource changes must match the task and verified scheduler constraints; command-line `sbatch` overrides are explicit changes, not silent fallbacks.
+- Load `"$HOME/.bashrc"`, report start time, end time, elapsed seconds, and exit status, and preserve failures as nonzero job exit codes. Launch computational commands with `srun` inside the allocation and preserve Slurm-managed GPU visibility.
+- Use the existing Python installation. Select a prepared, compute-node-accessible Python/PyTorch environment; do not assume a login node's `/tmp` packages exist on compute nodes or install Python automatically.
+- Keep logs and artifacts on compute-node-accessible persistent storage. Use job-specific local scratch for disposable compilation caches. Bound application work by the allocation's remaining time and reserve time to save evidence before Slurm termination.
+- Lightweight file inspection, syntax/static checks, and scheduler queries may run directly. Validate batch scripts with `bash -n` and, when supported, `sbatch --test-only`; distinguish submission preflight from an executed job. Report scheduler rejection explicitly instead of bypassing Slurm or silently changing partitions or resource counts.
+- Consult `sbatch/README.md` for environment variables, log-directory preparation, submission commands, and monitoring. Do not interpret a successful submission or Slurm job completion as an MR Pass without reviewing the actual test or experiment results.
+
 ## Current Repository Context
 
 - The project is named `mirage` and uses a `src` layout.

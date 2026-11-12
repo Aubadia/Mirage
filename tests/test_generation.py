@@ -32,7 +32,8 @@ class GenerationTests(unittest.TestCase):
         self.assertIsNone(saved[0].response.usage.input_tokens)
 
     def test_failure_candidates_never_repaired(self):
-        for kind in (DiagnosticKind.UNKNOWN_EXCEPTION, DiagnosticKind.SUSPECTED_FAILURE):
+        for kind in (DiagnosticKind.UNKNOWN_EXCEPTION, DiagnosticKind.SUSPECTED_FAILURE,
+                     DiagnosticKind.UNRESOLVED_PLAN, DiagnosticKind.STATE_NOT_REACHED):
             result = generate(FakeProvider(), self.request, lambda _: Diagnostic(kind))
             self.assertEqual(len(result.attempts), 1)
             self.assertEqual(result.status, kind.value)

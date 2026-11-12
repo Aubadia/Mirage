@@ -1,13 +1,13 @@
-"""Control-plane CLI. Execution commands remain explicitly unavailable."""
+"""Batch exploration, immutable evidence inspection and LLM-free replay."""
 
 import argparse
-from collections import Counter
 import json
 from pathlib import Path
 import sys
 
 from mirage.artifacts.store import ArtifactStore
 from mirage.contracts.apis import select_apis
+from mirage.artifacts.report import summarize
 
 
 def positive_integer(value: str) -> int:
@@ -24,10 +24,10 @@ def parser() -> argparse.ArgumentParser:
     inspect = commands.add_parser("inspect", help="Validate and display one manifest")
     inspect.add_argument("manifest", type=Path)
 
-    report = commands.add_parser("report", help="Inventory saved artifacts; does not infer coverage")
+    report = commands.add_parser("report", help="Show validated batch coverage and saved outcomes")
     report.add_argument("directory", type=Path)
 
-    run = commands.add_parser("run", help="Reserved for the forthcoming execution runtime")
+    run = commands.add_parser("run", help="Generate, execute and inspect a batch of candidates")
     run.add_argument("--apis", nargs="+")
     run.add_argument("--cases", type=positive_integer, default=100)
     run.add_argument("--time-limit", type=positive_integer, default=14400)
@@ -35,9 +35,24 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--backend", choices=("eager", "compile_eager", "aot_eager", "inductor"), default="eager")
     run.add_argument("--precision", choices=("fp32", "fp16", "bf16"), default="fp32")
+    run.add_argument("--provider", help="Python module:factory, or 'reference' integration fixture")
+    run.add_argument("--output", type=Path, default=Path("artifacts"))
+    run.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    run.add_argument("--updates", type=positive_integer, default=3)
+    run.add_argument("--size", type=positive_integer, default=4)
+    run.add_argument("--epsilon", type=float, default=0.1)
+    run.add_argument("--warmup-steps", type=positive_integer, default=1)
+    run.add_argument("--replay-failures", type=int, default=1)
 
-    replay = commands.add_parser("replay", help="Reserved for the forthcoming replay runtime")
+    replay = commands.add_parser("replay", help="Execute a saved pair without calling an LLM")
     replay.add_argument("manifest", type=Path)
+    replay.add_argument("--worker-timeout", type=positive_integer, default=600)
+    replay.add_argument("--allow-environment-change", action="store_true")
+    replay.add_argument("--source-program", type=Path)
+    replay.add_argument("--followup-program", type=Path)
+    replay.add_argument("--size", type=positive_integer)
+    replay.add_argument("--updates", type=positive_integer)
+    replay.add_argument("--iteration", type=int)
     return result
 
 
@@ -45,25 +60,35 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         if args.command == "run":
-            select_apis(args.apis)
-            if args.seed < 0:
-                raise ValueError("seed must be nonnegative")
-            raise ValueError("run is unavailable: the PyTorch runtime is not implemented in this batch")
-        if args.command == "replay":
-            raise ValueError("replay is unavailable: executable replay bundles are not implemented in this batch")
-        if args.command == "inspect":
+            from mirage.contracts.programs import RunOptions
+            from mirage.workflow import run
+
+            apis = select_apis(args.apis)
+            if not args.provider:
+                raise ValueError("--provider module:factory is required; use --provider reference only for fixture runs")
+            values = vars(args).copy()
+            for key in ("command", "apis"):
+                values.pop(key)
+            values["output"] = str(values["output"])
+            output = run(RunOptions(**values), apis)
+        elif args.command == "replay":
+            from mirage.artifacts.replay import replay
+
+            output = replay(args.manifest, timeout=args.worker_timeout,
+                            allow_environment_change=args.allow_environment_change,
+                            source_program=args.source_program, followup_program=args.followup_program,
+                            size=args.size, updates=args.updates, iteration=args.iteration)
+        elif args.command == "inspect":
             if args.manifest.suffix != ".json":
                 raise ValueError("Expected a .json manifest")
             output = ArtifactStore(args.manifest.parent).read(args.manifest.stem)
+            if "files" in output["payload"]:
+                from mirage.artifacts.bundle import verify
+
+                verify(args.manifest.parent / output["payload"]["bundle"], output["payload"]["files"])
         else:
             manifests = ArtifactStore(args.directory).list_manifests()
-            output = {
-                "artifact_count": len(manifests),
-                "kinds": dict(Counter(item["kind"] for item in manifests)),
-                "artifact_ids": [item["artifact_id"] for item in manifests],
-                "coverage": None,
-                "note": "Artifact inventory only; coverage requires validated execution evidence.",
-            }
+            output = summarize(manifests)
         print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
         return 0
     except (ValueError, OSError, TypeError) as error:

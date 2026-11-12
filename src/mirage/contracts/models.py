@@ -1,7 +1,7 @@
 """Serializable experiment intent and runtime evidence, without torch imports.
 
 These records enforce structural consistency. They do not establish that a
-probe is truthful or replace the future runtime inspector.
+probe is truthful or replace the runtime inspector.
 """
 
 from dataclasses import dataclass

@@ -13,11 +13,20 @@ class Coverage:
         self.candidates = tuple(candidates)
         self.counts: Counter[Candidate] = Counter()
         self._observed: set[Candidate] = set()
+        self._api_observed: set[str] = set()
+        self._transitions_observed: set[str] = set()
         self._applied: set[Candidate] = set()
         self._experiments: set[str] = set()
         self._verdicts: Counter[str] = Counter()
         self._applicability: Counter[str] = Counter()
         self.execution_seconds = 0.0
+
+    def observe_api(self, api: str, execution: Execution) -> None:
+        """Retain canonical/incremental API evidence even if later generation fails."""
+        if api not in {candidate.api for candidate in self.candidates}:
+            raise ValueError("API is outside the declared universe")
+        if execution.evidence.trace_refs and execution.evidence.api_executed is True:
+            self._api_observed.add(api)
 
     def update(
         self,
@@ -74,6 +83,12 @@ class Coverage:
         # Commit only after validation, so a rejected update cannot partially count.
         self._experiments.add(experiment.experiment_id)
         self.execution_seconds += sum(item.elapsed_seconds for item in executions)
+        for item in executions:
+            if item.evidence.trace_refs and item.evidence.api_executed is True:
+                self._api_observed.add(candidate.api)
+            if (item.role == "followup" and item.evidence.trace_refs
+                    and item.evidence.actions_completed is True):
+                self._transitions_observed.add(candidate.transition)
         if reached:
             self._observed.add(candidate)
             if candidate.mr is None:
@@ -109,12 +124,16 @@ class Coverage:
         return {
             "denominator_basis": "declared_candidates_not_proven_feasible",
             "experiments": len(self._experiments),
-            "api": metric({c.api for c in self._observed}, {c.api for c in universe}),
+            "api": metric(self._api_observed, {c.api for c in universe}),
             "state": metric({c.state_key for c in self._observed}, {c.state_key for c in universe}),
-            "transition": metric({c.transition for c in self._observed}, {c.transition for c in universe}),
+            "transition": metric(self._transitions_observed, {c.transition for c in universe}),
             "api_mr": metric({(c.api, c.mr) for c in self._applied}, {(c.api, c.mr) for c in mr_universe}),
             "combinations": metric(set(self.counts), universe),
             "applicability": dict(self._applicability),
+            "applicability_denominator": sum(self._applicability.values()),
+            "applicability_fractions": {
+                key: count / sum(self._applicability.values()) for key, count in self._applicability.items()
+            },
             "verdicts": dict(self._verdicts),
             "cost": {"execution_seconds": self.execution_seconds, "generation_tokens": None},
         }

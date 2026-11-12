@@ -17,6 +17,9 @@ class DiagnosticKind(StrEnum):
     MISSING_PATH = "missing_path"
     UNKNOWN_EXCEPTION = "unknown_exception"
     SUSPECTED_FAILURE = "suspected_failure"
+    UNSUPPORTED = "unsupported"
+    UNRESOLVED_PLAN = "unresolved_plan"
+    STATE_NOT_REACHED = "state_not_reached"
 
 
 @dataclass(frozen=True)

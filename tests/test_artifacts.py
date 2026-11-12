@@ -52,7 +52,7 @@ class ArtifactTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.store.write(value, "experiment", {})
 
-    def test_cli_inspect_report_and_unavailable_execution(self):
+    def test_cli_inspect_report_and_execution_validation(self):
         path = self.store.write("a", "experiment", {"note": "測試"})
         for arguments, expected_key in ((["inspect", str(path)], "payload"),
                                         (["report", self.directory.name], "artifact_count")):
