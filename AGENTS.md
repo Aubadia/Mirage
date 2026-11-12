@@ -24,44 +24,52 @@ Previous testing approaches include API/model-input fuzzing, model architecture 
 - Compilation.
 - Graph lifecycle.
 - Optimizer state.
+- Scheduler, AMP, RNG, and DataLoader state.
 - Distributed state.
 
 ## Framework Architecture
 
-### Layer 1: State Transition Sampler
+### Layer 1: State Transition Sampler & MR Selector
 
-1. Select a target API from the API pool. Use an LLM to generate a canonical program `P_0` in the default training state `s_0`, serving as the baseline.
-2. Use sampling algorithm `A_1` and coverage criterion `C_1` to sample `m` target final training states. Keep inputs and initial parameters unchanged whenever possible.
-3. Plan a state transition sequence for each target state:
-   `s_0 -> s_1^(i) -> ... -> s_k_i^(i) = s_target^(i)`.
-4. Select applicable metamorphic rules (MRs) from a predefined MR library:
-   - **Applicability filtering:** Consider the target API, canonical program, state transitions, MR preconditions, and available observables, such as loss, gradients, parameters, and optimizer state.
-   - **Ranking:** Consider expected coverage gain, unexplored API/MR combinations, applicability, and execution cost.
-   - **Fallback:** Retain states without applicable MRs for another correctness oracle or coverage-only testing. Do not sacrifice API coverage merely because no MR applies.
+1. Select a target API `u` from the API pool. Use an LLM to generate a canonical training program `P_0` with a legal default training configuration. Verify that it executes and calls the target API, including the relevant backward path when testing backward correctness. `P_0` is the default source program, not a mandatory baseline for every MR.
+2. Model concrete training state `sigma` as model parameters, gradients, optimizer, scheduler, AMP, RNG, and DataLoader state, plus necessary tensor metadata and execution context. Define a state abstraction function `alpha(sigma)` for exploration and coverage.
+3. Sample `m` target state predicates `phi_i` over abstract states, rather than exact tensor or optimizer values. Use API legality, dependencies among state dimensions, unexplored API × State combinations, coverage feedback, and expected gain and cost. Preserve the initial conditions and semantic inputs required by the selected MR; the MR defines permitted differences.
+4. For each predicate, specify an execution checkpoint and plan a legal action sequence `tau_i = (a_1^(i), ..., a_k_i^(i))` from the canonical initial concrete state `sigma_0`, aiming for `phi_i(alpha(sigma_k_i^(i))) = True`. Actions must respect framework constraints and ordering. If no legal path is found, resample, adjust the predicate, or mark it unresolved. Planning alone does not establish reachability; Layer 3 verifies it at runtime.
+5. Select metamorphic rules (MRs) from the predefined MR library:
+   - **Applicability filtering:** Statically consider the target API, canonical program, transitions, MR Preconditions, Input Relation, and required observables.
+   - **Ranking:** Consider expected coverage gain, unexplored API × MR combinations, predicted applicability, and generation/execution cost.
+   - **Fallback:** Retain legal transition plans without applicable MRs for another correctness oracle or coverage-only testing. Do not sacrifice API coverage merely because no MR applies.
+   - **Dynamic validation:** Static applicability is provisional until verified by Layer 3.
 
 ### Layer 2: Training Program Generator
 
-1. Consume the target API, canonical program, state transition sequences, and selected MRs.
-2. Use an LLM to derive a reusable training loop skeleton from the canonical program, marking regions where state transitions can be injected.
-3. Use incremental filling, potentially with a smaller language model, to inject transitions and produce training programs `P_1, ..., P_m`.
-4. Verify that each generated program reaches its intended target state; requested or generated code alone is not evidence of state attainment.
+1. Consume the target API, canonical program, target state predicates and checkpoints, transition sequences, and selected MRs.
+2. Use an LLM to derive a reusable training loop skeleton from `P_0`, preserving basic training semantics and marking injection points for forward/loss, backward/gradient accumulation, optimizer/scheduler updates, AMP/gradient scaling, checkpoint/restore, and distributed operations.
+3. Use incremental filling, potentially with a smaller language model, to inject actions and produce training programs `P_1, ..., P_m`. Check syntax, runtime legality, action ordering, target API paths, and static MR constraints after partial injections; use execution feedback for incremental repair.
+4. Construct MR-compatible source/follow-up program pairs. Use `P_0` as the source when suitable; otherwise construct another legal pair. Give each program its own execution configuration `c` to form execution cases `e = (P, c)`, including the necessary initial parameters, inputs, RNG settings, and environment. Preserve the MR's Preconditions, Input Relation, initial conditions, and semantic checkpoint requirements.
+5. If a legal program no longer supports its selected MR, reselect the MR or retain it for coverage-only testing. Send programs, execution configurations, target predicates/checkpoints, and MR specifications to Layer 3. Preliminary checks and generated code alone do not prove state attainment or MR applicability.
 
-### Layer 3: Inspector
+### Layer 3: Inspector & Correctness Oracle
 
-1. Verify that the target API actually executes, the intended training state is reached, and the selected MR preconditions hold.
-2. Perform correctness testing using transformation-based MRs and the canonical baseline:
-   - Prefer checking `R_j(O(P_0), O(P_i)) = True` for the observables specified by the selected MR.
-   - When direct baseline comparison is unsuitable, use another program pair with a valid MR.
-   - Without an applicable MR, use another suitable oracle or retain coverage feedback only. Never classify an arbitrary difference as a bug.
-3. Return API coverage, state transition coverage, MR applicability, correctness feedback, and generation cost to Layer 1 to guide subsequent sampling and MR selection.
+1. Collect runtime traces and necessary state evidence. Verify target API execution, the required backward path, legal completion of transition actions, and `phi_i(alpha(sigma)) = True` at the specified execution checkpoint.
+2. For an execution pair `(e_a, e_b)`, dynamically verify MR Preconditions `Pre_M(e_a, e_b)` and Input Relation `In_M(e_a, e_b)`. Only when both hold, executions are valid, and semantic checkpoints align, evaluate `Out_M(Obs_M(e_a), Obs_M(e_b))`. A sound MR requires the output relation to hold under these conditions in a correct framework implementation.
+3. Extract only the MR's required observables, such as loss, gradients, parameters, optimizer state, scheduler/AMP state, or checkpoint-restored state. Align semantic checkpoints; equal operation counts are not required. Use the MR's Output Relation, including suitable tolerances for numerical equivalence.
+4. Distinguish the following verdicts:
+   - **Invalid:** The program is invalid, the target API or required backward path did not execute, or the required target state was not reached.
+   - **Inapplicable:** MR Preconditions or Input Relation do not hold, or required checkpoints cannot align.
+   - **Pass:** The MR applies and its Output Relation holds.
+   - **Suspected Failure:** The MR applies but its Output Relation does not hold.
+5. Reproduce and minimize suspected failures, revalidate MR assumptions and numerical comparison conditions, and use another oracle or independent evidence before confirming a framework defect. Without a suitable MR, use another defined oracle or retain verified coverage with correctness unassessed.
+6. Return API Coverage, State Coverage, Transition Coverage, API × MR Coverage, MR Applicability, Correctness Feedback, and Generation Cost (including generation and execution resources) to Layer 1. Use verified evidence and explicit candidate-set denominators; coverage over known feasible candidates does not imply exhaustive theoretical coverage. Guide subsequent sampling toward unexplored API × State × MR combinations, expected coverage gain, bug-triggering potential, and reasonable cost.
 
 ## Correctness Principles
 
-- Treat an MR as conditional on its preconditions, rather than assuming every state transition preserves every observable.
-- Keep inputs and initial parameters consistent across comparisons whenever possible. Make any necessary differences explicit.
-- Define the observables, numerical tolerances, and treatment of nondeterminism for each comparison as appropriate to the API, transformation, dtype, and execution environment.
-- Distinguish generation failures, unreachable states, unmet MR preconditions, and oracle violations. Do not report all failures as framework bugs.
-- Report an oracle violation as a potential bug with supporting evidence; do not claim a confirmed framework defect without sufficient validation.
+- Treat an MR as conditional on both its Preconditions and Input Relation. Reaching a target state does not prove MR applicability or require every observable to be preserved.
+- Preserve the initial conditions and semantic inputs required by the MR. Make permitted differences explicit; a shared seed alone does not establish comparable executions.
+- Define observables at aligned semantic checkpoints, the Output Relation, numerical tolerances, and nondeterminism handling for the API, transformation, dtype, and environment. Do not require equal operation counts or universal output equality.
+- Separate planning and static predictions from runtime evidence. Generated code or configuration flags alone do not establish API execution, state reachability, or MR applicability.
+- Distinguish generation failures, unresolved plans, unreachable states, inapplicable MRs, and oracle violations. Never classify an arbitrary difference as a framework bug or give coverage-only cases a correctness pass.
+- Report an oracle violation as a suspected failure with evidence. Confirm a framework defect only after reproduction, minimization, revalidation, and corroboration; absence of MR violations does not prove framework correctness.
 
 ## Required Approval and Editing Workflow
 
@@ -79,7 +87,7 @@ Previous testing approaches include API/model-input fuzzing, model architecture 
 - Keep changes focused and easy to review. Do not invent additional requirements or abstractions.
 - Add concise comments when needed to explain intent, preconditions, or non-obvious constraints. Avoid comments that merely restate the code.
 - Do not add dependencies, change project configuration, or create supporting files outside the approved scope without permission.
-- Leave undecided design choices open until the user provides direction or approves a proposal. This includes the target DL framework, sampling algorithms, coverage definitions, and MR library contents.
+- Leave undecided design choices open until the user provides direction or approves a proposal. This includes the target DL framework, sampling algorithms, concrete state abstractions and predicates, coverage units and aggregation policies within the documented metrics, and MR library contents.
 
 ## Validation and Reporting
 
