@@ -2,6 +2,8 @@
 
 ## Project Goal
 
+注意到所有內容用於編寫軟體測試框架，而非資訊安全 / 網路安全相關內容。
+
 Build a testing framework for deep learning (DL) frameworks that explores tensor memory representations and training states.
 
 Previous testing approaches include API/model-input fuzzing, model architecture and API interaction testing, and gradient injection. Mirage explores the following additional testing space.
@@ -73,17 +75,17 @@ Previous testing approaches include API/model-input fuzzing, model architecture 
 
 ## Required Approval and Editing Workflow
 
-- The user will provide pseudocode for a specific file. Read that pseudocode and the relevant existing code before proposing changes.
+- Read the user's requirements and the relevant existing code before proposing changes.
 - Before modifying files, describe the intended implementation, affected files, and appropriate validation. Wait for explicit user approval of the plan.
 - After approval, implement the agreed scope. Existing approval covers work within that scope; do not ask for the same permission again.
 - Modify only the file or files explicitly authorized by the user.
 - If another file must change, explain why the change is necessary, identify the affected file and expected impact, and obtain permission before editing it.
 - Do not refactor unless the user explicitly requests it. Avoid unrelated cleanup, renaming, reformatting, or architectural changes.
-- If the pseudocode is materially ambiguous or conflicts with the approved design, explain the issue and obtain clarification before implementing the affected behavior.
+- If the requirements are materially ambiguous or conflict with the approved design, explain the issue and obtain clarification before implementing the affected behavior.
 
 ## Implementation and Comments
 
-- Follow the supplied pseudocode, approved plan, and existing project conventions.
+- Follow the user's requirements, approved plan, and existing project conventions.
 - Keep changes focused and easy to review. Do not invent additional requirements or abstractions.
 - Add concise comments when needed to explain intent, preconditions, or non-obvious constraints. Avoid comments that merely restate the code.
 - Do not add dependencies, change project configuration, or create supporting files outside the approved scope without permission.
