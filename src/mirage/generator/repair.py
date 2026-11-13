@@ -118,3 +118,25 @@ def generate(
                           diagnostic=diagnostic.message)
 
     raise AssertionError("Unreachable generation state")
+
+
+def normalize_source_delimiter(source):
+    """Remove only one diagnosed, standalone trailing JSON delimiter.
+
+    No executable statement is added or rewritten. Both raw and normalized source
+    are retained by the caller; all other syntax errors remain generation failures.
+    """
+    import ast
+    if not isinstance(source,str): raise TypeError('source must be a Python source string')
+    try:
+        ast.parse(source)
+        return source,None
+    except SyntaxError as error:
+        lines=source.rstrip().splitlines()
+        if (error.msg != "unmatched '}'" or not lines or lines[-1].strip()!='}'
+                or error.lineno!=len(lines)):
+            raise
+        candidate='\n'.join(lines[:-1])+'\n'
+        ast.parse(candidate)
+        return candidate,{'kind':'trailing_json_delimiter','removed_line':len(lines),
+                          'training_statements_added':0,'training_statements_rewritten':0}

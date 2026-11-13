@@ -48,3 +48,9 @@ class CLITests(unittest.TestCase):
     def test_replay_has_explicit_environment_control(self):
         arguments = parser().parse_args(["replay", "case.json", "--allow-environment-change"])
         self.assertTrue(arguments.allow_environment_change)
+
+
+    def test_stateful_strategy_selects_its_independent_version(self):
+        with patch('mirage.workflow.run', return_value={'stop_reason':'case_limit','records':[]}) as execute, redirect_stdout(StringIO()):
+            main(['run','--provider','vllm','--strategy','stateful'])
+        self.assertEqual(execute.call_args.args[0].contract_version, 4)

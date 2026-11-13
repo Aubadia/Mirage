@@ -104,3 +104,39 @@ def property_configuration(api, device, attempt, family):
                 representation=representations[attempt%len(representations)] if family in ('materialization','gradient_reference') else 'original',
                 subject=attempt//len(representations),
                 backend=('eager' if attempt%2 else 'inductor') if family=='gradient_reference' else 'eager')
+
+
+def stateful_input_profile(attempt):
+    """Finite, deterministic category schedule with no target identity input."""
+    from mirage.contracts.capabilities import INPUT_CATEGORIES, InputCoverage
+    if type(attempt) is not int or attempt < 0:
+        raise ValueError("attempt must be nonnegative")
+    return InputCoverage((INPUT_CATEGORIES[attempt % len(INPUT_CATEGORIES)],))
+
+
+def stateful_state_predicates(observed, attempt):
+    """Select goals from observed capabilities, without target API identifiers.
+
+    These are exploration requests, not reachability certificates or transitions.
+    The generated program must implement and reach its selected goal.
+    """
+    from dataclasses import asdict
+    from mirage.contracts.capabilities import StatePredicate
+    choices=[]
+    if observed.get('backward_executed'):
+        choices.extend((StatePredicate('gradient','backward_count',2,'final'),
+                        StatePredicate('graph_lifecycle','target_backward_count',2,'final'),
+                        StatePredicate('execution_mode','compiled_execution',True,'final')))
+    if 'context_exit' in observed.get('transition_signature',()):
+        choices.append(StatePredicate('context','restoration_count',2,'final'))
+    return [asdict(choices[attempt % len(choices)])] if choices else []
+
+
+def stateful_diversity_predicates(primary, attempt):
+    """Explore joint abstract states, not source templates or prescribed actions."""
+    from copy import deepcopy
+    goals=deepcopy(list(primary))
+    if goals and not any(p['dimension']=='graph_lifecycle' and p['field']=='target_boundary_count' for p in goals):
+        goals.append(dict(dimension='graph_lifecycle',field='target_boundary_count',
+                          expected=1+attempt%2,checkpoint='final'))
+    return goals

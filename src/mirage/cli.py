@@ -29,7 +29,7 @@ def parser() -> argparse.ArgumentParser:
 
     run = commands.add_parser("run", help="Generate, execute and inspect a batch of candidates", allow_abbrev=False)
     run.add_argument("--apis", nargs="+")
-    run.add_argument("--strategy", choices=("training","properties"), default="training")
+    run.add_argument("--strategy", choices=("training","properties","stateful"), default="training")
     run.add_argument("--cases", type=positive_integer, default=100)
     run.add_argument("--time-limit", type=positive_integer, default=14400)
     run.add_argument("--worker-timeout", type=positive_integer, default=600)
@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
             for key in ("command", "apis"):
                 values.pop(key)
             values["output"] = str(values["output"])
-            values["contract_version"] = 3
+            values["contract_version"] = 4 if values["strategy"] == "stateful" else 3
             output = run(RunOptions(**values), apis)
         elif args.command == "replay":
             from mirage.workflow import replay
@@ -95,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
                 output = summarize(manifests)
         print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
         if args.command == "replay" and output.get("process", {}).get("outcome", "completed") != "completed":
+            return 1
+        if args.command == "replay" and output.get("replay_valid") is False:
             return 1
         if args.command == "run":
             if output["stop_reason"] in ("interrupted", "controller_error", "provider_cancellation_unconfirmed",

@@ -18,7 +18,7 @@ source "$HOME/.bashrc"
 set -euo pipefail
 mirage_root="${MIRAGE_PROJECT_ROOT:-${SLURM_SUBMIT_DIR:?}}"
 source "$mirage_root/sbatch/lib/environment.sh"
-MIRAGE_OUTPUT_ROOT="$mirage_root/result/pytorch-correctness"
+MIRAGE_OUTPUT_ROOT="${MIRAGE_OUTPUT_ROOT:-$mirage_root/result/pytorch-correctness}"
 mirage_setup
 source "$mirage_root/result/serving/761235/serving.env"
 source "$mirage_root/sbatch/lib/serving.sh"

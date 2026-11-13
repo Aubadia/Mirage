@@ -45,6 +45,8 @@ def execute(source, config, initial, directory, budget, engine=None, cancel=None
 
 
 def run(options, apis):
+    if options.strategy == "stateful":
+        return run_stateful(options, apis)
     if options.strategy == "properties":
         return run_properties(options, apis)
     root = Path(options.output).resolve()
@@ -344,6 +346,11 @@ def run(options, apis):
 
 
 def replay(manifest_path, *, timeout=600, allow_environment_change=False, deadline=None, cancel=None):
+    candidate = json.loads(Path(manifest_path).read_text())
+    if candidate.get('format') == 'stateful-1-replay':
+        return replay_stateful(Path(manifest_path), timeout=timeout,
+                               allow_environment_change=allow_environment_change, cancel=cancel)
+
     path = Path(manifest_path).resolve()
     raw=json.loads(path.read_text())
     if raw.get('mode')=='execute_property':
@@ -506,3 +513,177 @@ def replay_property(path, *, timeout, allow_environment_change=False, cancel=Non
                 reason='Environment changed' if changes else process.error)
     write_json(directory/'replay-summary.json',report)
     return report
+
+
+
+def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="backward", coverage_refinement=True):
+    """Full-program generation, runtime mutation and conditional MR assessment.
+
+    API/issue benchmark data never enters this path. Every candidate and repair
+    retains its request, response and execution evidence under one bounded run.
+    """
+    from dataclasses import replace
+    from mirage.generator.program import stateful_request, analyze_stateful
+    from mirage.contracts.exploration import stateful_input_profile, stateful_state_predicates, stateful_diversity_predicates
+    from mirage.generator.provider import ProviderFailure
+    from mirage.inspector.stateful import failure_record, input_category_feedback
+    if path_policy not in ('backward','mixed'):
+        raise ValueError('Unsupported stateful path policy')
+    root = Path(options.output).resolve()
+    root.mkdir(parents=True, exist_ok=False)
+    snapshot_engine(root / 'engine')
+    write_json(root / 'engine-sha256.json', inventory(root / 'engine'))
+    metadata, rows = {}, []
+    provider = IsolatedProvider(options.provider, root, options.worker_timeout)
+    metadata_started = time.monotonic()
+    for index, api in enumerate(apis):
+        directory = root / f'api-{index}'
+        process = run_worker({'mode':'api_metadata', 'api':api, 'contract':'stateful-1',
+                              'engine':str(root/'engine')}, directory, options.worker_timeout)
+        if process.outcome != 'completed':
+            result = {'strategy':'stateful', 'records':[], 'stop_reason':'metadata_failed', 'error':process.error}
+            write_json(root/'summary.json', result); return result
+        metadata[api] = json.loads((directory/'summary.json').read_text())
+    metadata_seconds = time.monotonic()-metadata_started
+    started = time.monotonic(); deadline = started+options.time_limit
+    pending = None; repair_count = 0; stop = 'case_limit'
+    canonicals, signatures, canonical_evidence = {}, {}, {}
+    dispatch_reserve = 10.
+    input_index = 0
+    for index in range(options.cases):
+        if rows:
+            dispatch_reserve = max(10., 1.5*max(r['finished_seconds']-r['started_seconds'] for r in rows)+5.)
+        if deadline-time.monotonic() <= dispatch_reserve:
+            stop = 'time_limit'; break
+        api = apis[index % len(apis)]
+        config = {'api':api, 'device':options.device, 'seed':options.seed, 'attempt':index, 'proposal_index':input_index,
+                  'requires_backward':not options.forward_only and (path_policy != 'mixed' or index % 3 != 0) and not metadata[api].get('callable_capabilities',{}).get('context_manager_factory',False),
+                  'input_categories':list(stateful_input_profile(input_index).requested),
+                  'predicates':(list(predicates) if predicates is not None else
+                                stateful_state_predicates(canonical_evidence[api], input_index)) if api in canonicals else [],
+                  'canonical_reference':bool(index % 2)}
+        if not config['requires_backward'] and predicates is None:
+            config['predicates'] = [p for p in config['predicates'] if p['dimension'] == 'context']
+        config['predicates'] = stateful_diversity_predicates(config['predicates'],input_index)
+        request = stateful_request(metadata[api], config, edges=edges, predicates=config['predicates'],
+                                   canonical=canonicals.get(api))
+        request.context['prior_transition_signatures'] = signatures.get(api, [])[-8:]
+        if pending:
+            request = pending; config = dict(request.context['configuration']); api = config['api']; pending = None
+        else:
+            input_index += 1
+        directory = root/f'attempt-{index:04d}';directory.mkdir()
+        write_json(directory/'request.json', asdict(request))
+        row = {'attempt':index, 'api':api, 'directory':str(directory), 'generated':False,
+               'contract_valid':False, 'executable':False, 'api_executed':False,
+               'repair_index':repair_count, 'refinement_kind':request.context.get('refinement_kind'), 'started_seconds':time.monotonic()-started,
+               'configuration':config, 'verdict':None, 'generation_stage':request.stage.value}
+        phase = 'generation'; response = None; repairable = False; coverage_feedback = None
+        try:
+            response = provider.generate(request, deadline=deadline)
+            write_json(directory/'response.json', asdict(response))
+            phase = 'parse'
+            value = json.loads(response.content)
+            if not isinstance(value, dict) or set(value) != {'source'}:
+                raise ContractError('Response must have exactly the source field')
+            source = value['source']; row['generated'] = True
+            (directory/'raw-program.py').write_text(source)
+            from mirage.generator.repair import normalize_source_delimiter
+            source, normalization = normalize_source_delimiter(source)
+            row['source_normalization'] = normalization
+            row['raw_syntax_valid'] = normalization is None
+            (directory/'program.py').write_text(source)
+            phase = 'static_contract'; graph = analyze_stateful(source)
+            row.update(contract_valid=True, fingerprint=graph['fingerprint'])
+            phase = 'initialization'
+            remaining = deadline-time.monotonic()
+            if remaining <= 0: raise TimeoutError('Budget exhausted before execution')
+            process = run_worker({'mode':'execute_stateful_pair', 'source':source, 'config':config,
+                                  'engine':str(root/'engine')}, directory/'execution',
+                                 min(options.worker_timeout, remaining))
+            row['process'] = asdict(process)
+            write_json(directory/'execution-sha256.json', inventory(directory/'execution'))
+            outcome_path = directory/'execution/summary.json'
+            if process.outcome == 'completed' and outcome_path.exists():
+                outcome = json.loads(outcome_path.read_text()); row.update(outcome, status='executed', executable=True)
+                if not outcome.get('inspection', {}).get('valid'):
+                    check = outcome.get('inspection', {})
+                    blocking = ('target_return' if not check.get('api_executed') else
+                                'backward' if not check.get('required_backward_executed') else 'state')
+                    row.update(failure_record(blocking, 'Required runtime evidence missing: '+json.dumps(check)))
+                    repairable = True
+                else:
+                    canonicals.setdefault(api, source)
+                    if api not in canonical_evidence:
+                        canonical_evidence[api] = dict(outcome)
+                    else:
+                        canonical_evidence[api]['backward_executed'] |= outcome.get('backward_executed',False)
+                        if 'context_exit' in outcome.get('transition_signature',[]):
+                            canonical_evidence[api]['transition_signature'] = outcome['transition_signature']
+                    signature = outcome.get('transition_signature', [])
+                    if signature not in signatures.setdefault(api, []): signatures[api].append(signature)
+                    coverage_feedback = input_category_feedback(outcome) if coverage_refinement else None
+                    if coverage_feedback: row['coverage_refinement_requested'] = coverage_feedback
+            else:
+                # Exception location is not inferred from worker exit alone.
+                row.update(status='execution_failed', reason=process.error,
+                           first_blocking_stage='unresolved_runtime', secondary_diagnostics=[])
+                if process.error and process.error.startswith('ContractError:'):
+                    repairable = True
+        except (ContractError, SyntaxError, json.JSONDecodeError) as error:
+            row.update(status='invalid_program', **failure_record(phase, str(error)))
+            repairable = True
+        except ProviderFailure as error:
+            row.update(status='provider_failed', reason=str(error), cancellation_uncertain=error.cancellation_uncertain)
+            if error.cancellation_uncertain:
+                stop = 'provider_cancellation_unconfirmed'
+                session = os.environ.get('MIRAGE_SESSION_DIR')
+                if session: (Path(session)/'cancellation-unconfirmed').write_text(str(error))
+        except Exception as error:
+            row.update(status='unresolved', reason=f'{type(error).__name__}: {error}')
+        if (repairable or coverage_feedback) and response is not None and repair_count < 2:
+            repair_count += 1
+            diagnostic=row.get('reason','contract violation') if repairable else 'The requested input category was not observed at the target. Use its measured dtype thresholds and actual operands to generate a new legal case. '+json.dumps(coverage_feedback)
+            context=dict(request.context,refinement_kind='contract_or_state' if repairable else 'input_coverage')
+            pending = replace(request, context=context,previous_content=response.content, diagnostic=diagnostic)
+        else:
+            repair_count = 0
+        row['finished_seconds'] = time.monotonic()-started
+        write_json(directory/'outcome.json', row);rows.append(row)
+        if (directory/'execution/source.pt').exists():
+            write_json(directory/'stateful-manifest.json', {
+                'format':'stateful-1-replay', 'source':'program.py', 'configuration':config,
+                'engine':str(root/'engine'), 'engine_inventory':inventory(root/'engine'),
+                'files':inventory(directory), 'initial_reference':'execution/source.pt',
+                'expected_verdict':row.get('verdict')})
+        result = {'strategy':'stateful', 'records':rows, 'stop_reason':stop, 'provider_calls':provider.calls,
+                  'elapsed_seconds':time.monotonic()-started, 'metadata_seconds':metadata_seconds,
+                  'dispatch_reserve_seconds':dispatch_reserve, 'prompt_treatment':'base_plus_edges' if edges else 'base'}
+        write_json(root/'summary.json', result)
+        if stop == 'provider_cancellation_unconfirmed': break
+    result = {'strategy':'stateful', 'records':rows, 'stop_reason':stop, 'provider_calls':provider.calls,
+              'elapsed_seconds':time.monotonic()-started, 'metadata_seconds':metadata_seconds,
+              'dispatch_reserve_seconds':dispatch_reserve, 'prompt_treatment':'base_plus_edges' if edges else 'base'}
+    write_json(root/'summary.json', result)
+    return result
+
+
+
+def replay_stateful(path, *, timeout=600, allow_environment_change=False, cancel=None):
+    """Replay an immutable source/input-checked execution pair without a provider."""
+    manifest=json.loads(path.read_text());directory=path.parent
+    verify(directory,manifest['files'])
+    engine=Path(manifest['engine']);verify(engine,manifest['engine_inventory'])
+    destination=directory/f'replay-{uuid.uuid4().hex[:12]}'
+    process=run_worker({'mode':'execute_stateful_pair','source':(directory/manifest['source']).read_text(),
+                        'config':manifest['configuration'],'engine':str(engine),
+                        'initial_reference':str(directory/manifest['initial_reference']),
+                        'allow_environment_change':allow_environment_change},destination,timeout,cancel=cancel)
+    summary=json.loads((destination/'summary.json').read_text()) if (destination/'summary.json').exists() else {}
+    result={'process':asdict(process),'summary':summary,'provider_calls':0,
+            'matches_original_verdict':process.outcome=='completed' and summary.get('verdict')==manifest['expected_verdict'],
+            'directory':str(destination)}
+    result['replay_valid']=bool(result['matches_original_verdict'] and summary.get('replay_source_evidence_equal')
+                                and summary.get('replay_followup_evidence_equal'))
+    write_json(destination/'replay.json',result)
+    return result

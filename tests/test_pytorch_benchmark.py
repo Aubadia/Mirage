@@ -66,5 +66,84 @@ class BenchmarkTests(unittest.TestCase):
             self.assertIn('sentinel', (Path(tmp)/'failure/stderr.txt').read_text())
 
 
+    def test_stateful_attribution_excludes_unrelated_anomalies(self):
+        evaluate=load('evaluate')
+        def record(properties,shape=(1,),strides=(1,)):
+            return {'target_calls':[{'metadata':[
+                {'path':['args',0],'device':'cuda:0','shape':[3],'strides':[1],'properties':{}},
+                {'path':['args',1],'device':'cpu','shape':list(shape),'strides':list(strides),'properties':properties}]}]}
+        positive={'label':'positive','scope':'target_outputs'}
+        for r in (record({'conjugate':True}),record({'negative':True},(3,),(2,))):
+            self.assertTrue(evaluate.stateful_attribution('200613',r,positive)['benchmark_reproduction'])
+            self.assertFalse(evaluate.stateful_attribution('200613',r,{'label':'unknown'})['benchmark_reproduction'])
+        self.assertFalse(evaluate.stateful_attribution('200613',record({}),positive)['benchmark_reproduction'])
+        self.assertFalse(evaluate.stateful_attribution('197089',{},positive)['benchmark_reproduction'])
+
+    def test_stateful_metrics_separate_generation_and_detection_failures(self):
+        import json
+        import torch
+        evaluate=load('evaluate')
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);run=root/'200613';run.mkdir()
+            rows=[]
+            for index,(valid,verdict) in enumerate(((False,'invalid'),(True,'pass'),(True,'suspected_failure'))):
+                directory=run/str(index);(directory/'execution').mkdir(parents=True)
+                evidence={'target_calls':[{'inputs':{'args':[torch.zeros(2),torch.tensor([1.,2.])],'kwargs':{}},
+                    'output':torch.zeros(2),'metadata':[
+                        {'device':'cuda:0','shape':[2],'strides':[1],'properties':{}},
+                        {'device':'cpu','shape':[2],'strides':[2],'properties':{'negative':True}}]}]}
+                torch.save(evidence,directory/'execution/source.pt')
+                rows.append(dict(attempt=index,api='torch.Tensor.copy_',directory=str(directory),
+                    inspection={'valid':valid},configuration={'predicates':[]},verdict=verdict,
+                    generated=True,contract_valid=True,executable=True,finished_seconds=index+1))
+            (run/'summary.json').write_text(json.dumps({'records':rows}))
+            result=evaluate.report_stateful(root)
+            self.assertEqual(result['counts'],{'TP':1,'FP':0,'TN':0,'FN':1})
+            self.assertEqual(result['known_labels_outside_metric_domain'],1)
+            report=result['reports'][0]
+            self.assertEqual(report['independent_reproductions'],2)
+            self.assertEqual(report['independently_confirmed_detections'],1)
+            self.assertEqual(report['time_to_first_detection_seconds'],3)
+            self.assertIsNone(result['false_positive_rate'])
+
+    def test_stateful_fixture_controls_are_independent(self):
+        import os
+        if os.environ.get('MIRAGE_STATEFUL_AUDIT_ROOT'):
+            audit=load('evaluate').stateful_fixture_audit(Path(os.environ['MIRAGE_STATEFUL_AUDIT_ROOT']))
+            self.assertTrue(audit['all_ten_independently_corroborated'],audit)
+        else:
+            self.skipTest('Saved stateful fixture artifact path not provided')
+
+    def test_stateful_audit_requires_single_target_output_evidence(self):
+        import torch
+        audit = load('evaluate').stateful_independent_audit
+        call = {'evidence': 'executed FX graph', 'inputs': None,
+                'output': (torch.ones(2),)}
+        result = audit('203078', {'target_calls': [call]})
+        self.assertEqual(result['label'], 'unknown')
+        self.assertIn('single-target', result['reason'])
+        call['metadata'] = [
+            {'path': ['args', 2], 'shape': [2, 1], 'strides': [1, 0]},
+            {'path': ['args', 3], 'shape': [2, 3], 'strides': [3, 1]}]
+        attribution = load('evaluate').stateful_attribution(
+            '203078', {'target_calls': [call]}, {'label': 'positive', 'scope': 'target_outputs'})
+        self.assertFalse(attribution['benchmark_reproduction'])
+
+    def test_stateful_partial_audit_preserves_unknown_scope(self):
+        import torch
+        audit = load('evaluate').stateful_independent_audit
+        eager = {'inputs': {'args': (torch.zeros(2), torch.ones(2)), 'kwargs': {}},
+                 'output': torch.ones(2)}
+        graph = {'evidence': 'executed FX graph', 'inputs': None,
+                 'output': (torch.ones(2),)}
+        self.assertEqual(audit('200613', {'target_calls': [eager]})['label'], 'negative')
+        result = audit('200613', {'target_calls': [eager, graph]})
+        self.assertEqual(result['label'], 'unknown')
+        self.assertEqual(result['eager_subset_audit']['label'], 'negative')
+        # Synthetic corrupted evidence tests the audit, not a PyTorch defect.
+        eager['output'] = torch.zeros(2)
+        self.assertEqual(audit('200613', {'target_calls': [eager, graph]})['label'], 'positive')
+
+
 if __name__ == '__main__':
     unittest.main()

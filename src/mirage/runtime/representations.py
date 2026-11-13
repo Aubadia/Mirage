@@ -63,3 +63,42 @@ def equivalent_view(tensor, representation):
     result.requires_grad_(tensor.requires_grad)
     if not torch.equal(result,tensor): raise ValueError('Representation changed logical values')
     return result
+
+
+def connected_representation(tensor, action):
+    """Stateful transformations retain the source differentiation coordinates.
+
+    Unlike the legacy fresh-leaf property path, copies here participate in the
+    original graph. Expanded independent coordinates are rejected by eligibility.
+    """
+    import torch
+    if tensor.is_mkldnn and action == "logical_materialize":
+        return tensor.to_dense()
+    if tensor.layout == torch.sparse_csr and action.startswith("values_"):
+        values = connected_representation(tensor.values(), action.removeprefix("values_"))
+        return torch.sparse_csr_tensor(tensor.crow_indices(), tensor.col_indices(), values,
+                                       size=tensor.shape, dtype=tensor.dtype, device=tensor.device)
+    if tensor.layout != torch.strided:
+        raise ValueError("Unsupported representation layout")
+    if action == "clone": return tensor.clone()
+    if action == "canonical": return tensor.resolve_conj().resolve_neg().clone(memory_format=torch.contiguous_format)
+    if action == "strided":
+        result = torch.zeros((*tensor.shape, 2), dtype=tensor.dtype, device=tensor.device)[..., 0]
+        return result.copy_(tensor)
+    if action == "offset":
+        result = torch.zeros(tensor.numel() + 1, dtype=tensor.dtype, device=tensor.device)[1:].view(tensor.shape)
+        return result.copy_(tensor)
+    if action == "conjugate": return tensor.conj_physical().conj()
+    if action == "negative": return torch.complex(torch.zeros_like(tensor), -tensor).conj().imag
+    if action == "singleton_stride":
+        axis = next(i for i, n in enumerate(tensor.shape) if n == 1)
+        strides = list(tensor.stride())
+        strides[axis] = max(1, strides[axis] + 1)
+        return tensor.as_strided(tensor.shape, strides, tensor.storage_offset())
+    if action == "expanded":
+        for axis, size in enumerate(tensor.shape):
+            if size > 1:
+                candidate = tensor.narrow(axis, 0, 1).expand_as(tensor)
+                if torch.equal(candidate, tensor): return candidate
+        raise ValueError("No value-preserving expansion")
+    raise ValueError(f"Unsupported action: {action}")
