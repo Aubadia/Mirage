@@ -541,3 +541,65 @@ def run(source, config, initial_path, recorder):
         "transition": transition,
     }
     return result
+
+
+def run_property(source, config, recorder, directory, initial_path=None):
+    """Execute reviewed property programs through the standard isolated worker."""
+    import json
+    from pathlib import Path
+    import torch
+    from mirage.generator.program import analyze_property
+    from mirage.rules.properties import execute, tensor_leaves, metadata_tree, observation, encode_initial, decode_initial, snapshot_signature
+    from mirage.runtime.representations import equivalent_view
+    from mirage.runtime.environment import describe
+    graph=analyze_property(source)
+    namespace={"torch":torch}
+    exec(compile(source,"<mirage-property-program>","exec"),namespace)
+    ctx=namespace['build'](config['device'],config.get('seed',0))
+    if not isinstance(ctx,dict): raise ContractError('build must return a dictionary')
+    if sum(t.numel() for _,t in tensor_leaves(ctx))>2_000_000:
+        raise ContractError('Property tensor budget exceeded')
+    if 'args' in ctx and not isinstance(ctx['args'],(tuple,list)):
+        raise ContractError('args must be a tuple/list')
+    if 'kwargs' in ctx and not isinstance(ctx['kwargs'],dict): raise ContractError('kwargs must be a dictionary')
+    saved=None
+    if initial_path is not None:
+        saved=torch.load(initial_path,weights_only=True)
+        restored=decode_initial(saved['context'])
+        for key,value in list(restored.items()):
+            if isinstance(ctx.get(key),torch.nn.Module):
+                ctx[key].load_state_dict(value); restored[key]=ctx[key]
+        ctx=restored
+    representation=config.get('representation','original')
+    if initial_path is None and representation!='original':
+        args=list(ctx.get('args',()))
+        candidates=[i for i,t in enumerate(args) if isinstance(t,torch.Tensor)]
+        if not candidates: return {'verdict':'inapplicable','reason':'No transformable positional tensor','api_executed':False}
+        index=candidates[config.get('subject',0)%len(candidates)]
+        try: args[index]=equivalent_view(args[index],representation)
+        except ValueError as error:
+            return {'verdict':'inapplicable','reason':str(error),'api_executed':False}
+        ctx['args']=tuple(args)
+    if config['family']=='gradient_reference' and initial_path is None:
+        args=list(ctx['args'])
+        args[0]=args[0].detach().requires_grad_(args[0].requires_grad)
+        ctx['args']=tuple(args)
+    initial_metadata=metadata_tree(ctx)
+    if saved is not None and snapshot_signature(saved['metadata'])!=snapshot_signature(initial_metadata):
+        raise ContractError('Restored tensor representation differs from saved evidence')
+    torch.save({'context':encode_initial(ctx),'metadata':initial_metadata},Path(directory)/'initial.pt')
+    calls=[]
+    def call(target,*args,**kwargs):
+        recorder.emit('api_enter',api=config['api'],metadata=metadata_tree((args,kwargs)))
+        result=target(*args,**kwargs)
+        calls.append({'api':config['api'],'metadata':metadata_tree((args,kwargs))})
+        recorder.emit('api_exit',api=config['api'])
+        return result
+    result=execute(namespace,ctx,config,call)
+    result.update(graph=graph,config=config,environment=describe(config['device']),
+                  api_executed=bool(calls),target_calls=calls,initial_metadata=initial_metadata,
+                  property_version=1,confirmed_defect=False)
+    if result.get('verdict') in ('pass','suspected_failure') and not calls:
+        result.update(verdict='invalid',reason='No target execution evidence')
+    recorder.emit('property_verdict',verdict=result.get('verdict'),api_executed=bool(calls))
+    return result

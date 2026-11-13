@@ -95,3 +95,12 @@ def history_request(config, source, path):
         f"{config['gradient_state']}, and no live graph."
     ), {"contract": "state-plan", "configuration": config, "source": source,
         "path_hint": "minimal history" if path == 0 else "alternative legal accumulation/history"})
+
+
+def property_configuration(api, device, attempt, family):
+    """Deterministic coverage cycle over general representation/execution choices."""
+    representations=('original','strided','offset','negative','conjugate','singleton_stride','expanded')
+    return dict(api=api,device=device,seed=attempt,attempt=attempt,family=family,
+                representation=representations[attempt%len(representations)] if family in ('materialization','gradient_reference') else 'original',
+                subject=attempt//len(representations),
+                backend=('eager' if attempt%2 else 'inductor') if family=='gradient_reference' else 'eager')

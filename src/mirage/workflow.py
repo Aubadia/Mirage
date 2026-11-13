@@ -45,6 +45,8 @@ def execute(source, config, initial, directory, budget, engine=None, cancel=None
 
 
 def run(options, apis):
+    if options.strategy == "properties":
+        return run_properties(options, apis)
     root = Path(options.output).resolve()
     root.mkdir(parents=True, exist_ok=True)
     batch_id = f"batch-{uuid.uuid4().hex[:16]}"
@@ -343,6 +345,9 @@ def run(options, apis):
 
 def replay(manifest_path, *, timeout=600, allow_environment_change=False, deadline=None, cancel=None):
     path = Path(manifest_path).resolve()
+    raw=json.loads(path.read_text())
+    if raw.get('mode')=='execute_property':
+        return replay_property(path,timeout=timeout,allow_environment_change=allow_environment_change,cancel=cancel)
     original = ArtifactStore(path.parent).read(path.stem)
     payload = original["payload"]
     if payload.get("generation_contract_version") != 3:
@@ -389,3 +394,115 @@ def replay(manifest_path, *, timeout=600, allow_environment_change=False, deadli
     manifest = ArtifactStore(path.parent).write(identifier, "execution", result, parent_id=original["artifact_id"])
     return {"artifact": str(manifest), "verdict": inspection.get("verdict"), "provider_calls": 0,
             "environment_changes": environment_changes, "resources": replay_resources}
+
+
+def run_properties(options, apis):
+    """Blind property generation through the same isolated worker as regression fixtures."""
+    from mirage.generator.program import analyze_property, property_request
+    from mirage.rules.properties import families
+    from mirage.contracts.exploration import property_configuration
+    from mirage.generator.provider import ProviderFailure
+    root=Path(options.output).resolve()
+    root.mkdir(parents=True,exist_ok=True)
+    snapshot_engine(root/'engine')
+    write_json(root/'engine-sha256.json',inventory(root/'engine'))
+    started=time.monotonic(); deadline=started+options.time_limit
+    results=[]; provider=IsolatedProvider(options.provider,root,options.worker_timeout)
+    stop='time_limit'
+    # API metadata is measured separately by the outer experiment protocol when supplied.
+    metadata={}
+    for api in apis:
+        directory=root/f'api-{len(metadata)}'
+        process=run_worker({'mode':'api_metadata','api':api,'engine':str(root/'engine')},directory,
+                           max(.01,min(options.worker_timeout,deadline-time.monotonic())))
+        if process.outcome!='completed':
+            write_json(root/'summary.json',{'stop_reason':'metadata_failed','records':results,'error':process.error})
+            return {'stop_reason':'metadata_failed','records':results}
+        metadata[api]=json.loads((directory/'summary.json').read_text())
+    metadata_seconds=time.monotonic()-started
+    started=time.monotonic(); deadline=started+options.time_limit
+    pending=None; repair_count=0
+    for index in range(options.cases):
+        remaining=deadline-time.monotonic()
+        # Leave a short window for persisting evidence; do not dispatch requests at expiry.
+        if remaining<45: break
+        api=apis[index%len(apis)]; choices=families(api)
+        if not choices:
+            results.append(dict(api=api,status='unsupported',attempt=index)); break
+        config=property_configuration(api,options.device,index,choices[index%len(choices)])
+        request=property_request(metadata[api],config)
+        if pending is not None:
+            request=pending; config=dict(request.context['configuration']); pending=None
+        attempt=root/f'attempt-{index:04d}'; attempt.mkdir()
+        write_json(attempt/'request.json',asdict(request))
+        row=dict(api=api,attempt=index,configuration=config,status='generation_failed',
+                 generated=False,contract_valid=False,executable=False,api_executed=False,
+                 verdict=None,directory=str(attempt),started_seconds=time.monotonic()-started)
+        try:
+            response=provider.generate(request,deadline=deadline)
+            write_json(attempt/'response.json',asdict(response))
+            value=json.loads(response.content)
+            source=value['source']; row['generated']=True
+            (attempt/'program.py').write_text(source)
+            row['fingerprint']=analyze_property(source)['fingerprint']; row['contract_valid']=True
+            remaining=deadline-time.monotonic()
+            if remaining<=0:
+                row['status']='budget_before_execution'
+            else:
+                process=run_worker({'mode':'execute_property','source':source,'config':config,
+                                    'engine':str(root/'engine')},attempt/'execution',min(options.worker_timeout,remaining))
+                row['process']=asdict(process)
+                write_json(attempt/'execution.sha256.json',inventory(attempt/'execution'))
+                path=attempt/'execution/summary.json'
+                if process.outcome=='completed' and path.exists():
+                    outcome=json.loads(path.read_text()); row.update(status='executed',executable=True,
+                        api_executed=outcome.get('api_executed',False),verdict=outcome.get('verdict'),
+                        reason=outcome.get('reason'),predicates=outcome.get('predicates',{}))
+                else: row.update(status='execution_failed',error=process.error)
+        except ProviderFailure as error:
+            row.update(status='provider_failed',error=str(error))
+            if error.cancellation_uncertain:
+                session=os.environ.get('MIRAGE_SESSION_DIR')
+                if session: (Path(session)/'cancellation-unconfirmed').write_text(str(error))
+                stop='provider_cancellation_unconfirmed'
+        except Exception as error:
+            row.update(status='invalid_program' if row['generated'] else 'generation_failed',
+                       error=f'{type(error).__name__}: {error}')
+        if row['status']=='invalid_program' and repair_count<2:
+            from dataclasses import replace
+            pending=replace(request,previous_content=response.content,diagnostic=row['error'])
+            repair_count+=1
+        else:
+            repair_count=0
+        row['repair_index']=repair_count
+        row['finished_seconds']=time.monotonic()-started
+        write_json(attempt/'outcome.json',row); results.append(row)
+        write_json(root/'summary.json',dict(stop_reason=stop,records=results,elapsed_seconds=time.monotonic()-started,
+                                          provider_calls=provider.calls))
+        if stop=='provider_cancellation_unconfirmed': break
+    if len(results)>=options.cases and stop=='time_limit': stop='case_limit'
+    output=dict(stop_reason=stop,records=results,elapsed_seconds=time.monotonic()-started,provider_calls=provider.calls,metadata_seconds=metadata_seconds,dispatch_reserve_seconds=45)
+    write_json(root/'summary.json',output)
+    return output
+
+
+def replay_property(path, *, timeout, allow_environment_change=False, cancel=None):
+    """Replay saved property inputs and a content-verified engine, without a provider."""
+    request=json.loads(path.read_text())
+    evidence=path.parent
+    checksums=evidence.parent/(evidence.name+'.sha256.json')
+    verify(evidence,json.loads(checksums.read_text()))
+    engine=Path(request['engine'])
+    verify(engine,json.loads((engine.parent/'engine-sha256.json').read_text()))
+    request['initial']=str(evidence/'initial.pt')
+    directory=evidence.parent/('replay-'+uuid.uuid4().hex[:16])
+    process=run_worker(request,directory,timeout,cancel=cancel)
+    original=load_tensor_record(evidence/'result.pt')
+    result=load_tensor_record(directory/'result.pt') if process.outcome=='completed' else None
+    changes=result is not None and result.get('environment')!=original.get('environment')
+    verdict=result.get('verdict') if result else None
+    if changes and not allow_environment_change: verdict=None
+    report=dict(verdict=verdict,provider_calls=0,environment_changed=changes,process=asdict(process),
+                reason='Environment changed' if changes else process.error)
+    write_json(directory/'replay-summary.json',report)
+    return report

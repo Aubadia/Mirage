@@ -1,0 +1,429 @@
+{
+  "schema_version": 1,
+  "research_date": "2026-11-13",
+  "status": "phase_1_complete",
+  "selection": "Prefer distinct mechanisms; 145093 and 204033 conservatively share one root group. Final admission requires reviewed repeated execution.",
+  "candidates": [
+    {
+      "id": "203078",
+      "url": "https://github.com/pytorch/pytorch/issues/203078",
+      "title": "`scatter_add` / `scatter_reduce` on CPU write to the wrong rows when the index is expanded and self has more columns than the index",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-09T01:13:38Z",
+      "api": "torch.Tensor.scatter_add",
+      "device": "cpu",
+      "root_group": "expanded-index row addressing",
+      "conditions": "Expanded stride (1,0), index narrower than destination",
+      "oracle": "Scalar scatter definition; contiguous-index control",
+      "framework_gap": "Missing zero-stride representation sampler; layout MR currently allows only strided/offset.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/203078/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:scatter",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "Scalar scatter definition; contiguous-index control",
+      "observed_differences": [
+        {
+          "path": "value",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 1.0,
+          "tolerance": {
+            "atol": 0.0,
+            "rtol": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "204407",
+      "url": "https://github.com/pytorch/pytorch/issues/204407",
+      "title": "[Autograd] Incorrect first-order gradient for torch.linalg.slogdet with conj().imag input",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-11T12:43:27Z",
+      "api": "torch.linalg.slogdet",
+      "device": "cpu",
+      "root_group": "negative-view determinant backward transpose",
+      "conditions": "complex128 conj().imag, nonsingular nonsymmetric 2x2 matrix",
+      "oracle": "Analytic inverse transpose, scalar finite differences and resolve_neg control",
+      "framework_gap": "Missing negative-bit transform and evidence; complex differentiable loss needs explicit real semantics.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/204407/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:slogdet",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "Analytic inverse transpose, scalar finite differences and resolve_neg control",
+      "observed_differences": [
+        {
+          "path": "value",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 0.1,
+          "tolerance": {
+            "atol": 1e-10,
+            "rtol": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "200599",
+      "url": "https://github.com/pytorch/pytorch/issues/200599",
+      "title": "CPU `torch.linalg.lu_solve` reads the wrong LU matrices when a size-1 batch dimension has a non-canonical stride (wrong results under nested `vmap` and `vmap(jacfwd)`)",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-07T17:26:33Z",
+      "api": "torch.linalg.lu_solve",
+      "device": "cpu",
+      "root_group": "singleton batch matrix indexing",
+      "conditions": "Inserted size-one batch dimension with noncanonical stride",
+      "oracle": "2x2 closed-form solve and contiguous-LU control",
+      "framework_gap": "Sampler cannot request singleton-dimension stride; generic linalg capability certification missing.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/200599/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:lu_solve",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "2x2 closed-form solve and contiguous-LU control",
+      "observed_differences": [
+        {
+          "path": "value",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 4.833333333333333,
+          "tolerance": {
+            "atol": 1e-12,
+            "rtol": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "202706",
+      "url": "https://github.com/pytorch/pytorch/issues/202706",
+      "title": "@torch.autocast decorator leaks autocast state across overlapping calls",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-09T12:40:24Z",
+      "api": "torch.autocast",
+      "device": "cpu",
+      "root_group": "reentrant autocast decorator state",
+      "conditions": "Recursive calls to same autocast decorator",
+      "oracle": "Entry/exit full AMP-state invariant and fresh-context control",
+      "framework_gap": "Program contract lacks general recursive context lifecycle and ambient AMP-state oracle.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/202706/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:autocast",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "Entry/exit full AMP-state invariant and fresh-context control",
+      "observed_differences": [
+        {
+          "path": "value.enabled",
+          "reason": "scalar mismatch",
+          "left": true,
+          "right": false
+        }
+      ]
+    },
+    {
+      "id": "181723",
+      "url": "https://github.com/pytorch/pytorch/issues/181723",
+      "title": "torch.cuda.make_graphed_callables can silently corrupt parameter gradient accumulation by returning static grad buffers",
+      "upstream_state": "open",
+      "upstream_updated": "2026-05-04T17:17:56Z",
+      "api": "torch.cuda.make_graphed_callables",
+      "device": "cuda",
+      "root_group": "CUDA graph static gradient buffer reuse",
+      "conditions": "Two different microbatches, initial grad=None",
+      "oracle": "Analytic sum of inputs and eager autograd control",
+      "framework_gap": "No CUDA graph capture/replay state transition.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/181723/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:cuda_graph",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "Analytic sum of inputs and eager autograd control",
+      "observed_differences": [
+        {
+          "path": "value",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 35.0,
+          "tolerance": {
+            "atol": 0.0,
+            "rtol": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "204033",
+      "url": "https://github.com/pytorch/pytorch/issues/204033",
+      "title": "[Inductor] Fails to preserve aliasing between conjugate imaginary view and base tensor",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-10T18:38:56Z",
+      "api": "torch.compile",
+      "device": "cpu",
+      "root_group": "compiled conjugate output aliasing",
+      "conditions": "Returned conjugate imaginary view subsequently mutated",
+      "oracle": "Analytic mutation propagation and eager control",
+      "framework_gap": "No post-return mutation probe or output alias contract.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/204033/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:compiled_alias",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "Analytic mutation propagation and eager control",
+      "observed_differences": [
+        {
+          "path": "value",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 100.0,
+          "tolerance": {
+            "atol": 0.0,
+            "rtol": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "145093",
+      "url": "https://github.com/pytorch/pytorch/issues/145093",
+      "title": "Inductor aten.clone lowering ignores Conjugate and Negative dispatch keys",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-10T03:48:30Z",
+      "api": "torch.clone",
+      "device": "cpu",
+      "root_group": "compiled conjugate output aliasing",
+      "conditions": "Negative view supplied to compiled clone",
+      "oracle": "Sign identity and resolved-negative clone control",
+      "framework_gap": "Grouped conservatively with 204033 pending evidence of independent cause.",
+      "implemented": true,
+      "local_status": "reserve_screening_violation_not_admitted",
+      "selected": false,
+      "screening_job": "763186",
+      "exclusion": "Conservatively grouped with selected 204033; not counted independently."
+    },
+    {
+      "id": "198118",
+      "url": "https://github.com/pytorch/pytorch/issues/198118",
+      "title": "Complex `linalg.pinv` / `linalg.polar` / `linalg.matrix_sqrth` return wrong values under any `TorchDispatchMode` (hence under `torch.compile`): a conjugate view taken inside the ATen kernel is not applied",
+      "upstream_state": "open",
+      "upstream_updated": "2026-09-30T22:49:14Z",
+      "api": "torch.linalg.pinv",
+      "device": "cpu",
+      "root_group": "dispatch-mode internal conjugate handling",
+      "conditions": "Complex input under public FlopCounterMode",
+      "oracle": "Elementary 2x2 inverse, inverse identity, and eager pinv control; explicit constant complex matrix",
+      "framework_gap": "No profiling-mode state dimension or mathematical reference oracle.",
+      "implemented": true,
+      "local_status": "reserve_current_fixed_input_fixture_not_executed",
+      "selected": false,
+      "screening_job": "763186",
+      "screening_note": "Screening used the earlier seeded-input fixture; no current fixed-input validation claimed."
+    },
+    {
+      "id": "204365",
+      "url": "https://github.com/pytorch/pytorch/issues/204365",
+      "title": "[MKLDNN] BatchNorm produces incorrect results with non-contiguous weight and bias",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-11T06:41:49Z",
+      "api": "torch.nn.functional.batch_norm",
+      "device": "cpu",
+      "root_group": "MKLDNN affine parameter stride",
+      "conditions": "MKLDNN inference input, stride-two affine tensors",
+      "oracle": "Explicit normalization formula and contiguous-affine control",
+      "framework_gap": "Dense registration possible with internal conversion; purity and specialized-layout evidence absent.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/204365/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:batch_norm",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "Explicit normalization formula and contiguous-affine control",
+      "observed_differences": [
+        {
+          "path": "value",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 69.59975719451904,
+          "tolerance": {
+            "atol": 2e-06,
+            "rtol": 1e-06
+          }
+        }
+      ]
+    },
+    {
+      "id": "201268",
+      "url": "https://github.com/pytorch/pytorch/issues/201268",
+      "title": "CSR `add(out=)` writes wrong values when `out`'s `values()` is non-contiguous",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-02T21:30:50Z",
+      "api": "torch.add",
+      "device": "cpu",
+      "root_group": "CSR output values stride",
+      "conditions": "Valid CSR out with stride-two values storage",
+      "oracle": "Elementwise scalar sums and contiguous-output control",
+      "framework_gap": "Registered sparse inputs rejected; out= and collateral storage observables absent.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/201268/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:sparse_add",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "Elementwise scalar sums and contiguous-output control",
+      "observed_differences": [
+        {
+          "path": "value",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 121.0,
+          "tolerance": {
+            "atol": 0.0,
+            "rtol": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "197089",
+      "url": "https://github.com/pytorch/pytorch/issues/197089",
+      "title": "[inductor][cpu] `torch.std`/`var` accumulate in float32: inf/NaN for 1e30-scale inputs, and **zero output with an all-zero gradient** for 1e-30-scale inputs (eager and float64 are correct)",
+      "upstream_state": "open",
+      "upstream_updated": "2026-10-11T01:37:42Z",
+      "api": "torch.std",
+      "device": "cpu",
+      "root_group": "Inductor CPU variance intermediate precision",
+      "conditions": "Compiled FP32 std on exactly representable tiny opposite values",
+      "oracle": "std([-a,a])=a and gradients [-.5,.5], eager control",
+      "framework_gap": "No pure eager/compiled MR; global absolute tolerance masks tiny outputs but not O(1) gradients.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/197089/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:std_gradient",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "std([-a,a])=a and gradients [-.5,.5], eager control",
+      "observed_differences": [
+        {
+          "path": "value.output",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 7.888609052210118e-31,
+          "tolerance": {
+            "atol": 0.0,
+            "rtol": 1e-06
+          }
+        },
+        {
+          "path": "value.gradient",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 0.5,
+          "tolerance": {
+            "atol": 0.0,
+            "rtol": 1e-06
+          }
+        }
+      ]
+    },
+    {
+      "id": "204347",
+      "url": "https://github.com/pytorch/pytorch/issues/204347",
+      "title": "[Inductor] CUDA static: clone of a repeated-input cat reads a transposed source with destination row-major strides (silent wrong values)",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-12T05:15:05Z",
+      "api": "torch.cat",
+      "device": "cuda",
+      "root_group": "Inductor repeated cat layout indexing",
+      "conditions": "Transposed broadcast operands, repeated cat, static compilation",
+      "oracle": "Cat/chunk identity and eager control",
+      "framework_gap": "No general eager/compiled equivalence MR with runtime graph evidence.",
+      "implemented": true,
+      "local_status": "reserve_current_fixed_input_fixture_not_executed",
+      "selected": false,
+      "screening_job": "763186",
+      "screening_note": "Screening used the earlier seeded-input fixture; no current fixed-input validation claimed."
+    },
+    {
+      "id": "200613",
+      "url": "https://github.com/pytorch/pytorch/issues/200613",
+      "title": "[ROCm] copy_ double-applies conjugate/negative view bits when broadcasting requires temporary staging",
+      "upstream_state": "open",
+      "upstream_updated": "2026-10-14T09:57:07Z",
+      "api": "torch.Tensor.copy_",
+      "device": "cuda",
+      "root_group": "broadcast transfer view-bit reapplication",
+      "conditions": "Blocking CPU-to-CUDA broadcasting of conjugate source",
+      "oracle": "Explicit complex sign values and resolved-conjugate control",
+      "framework_gap": "No transfer/offload action; upstream ROCm observation must be independently verified on NVIDIA.",
+      "implemented": true,
+      "local_status": "confirmed_reproduction",
+      "selected": true,
+      "screening_job": "763186",
+      "torch_version": "2.15.0+cu132",
+      "reproduction_result": "result/pytorch-correctness/763186/run/200613/repeat-0-variant-0/result.json",
+      "minimal_example": "cases.py:broadcast_copy",
+      "reproduction_policy": "one fixed-input execution",
+      "expected_behavior": "Explicit complex sign values and resolved-conjugate control",
+      "observed_differences": [
+        {
+          "path": "value",
+          "reason": "numerical mismatch",
+          "max_absolute_error": 4.0,
+          "tolerance": {
+            "atol": 0.0,
+            "rtol": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "204496",
+      "url": "https://github.com/pytorch/pytorch/issues/204496",
+      "title": "[CUDA] grid_sampler_2d backward: FP16/BF16 grad_grid accumulates in the input dtype",
+      "upstream_state": "open",
+      "upstream_updated": "2026-11-11T22:33:51Z",
+      "api": "torch.nn.functional.grid_sample",
+      "device": "cuda",
+      "root_group": "grid sampler low precision gradient accumulation",
+      "conditions": "BF16 bilinear grid gradient summed over 2048 or 4096 channels",
+      "oracle": "Analytic interior derivative and FP32 control",
+      "framework_gap": "Low precision input generation and numerical property oracle absent; direct BF16 is not autocast.",
+      "implemented": true,
+      "local_status": "reserve_screening_violation_not_admitted",
+      "selected": false,
+      "screening_job": "763186"
+    }
+  ],
+  "selected": [
+    "203078",
+    "204407",
+    "200599",
+    "202706",
+    "181723",
+    "204033",
+    "204365",
+    "201268",
+    "197089",
+    "200613"
+  ],
+  "validation_policy": "One execution per issue, explicit fixed inputs, no RNG or timing races; controls and independent oracle required.",
+  "final_review": "result/pytorch-correctness/research/final-review.json"
+}

@@ -30,8 +30,11 @@ class RunOptions:
     targets_per_canonical: int = 12
     paths_per_target: int = 2
     forward_only: bool = False
+    strategy: str = "training"
 
     def __post_init__(self) -> None:
+        if self.strategy not in ("training","properties"):
+            raise ValueError("Unknown execution strategy")
         if self.contract_version != 3:
             raise ValueError("Unknown generation contract")
         for name in ("canonicals_per_api", "targets_per_canonical", "paths_per_target"):

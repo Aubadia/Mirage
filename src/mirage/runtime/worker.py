@@ -24,6 +24,14 @@ def dispatch(request: dict, directory: Path) -> None:
         return
 
     import torch
+    if mode == "execute_property":
+        from mirage.runtime.program import run_property
+        from mirage.runtime.probes import Recorder
+        result=run_property(request["source"],request["config"],Recorder(directory/"trace.jsonl"),directory,request.get("initial"))
+        torch.save(result,directory/"result.pt")
+        summary={k:v for k,v in result.items() if k not in ("observables","reference","control")}
+        (directory/"summary.json").write_text(json.dumps(summary,indent=2,allow_nan=False))
+        return
     if mode == "inspect_pair":
         from mirage.artifacts.bundle import load_tensor_record
         from mirage.rules.conditional import inspect

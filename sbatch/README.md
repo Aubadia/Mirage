@@ -90,3 +90,26 @@ Create the corresponding `result/<category>/logs` directory before submission.
 Scripts source `"$HOME/.bashrc"`, record start/end time and exit status, and retain
 failures as nonzero statuses. `sbatch --test-only` is only preflight; neither
 submission nor job completion establishes an MR Pass. Inspect actual artifacts.
+
+## PyTorch correctness Phase 2–3 session
+
+`experiments/pytorch_correctness.sbatch` explicitly allocates two GPUs and reuses
+one prepared vLLM service across validation and the ten-API evaluation. It creates
+`result/pytorch-correctness/JOB_ID/session.env` and `ready`. Prepare logs, run
+`bash -n`, then `sbatch --test-only` before submission. Attach a testing step as
+above and source that session's environment plus `sbatch/lib/development.sh`.
+
+```bash
+mkdir -p result/pytorch-correctness/logs
+bash -n sbatch/experiments/pytorch_correctness.sbatch
+sbatch --test-only sbatch/experiments/pytorch_correctness.sbatch
+sbatch --parsable sbatch/experiments/pytorch_correctness.sbatch
+```
+
+Inside the testing step, enable full validation with `MIRAGE_TEST_COMPILE=1`,
+`MIRAGE_TEST_CUDA=1`, and `MIRAGE_TEST_E2E=1`. Run the integration/evaluation commands
+in `benchmarks/pytorch_correctness/README.md`. Set `MIRAGE_ITERATION_TIMEOUT=3600`
+for ten sequential 300-second API budgets; the helper still respects allocation
+time remaining and reserves cleanup time. It snapshots benchmark scripts as well
+as production code, tests and batch helpers. Leave the service healthy after
+ordinary test failures; stop it and verify all owned steps exit at task completion.

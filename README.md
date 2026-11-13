@@ -56,9 +56,10 @@ than being assumed compatible with an MR.
 
 The accumulation rule initially certifies deterministic FP32 per-sample computation
 with explicit sample axes and correctly normalized losses. Saved-tensor roundtrip
-uses same-device lossless copies. CPU offload, distributed execution, sparse and
-quantized tensor adapters, and automatic arbitrary-program minimization are outside
-this implementation. Compiled-path evidence is conservative; unsupported graph
+uses same-device lossless copies. Within the training-program strategy, CPU offload, distributed execution, sparse
+and quantized tensor adapters, and automatic arbitrary-program minimization remain
+outside the implementation. The property strategy below adds selected CSR/MKLDNN
+adapters with narrower contracts. Compiled-path evidence is conservative; unsupported graph
 correspondence or operand capture is reported instead of claiming correctness.
 
 Outputs distinguish invalid executions, inapplicable relations, Pass, suspected
@@ -83,3 +84,35 @@ no provider calls. Environment changes are reported and suppress a same-environm
 verdict unless `--allow-environment-change` is explicit. Suspected failures trigger
 bounded reproduction controlled by `--replay-failures`; no result is automatically
 promoted to a confirmed framework defect.
+
+## Deterministic correctness benchmark and property strategy
+
+The [reproduction report](docs/pytorch-correctness-reproduction.md) records ten
+fixed-input upstream correctness issues. The [Phase 2–3 report](docs/pytorch-correctness-evaluation.md)
+describes integration, property preconditions, the blind generation protocol and
+measured results: 10/10 admitted fixtures were detected, and the frozen LLM run
+reproduced 3/10 known issues from 1,154 candidates. Issue-derived fixtures live under
+`benchmarks/pytorch_correctness/`; they are not imported by production generation.
+
+For reviewed API semantics, `--strategy properties` asks the LLM for a deterministic
+input builder (and a small function/module where required). The runtime owns
+materialization, analytic-gradient, context-restoration, captured-accumulation and
+compiled-alias probes. This supplements the training strategy with explicit
+state/representation oracles; it does not certify arbitrary APIs or programs.
+
+```bash
+# Inside a Slurm testing step with a healthy prepared provider:
+python -m mirage run --strategy properties --provider vllm --device cpu \
+  --apis torch.linalg.slogdet --time-limit 300 --cases 100000 \
+  --output result/experiments/properties-example
+python -m mirage report result/experiments/properties-example
+python -m mirage replay result/experiments/properties-example/attempt-0000/execution/request.json
+```
+
+Property results preserve invalid, inapplicable, unassessed, pass and suspected
+failure outcomes. An exception is not automatically a PyTorch bug. A no-provider
+replay verifies saved code/evidence and initial representation. Unsupported snapshot
+restoration is a failed replay, not an inferred pass. Property exploration is
+currently serial; training-strategy concurrency and canonical/path budgets do not
+control it. The property report does not invent ground-truth detection or false
+positive rates from oracle outputs alone.

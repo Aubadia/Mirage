@@ -106,3 +106,56 @@ def request(metadata, seed, device, size, requires_backward=True):
     ), {"contract": "training-program", "api_context": metadata,
         "configuration": {"seed": seed, "device": device, "size_hint": size,
                           "requires_backward": requires_backward}})
+
+
+def analyze_property(source):
+    """Bounded public-API builders; this is validation, not a security sandbox."""
+    if not isinstance(source,str) or not source.strip() or len(source)>40000:
+        raise ContractError('Expected property source of at most 40000 characters')
+    tree=ast.parse(source)
+    definitions={}
+    for node in tree.body:
+        if isinstance(node,ast.Import) and all(a.name=='math' or a.name=='torch' or a.name.startswith('torch.') for a in node.names): continue
+        if isinstance(node,ast.ImportFrom) and node.module and (node.module=='torch' or node.module.startswith('torch.')): continue
+        if not isinstance(node,ast.FunctionDef) or node.decorator_list:
+            raise ContractError('Property source supports torch/math imports and functions only')
+        if node.name in definitions: raise ContractError('Duplicate function')
+        definitions[node.name]=node
+    if 'build' not in definitions or [a.arg for a in definitions['build'].args.args]!=['device','seed']:
+        raise ContractError('Define build(device, seed)')
+    forbidden={'rand','randn','randint','rand_like','randn_like','randperm','normal','uniform_',
+               'bernoulli','bernoulli_','dropout','manual_seed','seed','empty','empty_like',
+               'eval','exec','open','compile','is_compiling','data_ptr','untyped_storage','getattr','setattr'}
+    for node in ast.walk(tree):
+        if isinstance(node,ast.ClassDef) and [ast.unparse(b) for b in node.bases]!=['torch.nn.Module']:
+            raise ContractError('Only local torch.nn.Module classes are supported')
+        if isinstance(node,ast.Assert):
+            raise ContractError('The runner owns assertions and oracles')
+        if isinstance(node,ast.Attribute) and isinstance(node.ctx,ast.Store) and not (isinstance(node.value,ast.Name) and node.value.id=='self'):
+            raise ContractError('Do not modify imported APIs or external attributes')
+        if isinstance(node,(ast.Global,ast.Nonlocal)):
+            raise ContractError('No mutable globals/nonlocals')
+        if isinstance(node,ast.Call):
+            name=node.func.id if isinstance(node.func,ast.Name) else node.func.attr if isinstance(node.func,ast.Attribute) else ''
+            if name in forbidden or name.startswith('_') and name!='__init__':
+                raise ContractError(f'Unsupported or nondeterministic builder call: {name}')
+        if isinstance(node,ast.Attribute) and node.attr.startswith('_') and node.attr not in ('__init__','__class__'):
+            raise ContractError('Use public APIs only')
+    return dict(version='property-1',fingerprint=hashlib.sha256(ast.dump(tree,include_attributes=False).encode()).hexdigest())
+
+
+def property_request(metadata, configuration):
+    from mirage.rules.properties import description
+    return Request(Stage.CANONICAL,
+        'Generate one small deterministic PyTorch property-test program from the installed API specification. '
+        'Return JSON with exactly source. Use torch/math imports and define build(device, seed). '
+        'build must return a dictionary whose named keys are specified below, never a tuple. '
+        'Use explicitly initialized tensors (tensor, zeros, ones, arange, linspace), bounded dimensions '
+        'and finite values. No RNG, external I/O, private APIs, assertions, or expected answers. '
+        'The runner owns API invocation, state evidence, references, gradients and validation. '
+        'Choose shapes, values, legal options and public representation operations yourself; vary them '
+        'across attempt indices. Inputs may use ordinary views, strides, complex values, storage offsets '
+        'or sparse layouts when the API supports them. Keep total storage below 2 million elements. '
+        'Do not supply unrelated trainable parameters. '+description(configuration['family']),
+        {'contract':'training-program','program_kind':'property-1','api_context':metadata,
+         'configuration':configuration})

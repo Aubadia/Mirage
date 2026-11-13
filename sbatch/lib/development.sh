@@ -20,10 +20,14 @@ mirage_iteration() {
     iteration=$(mktemp -d "${MIRAGE_SESSION_DIR}/iteration-XXXXXX")
     mkdir -p "$iteration/code"
     cp -a "$MIRAGE_PROJECT_ROOT/src" "$MIRAGE_PROJECT_ROOT/tests" "$MIRAGE_PROJECT_ROOT/sbatch" "$iteration/code/"
+    if [[ -d "$MIRAGE_PROJECT_ROOT/benchmarks" ]]; then
+        cp -a "$MIRAGE_PROJECT_ROOT/benchmarks" "$iteration/code/"
+    fi
     source "$iteration/code/sbatch/lib/environment.sh"
     budget=$(mirage_budget "${MIRAGE_ITERATION_TIMEOUT:-1800}" 300) || return
     for argument in "$@"; do
-        arguments+=("${argument/#$MIRAGE_PROJECT_ROOT\/tests/$iteration\/code\/tests}")
+        argument="${argument/#$MIRAGE_PROJECT_ROOT\/tests/$iteration\/code\/tests}"
+        arguments+=("${argument/#$MIRAGE_PROJECT_ROOT\/benchmarks/$iteration\/code\/benchmarks}")
     done
     printf '%q ' "$@" > "$iteration/command.txt"
     printf '\n' >> "$iteration/command.txt"

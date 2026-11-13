@@ -19,6 +19,12 @@ class CLITests(unittest.TestCase):
         with patch("mirage.workflow.run", return_value=report), redirect_stdout(StringIO()):
             self.assertEqual(main(["run", "--provider", "vllm"]), 1)
 
+    def test_property_results_and_provider_failures(self):
+        for status,expected in [('executed',0),('provider_failed',1)]:
+            report={'stop_reason':'case_limit','records':[{'status':status}]}
+            with patch('mirage.workflow.run',return_value=report), redirect_stdout(StringIO()):
+                self.assertEqual(main(['run','--provider','vllm','--strategy','properties']),expected)
+
     def test_provider_is_explicit_and_limits_are_validated(self):
         for arguments in (["run"], ["run", "--provider", "reference", "--epsilon", "nan"],
                           ["run", "--provider", "reference", "--replay-failures", "-1"]):
@@ -34,6 +40,10 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(main(["report", temporary]), 0)
             self.assertEqual(json.loads(output.getvalue())["coverage"], {"experiments": 1})
+
+    def test_property_replay_failure_preserves_nonzero_exit(self):
+        with patch('mirage.workflow.replay',return_value={'process':{'outcome':'exception'}}), redirect_stdout(StringIO()):
+            self.assertEqual(main(['replay','case.json']),1)
 
     def test_replay_has_explicit_environment_control(self):
         arguments = parser().parse_args(["replay", "case.json", "--allow-environment-change"])

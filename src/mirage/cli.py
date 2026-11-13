@@ -29,6 +29,7 @@ def parser() -> argparse.ArgumentParser:
 
     run = commands.add_parser("run", help="Generate, execute and inspect a batch of candidates", allow_abbrev=False)
     run.add_argument("--apis", nargs="+")
+    run.add_argument("--strategy", choices=("training","properties"), default="training")
     run.add_argument("--cases", type=positive_integer, default=100)
     run.add_argument("--time-limit", type=positive_integer, default=14400)
     run.add_argument("--worker-timeout", type=positive_integer, default=600)
@@ -85,16 +86,26 @@ def main(argv: list[str] | None = None) -> int:
 
                 verify(args.manifest.parent / output["payload"]["bundle"], output["payload"]["files"])
         else:
-            manifests = ArtifactStore(args.directory).list_manifests()
-            output = summarize(manifests)
+            property_summary=args.directory/"summary.json"
+            if property_summary.exists() and "records" in json.loads(property_summary.read_text()):
+                from mirage.artifacts.report import summarize_properties
+                output=summarize_properties(json.loads(property_summary.read_text()))
+            else:
+                manifests = ArtifactStore(args.directory).list_manifests()
+                output = summarize(manifests)
         print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+        if args.command == "replay" and output.get("process", {}).get("outcome", "completed") != "completed":
+            return 1
         if args.command == "run":
             if output["stop_reason"] in ("interrupted", "controller_error", "provider_cancellation_unconfirmed",
                                        "interrupted_or_provider_cancellation_unconfirmed"):
                 return 1
             if any(item["status"] != "validated" for item in output.get("canonicals", [])):
                 return 1
-            if any(case["status"].startswith("generation_provider_") for case in output["experiments"]):
+            if output["stop_reason"] == "metadata_failed":
+                return 1
+            if any(case["status"].startswith("generation_provider_") or case["status"] == "provider_failed"
+                   for case in output.get("experiments", output.get("records", []))):
                 return 1
         return 0
     except (ValueError, OSError, TypeError) as error:
