@@ -114,3 +114,74 @@ def apply_mutation(parent, replacement, contract):
                     'kind': contract['kind'], 'editable_region': deepcopy(region),
                     'replacement': replacement, 'outside_region_unchanged': True,
                     'runtime_obligations': 'not established by static editing'}
+
+
+def plan_regions(source, parent_id, attempt, regions):
+    """Regions share one immutable preimage; edits are applied simultaneously."""
+    if 'full' in regions:
+        return None
+    contracts = [plan_mutation(source, parent_id, attempt, kind=kind) for kind in dict.fromkeys(regions)]
+    if not contracts or any(c is None for c in contracts):
+        return None
+    for contract in contracts:
+        region = contract['editable_region']
+        contract['region_id'] = f"{region['function']}:{region['start']}:{region['stop']}"
+        contract['preimage_sha256'] = source_hash('\n'.join(contract['original_statements']))
+    return {'version': 'local-regions-2', 'parent_id': parent_id,
+            'parent_sha256': source_hash(source), 'kind': 'multi_region', 'regions': contracts,
+            'budget': {'characters': 8192, 'statements': 16, 'ast_nodes': 256}}
+
+
+def apply_regions(parent, patches, contract):
+    if contract.get('version') != 'local-regions-2' or source_hash(parent) != contract.get('parent_sha256'):
+        raise ContractError('Mutation parent/version mismatch')
+    if not isinstance(patches, list) or len(patches) != len(contract['regions']):
+        raise ContractError('Return exactly one patch for every declared region')
+    indexed = {}
+    for patch in patches:
+        if not isinstance(patch, dict) or set(patch) != {'region_id', 'preimage_sha256', 'source'}:
+            raise ContractError('Invalid patch fields')
+        if not isinstance(patch['region_id'], str) or patch['region_id'] in indexed:
+            raise ContractError('Duplicate region patch')
+        indexed[patch['region_id']] = patch
+    tree = ast.parse(parent)
+    functions = {n.name:n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    total_chars = total_nodes = total_statements = 0
+    prepared = []
+    for region in contract['regions']:
+        patch = indexed.get(region['region_id'])
+        if patch is None or patch['preimage_sha256'] != region['preimage_sha256']:
+            raise ContractError('Region preimage mismatch')
+        snippet = patch['source']
+        if not isinstance(snippet, str):
+            raise ContractError('Patch source must be a string')
+        # Validate each frame against the original parent, allowing a region no-op
+        # when another region carries the semantic change.
+        try:
+            apply_mutation(parent, snippet, region)
+        except ContractError as error:
+            if str(error) != 'Mutation made no semantic AST edit':
+                raise
+        parsed = ast.parse(snippet)
+        total_chars += len(snippet); total_nodes += sum(1 for _ in ast.walk(parsed)); total_statements += len(parsed.body)
+        prepared.append((region['editable_region'], parsed.body))
+    budget = contract['budget']
+    if total_chars > budget['characters'] or total_nodes > budget['ast_nodes'] or total_statements > budget['statements']:
+        raise ContractError('Combined mutation budget exceeded')
+    # Descending original indices preserve each region's immutable coordinates.
+    for region, body in sorted(prepared, key=lambda item:(item[0]['function'], item[0]['start']), reverse=True):
+        functions[region['function']].body[region['start']:region['stop']] = body
+    child = ast.unparse(ast.fix_missing_locations(tree)) + '\n'
+    if analyze_stateful(child)['fingerprint'] == analyze_stateful(parent)['fingerprint']:
+        raise ContractError('Mutation made no semantic AST edit')
+    return child, {'version': contract['version'], 'parent_id': contract['parent_id'],
+                   'parent_sha256': contract['parent_sha256'], 'child_sha256': source_hash(child),
+                   'kind': 'multi_region', 'patches': patches, 'outside_region_unchanged': True,
+                   'runtime_obligations': 'not established by static editing'}
+
+
+PATCH_SCHEMA = {'type': 'object', 'properties': {'patches': {'type': 'array', 'minItems': 1,
+    'maxItems': 3, 'items': {'type': 'object', 'properties': {
+        'region_id': {'type': 'string'}, 'preimage_sha256': {'type': 'string'}, 'source': {'type': 'string'}},
+        'required': ['region_id', 'preimage_sha256', 'source'], 'additionalProperties': False}}},
+    'required': ['patches'], 'additionalProperties': False}

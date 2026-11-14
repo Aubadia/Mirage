@@ -36,6 +36,8 @@ mirage_start_service() {
     export MIRAGE_MAX_MODEL_LEN="${MIRAGE_MAX_MODEL_LEN:-16384}"
     export MIRAGE_MAX_TOKENS="${MIRAGE_MAX_TOKENS:-4096}"
     export MIRAGE_GENERATION_CONCURRENCY="${MIRAGE_GENERATION_CONCURRENCY:-2}"
+    export MIRAGE_MTP_TOKENS="${MIRAGE_MTP_TOKENS:-0}"
+    case "$MIRAGE_MTP_TOKENS" in 0|1|2|3) ;; *) echo "MIRAGE_MTP_TOKENS must be 0, 1, 2 or 3" >&2; return 2 ;; esac
     export MIRAGE_VLLM_PORT="${MIRAGE_VLLM_PORT:-8000}"
     export MIRAGE_VLLM_BASE_URL="http://127.0.0.1:${MIRAGE_VLLM_PORT}/v1"
     "$MIRAGE_PYTHON" - <<'PY'
@@ -90,17 +92,25 @@ metadata = {
     "declared_revision": os.environ["MIRAGE_MODEL_REVISION"],
     "config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
     "endpoint": os.environ["MIRAGE_VLLM_BASE_URL"],
+    "mtp_tokens": int(os.environ["MIRAGE_MTP_TOKENS"]),
+    "prefix_caching": True,
+    "cuda_graph_policy": "vLLM automatic; verify startup logs",
+    "attention_backend": "vLLM automatic; verify startup logs",
     "max_model_len": int(os.environ["MIRAGE_MAX_MODEL_LEN"]),
     "max_num_seqs": int(os.environ["MIRAGE_GENERATION_CONCURRENCY"]),
 }
 Path(sys.argv[1]).write_text(json.dumps(metadata, indent=2))
 PY
+            speculation=()
+            if [[ "$MIRAGE_MTP_TOKENS" != 0 ]]; then
+                speculation=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MIRAGE_MTP_TOKENS}")
+            fi
             exec "${MIRAGE_SERVE_PYTHON%/*}/vllm" serve "$MIRAGE_MODEL_PATH" \
                 --served-model-name "$MIRAGE_VLLM_MODEL" --host 127.0.0.1 \
                 --port "$MIRAGE_VLLM_PORT" --tensor-parallel-size 1 \
                 --max-model-len "$MIRAGE_MAX_MODEL_LEN" \
                 --max-num-seqs "$MIRAGE_GENERATION_CONCURRENCY" \
-                --generation-config vllm
+                --enable-prefix-caching "${speculation[@]}" --generation-config vllm
         ' mirage-serving "${MIRAGE_JOB_DIR}/serving/environment.json" &
     MIRAGE_SERVICE_PID=$!
 

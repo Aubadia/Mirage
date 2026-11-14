@@ -129,3 +129,20 @@ class AdaptiveTests(unittest.TestCase):
                 self.assertTrue(all(r['selection']['candidate_count'] > 0 for r in run['records']))
                 if mode == 'full': self.assertTrue(all(r['generation_mode'] == 'full' for r in run['records']))
                 self.assertGreater(run['search_metrics']['runtime_valid'], 0)
+
+
+class GoalFeedbackTests(unittest.TestCase):
+    def test_goal_families_have_separate_cost_and_validity_feedback(self):
+        sampler = FeedbackSampler()
+        base = {'api':'torch.sin','parent':'seed','kind':'planned'}
+        good, bad = dict(base, goal='gradient.backward_count'), dict(base, goal='representation.negative')
+        for index in range(3):
+            sampler.observe(good, record(str(index), seconds=1))
+            sampler.observe(bad, record(valid=False, seconds=15))
+        _, selection = sampler.choose([good,bad])
+        self.assertGreater(selection['candidates'][0]['probability'], selection['candidates'][1]['probability'])
+
+    def test_planning_usage_is_included_in_total_cost(self):
+        row = record()
+        row['planning_usage'] = {'input_tokens':100,'output_tokens':50}
+        self.assertEqual(summarize_search({'records':[row]})['known_tokens'], 180)

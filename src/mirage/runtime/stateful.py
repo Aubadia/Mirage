@@ -242,8 +242,13 @@ def execute(source, config, recorder, initial_reference=None):
     ctx = namespace['build'](config['device'], config.get('seed', 0))
     if not isinstance(ctx, dict) or not isinstance(ctx.get('inputs'), dict) or not isinstance(ctx.get('parameters'), dict):
         raise ContractError("build must return inputs and parameters dictionaries")
-    if any(not isinstance(x, torch.Tensor) or not x.is_leaf or not x.requires_grad for x in ctx['parameters'].values()):
-        raise ContractError("Register trainable leaf tensors as parameters")
+    for name, parameter in ctx['parameters'].items():
+        if not isinstance(parameter, torch.Tensor):
+            raise ContractError(f"parameters[{name!r}] must be a Tensor; got {type(parameter).__name__}")
+        if not parameter.is_leaf or not parameter.requires_grad:
+            raise ContractError(f"parameters[{name!r}] requires is_leaf=True and requires_grad=True; "
+                                f"observed is_leaf={parameter.is_leaf}, requires_grad={parameter.requires_grad}. "
+                                "Use inputs for non-parameter tensors; parameters may be empty.")
     if not isinstance(ctx.get('modules',{}),dict): raise ContractError('modules must be a dictionary of actual modules')
     for key in ('optimizer','scheduler','scaler'):
         if ctx.get(key) is not None and not callable(getattr(ctx[key],'state_dict',None)):

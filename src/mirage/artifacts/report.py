@@ -67,10 +67,17 @@ def summarize_search(report):
     pairs = {(r['api'], r['relation']) for r in applicable}
     state_relations = {(unit, r['relation']) for r in applicable for unit in verified_search_units(r)}
     elapsed = report.get('elapsed_seconds', 0)
-    usage = [r.get('generation_usage') or {} for r in rows]
+    usage = [r.get(key) or {} for r in rows for key in ('planning_usage', 'generation_usage')
+             if key in r or key == 'generation_usage' and r.get('first_blocking_stage') != 'state_plan']
     known_tokens = sum(u.get('input_tokens') or 0 for u in usage) + sum(u.get('output_tokens') or 0 for u in usage)
     tokens_complete = bool(rows) and all(u.get('input_tokens') is not None and u.get('output_tokens') is not None for u in usage)
     return {'attempts':len(rows), 'runtime_valid':len(valid),
+            'planning_calls':sum('planning_usage' in r for r in rows),
+            'program_generation_calls':sum(r.get('program_generation_dispatched', 'generation_usage' in r) for r in rows),
+            'planning_rejections':sum(r.get('first_blocking_stage') == 'state_plan' for r in rows),
+            'planned_executions':sum('state_plan' in r or bool(r.get('configuration', {}).get('predicates')) for r in rows),
+            'goal_attained_cases':sum(bool(r.get('inspection', {}).get('predicates')) and r['inspection'].get('target_state_reached', False) for r in valid),
+            'valid_cases_per_second':len(valid)/elapsed if elapsed else None,
             'runtime_valid_rate':len(valid)/len(rows) if rows else None,
             'verified_apis':sorted({r['api'] for r in valid}),
             'semantic_units':len(semantic), 'transition_units':len(transitions),

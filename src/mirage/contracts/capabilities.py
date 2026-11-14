@@ -5,7 +5,7 @@ from typing import Any
 
 CONTRACT_VERSION = "stateful-1"
 SEMANTIC_COVERAGE_VERSION = "state-semantic-1"
-STATE_DIMENSIONS = ("gradient", "context", "graph_lifecycle", "execution_mode")
+STATE_DIMENSIONS = ("gradient", "context", "graph_lifecycle", "execution_mode", "representation", "data")
 INPUT_CATEGORIES = ("ordinary", "zero", "small_finite", "large_finite", "repeated",
                     "nonuniform", "mixed_sign", "singleton", "broadcast", "supported_layout")
 
@@ -52,14 +52,24 @@ class StatePredicate:
     field: str
     expected: Any
     checkpoint: str
+    call_index: int | None = None
+    operand_path: tuple | None = None
+    relation: str | None = None
 
     def __post_init__(self):
         if self.dimension not in STATE_DIMENSIONS or not self.field or not self.checkpoint:
             raise ValueError("State predicate requires a supported dimension, field and checkpoint")
 
+        if self.dimension in ("representation", "data") and (type(self.call_index) is not int or self.call_index < 0 or not self.operand_path):
+            raise ValueError("Operand predicates require a call index and operand path")
+        if self.dimension not in ("representation", "data") and any(value is not None for value in (self.call_index, self.operand_path, self.relation)):
+            raise ValueError("Scoped predicates require representation or data dimensions")
+        if self.relation not in (None, "target_backward_node", "operand_gradient_contribution", "output_gradient"):
+            raise ValueError("Unsupported path relation")
+
     def holds(self, observed: Evidence):
         return (observed.established and observed.checkpoint == self.checkpoint
-                and observed.value == self.expected)
+                and type(observed.value) is type(self.expected) and observed.value == self.expected)
 
 
 @dataclass(frozen=True)

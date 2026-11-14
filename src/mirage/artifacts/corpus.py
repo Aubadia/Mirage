@@ -113,6 +113,7 @@ class Corpus:
                           'usage': deepcopy(row.get('generation_usage'))}}
         entry['evidence']['backward_calls'] = sorted({w['call'] for w in coverage.get('witnesses', [])
             if w['checkpoint'] == 'final' and w['relations']['target_backward_node']['status'] == 'verified'})
+        entry['evidence']['witnesses'] = deepcopy(coverage.get('witnesses', []))
         self.source(entry)
         def units_for(seed):
             if self.coverage_basis == 'semantic':

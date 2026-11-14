@@ -22,6 +22,51 @@ def write(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False)+'\n')
 
 
+
+def replay_requests(requests_path, output):
+    """Fixed JSON-constrained workload, separate from bug-search measurements."""
+    import urllib.request
+    from mirage.generator.http_provider import HTTPProvider, HTTPConfig
+    from mirage.generator.provider import Request, Stage
+    output.mkdir(parents=True, exist_ok=False)
+    requests = json.loads(requests_path.read_text())
+    provider = HTTPProvider.from_environment(directory=output)
+    base = provider.config.base_url.removesuffix('/v1')
+    def metrics(name):
+        with urllib.request.urlopen(base + '/metrics', timeout=10) as response:
+            (output/name).write_bytes(response.read())
+    metrics('metrics-before.txt')
+    results = []
+    # Same order and one warmup pass on each service; measurements retain both.
+    for repeat in range(2):
+        for index, value in enumerate(requests):
+            raw = dict(value)
+            raw['stage'] = Stage(raw['stage'])
+            request = Request(**raw)
+            started = time.monotonic()
+            response = provider.generate(request, deadline=started + 120)
+            elapsed = time.monotonic() - started
+            try:
+                parsed = json.loads(response.content)
+                field = {'state-goal-plan':'plans','region-patches':'patches'}.get(request.context.get('contract'), 'source')
+                valid = isinstance(parsed, dict) and set(parsed) == {field} and isinstance(parsed[field], str if field=='source' else list)
+            except (ValueError, TypeError):
+                valid = False
+            results.append({'repeat':repeat, 'request':index, 'seconds':elapsed,
+                            'input_tokens':response.usage.input_tokens, 'output_tokens':response.usage.output_tokens,
+                            'json_shape_valid':valid, 'content':response.content})
+            write(output/'results.json', {'requests_sha256':hashlib.sha256(requests_path.read_bytes()).hexdigest(),
+                  'warmup_repeat':0, 'results':results})
+    metrics('metrics-after.txt')
+    measured = [r for r in results if r['repeat']==1]
+    write(output/'summary.json', {'complete':True, 'requests':len(measured),
+          'seconds':sum(r['seconds'] for r in measured),
+          'output_tokens':sum(r['output_tokens'] or 0 for r in measured),
+          'json_shape_valid':sum(r['json_shape_valid'] for r in measured),
+          'semantic_validity':'separate runtime testing required',
+          'requests_sha256':hashlib.sha256(requests_path.read_bytes()).hexdigest()})
+    return 0 if all(r['json_shape_valid'] for r in results) else 1
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
@@ -30,7 +75,10 @@ def main():
     parser.add_argument('--seeds', type=int, nargs='+', default=[11,29])
     parser.add_argument('--apis', nargs='+', default=['torch.sin','torch.add'])
     parser.add_argument('--pilot', action='store_true')
+    parser.add_argument('--replay-requests', type=Path)
     args = parser.parse_args()
+    if args.replay_requests:
+        return replay_requests(args.replay_requests, args.output)
     args.output.mkdir(parents=True, exist_ok=False)
     source = Path(__file__).resolve()
     arms = (ARMS[3],) if args.pilot else ARMS

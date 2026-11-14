@@ -251,6 +251,8 @@ def stateful_request(metadata, configuration, *, edges=True, canonical=None, pre
         "Use explicitly initialized tensors. A seed does not replace initialization. "
         "Replace all retained random module values. Registered module parameters must be the "
         "same objects as entries in parameters, not the tensors used to construct Parameters. "
+        "Every registered parameter must be a tensor with is_leaf=True and requires_grad=True. "
+        "Inputs may require gradients without being registered parameters. "
         "Omit unused optional fields. optimizer/scheduler/scaler must be real objects or None, "
         "never dictionaries. inputs/parameters/modules are dictionaries and may be empty. "
         "Functions belong in source, not checkpoint_data or returned observations.\n"
@@ -287,7 +289,7 @@ def stateful_request(metadata, configuration, *, edges=True, canonical=None, pre
         "members; actual target values, not comments describing them as small/large, establish coverage. "
         "If a requested capability is unavailable, preserve legal coverage and do not invent evidence."
     )
-    if mutation is not None:
+    if mutation is not None and mutation.get("version") != "local-regions-2":
         if canonical is None:
             raise ContractError("A local mutation requires its immutable parent source")
         prompt = prompt.replace(
@@ -319,9 +321,36 @@ def stateful_request(metadata, configuration, *, edges=True, canonical=None, pre
                    "Respect the supplied edit budget and preserved obligations. For run_tail include "
                    "a return of the required observables. The parent/child pair is exploration lineage, "
                    "not an MR pair. Each child's MR applicability is independently checked at runtime.")
+    if mutation is not None and mutation.get("version") == "local-regions-2":
+        prompt = (
+            "Generate bounded patches implementing transition_plan, using the installed API spec. "
+            "Return JSON with exactly patches: an array of region_id, preimage_sha256, source. "
+            "Copy IDs/hashes exactly from mutation_contract.regions. Each source contains only "
+            "unindented replacement statements, no imports or build/run definitions. "
+            "All coordinates are zero-based TOP-LEVEL STATEMENT indices in the original canonical_source, "
+            "not line numbers. Equal start/stop means INSERTION into an EMPTY region. "
+            "region_statements is READ-ONLY surrounding context, NOT the requested replacement. "
+            "Do not copy surrounding statements into a patch. Preserve names used elsewhere. "
+            "device and seed are build arguments, NOT run variables; in run use an existing tensor device/dtype. "
+            "For operand_setup return ONLY assignments constructing/rebinding the target operand variables "
+            "already in scope. This patch MUST NOT contain probe.call, backward, grad or return: "
+            "the original target/loss/backward/return remain AFTER the inserted statements. "
+            "For example, an insertion patch is a short assignment, never the rest of run. "
+            "initialization replaces only the selected build assignment and MUST NOT contain run code; "
+            "run_tail replaces the suffix AFTER the last target and must include return. "
+            "Existing target calls remain unchanged. A run_tail may add target calls when the plan "
+            "requires additional boundaries. Plan graph retention before the first backward, "
+            "or recompute the whole required graph. Use probe.call results for backward. "
+            "The assembled program must reach every predicate at its named checkpoint. "
+            "Keep edits within per-region and combined budgets. No random initialization, I/O, "
+            "expected answers or fake probe evidence. Each child starts from build(). "
+            "Parent/child lineage is not an MR; child MR applicability is checked independently. "
+            "Registered parameters must be tensors with is_leaf=True and requires_grad=True; "
+            "parameters may be empty. Inputs needing gradients need not be registered parameters."
+        )
     if edges: prompt += "\n\n" + EDGE_CASE_PROMPT
     return Request(Stage.TRANSITION if canonical else Stage.CANONICAL, prompt,
-                   {"contract": "training-program", "program_kind": "stateful-1", "api_context": context, "configuration": configuration,
+                   {"contract": "region-patches" if mutation and mutation.get("version") == "local-regions-2" else "training-program", "program_kind": "stateful-1", "api_context": context, "configuration": configuration,
                     "canonical_source": canonical, "state_predicates": list(predicates),
                     "mutation_contract": copy.deepcopy(mutation),
                     "state_measurement_units": {

@@ -4,7 +4,7 @@ import json
 from mirage.contracts.capabilities import (Evidence, EvidenceStatus, StatePredicate,
                                          PathEvidence, SEMANTIC_COVERAGE_VERSION)
 
-FUNNEL = ("generation", "parse", "static_contract", "initialization", "snapshot",
+FUNNEL = ("state_plan", "generation", "parse", "static_contract", "initialization", "snapshot",
           "mutation_eligibility", "mutation_application", "target_entry", "target_return",
           "backward", "state", "relation", "audit")
 
@@ -38,7 +38,10 @@ def inspect_state(record, predicates=()):
             if key in facts:
                 fact = Evidence(EvidenceStatus.VERIFIED, 'runtime checkpoint observation',
                                 facts[key], predicate.checkpoint)
-        attained.append({'dimension': predicate.dimension, 'field': predicate.field,
+        if predicate.dimension in ('representation', 'data'):
+            fact = operand_fact(record, predicate)
+        attained.append({'call_index': predicate.call_index, 'operand_path': predicate.operand_path,
+                         'relation': predicate.relation, 'dimension': predicate.dimension, 'field': predicate.field,
                          'checkpoint': predicate.checkpoint, 'expected': predicate.expected,
                          'observed': fact.value, 'evidence_status': fact.status.value,
                          'attained': predicate.holds(fact)})
@@ -169,3 +172,32 @@ def semantic_coverage(record, *, valid=False):
             'environment': environment, 'events': events, 'witnesses': witnesses,
             'signatures': [json.loads(s) for s in sorted(signatures)], 'eligible': valid,
             'observed_units': len(signatures), 'denominator': None, 'correctness': 'unassessed'}
+
+
+def operand_fact(record, predicate):
+    """Read one call/operand witness, with optional attributable backward evidence."""
+    witnesses = [w for w in semantic_coverage(record)['witnesses']
+                 if w['checkpoint'] == predicate.checkpoint and w['call'] == predicate.call_index
+                 and w['operand_path'] == list(predicate.operand_path)]
+    if len(witnesses) != 1:
+        return Evidence(reason='missing or ambiguous operand witness')
+    witness = witnesses[0]
+    if predicate.relation and witness['relations'][predicate.relation]['status'] != 'verified':
+        return Evidence(reason='required path relation not established')
+    metadata = witness['metadata'] or {}
+    properties = metadata.get('properties', {})
+    fields = dict(properties, **{k: metadata.get(k) for k in ('dtype', 'device', 'layout', 'shape', 'strides', 'requires_grad', 'leaf')})
+    fields['offset_nonzero'] = None if metadata.get('offset') is None else metadata['offset'] != 0
+    fields['zero_stride'] = None if metadata.get('strides') is None else any(
+        n > 1 and stride == 0 for n, stride in zip(metadata['shape'], metadata['strides']))
+    call = next((c for c in record.get('target_calls', []) if c['index'] == predicate.call_index), {})
+    if predicate.field == 'aliases' and metadata.get('storage_group') is not None:
+        fields['aliases'] = [list(o['path']) for o in call.get('metadata', [])
+                            if list(o['path']) != list(predicate.operand_path) and o.get('storage_group') == metadata['storage_group']]
+    if predicate.dimension == 'data':
+        measured = next((o['facts'] for o in call.get('input_properties', []) if list(o['path']) == list(predicate.operand_path)), {})
+        fields = dict(measured, dtype=metadata.get('dtype'), shape=metadata.get('shape'))
+    value = fields.get(predicate.field)
+    if value is None:
+        return Evidence(reason='operand field not instrumented')
+    return Evidence(EvidenceStatus.VERIFIED, 'call-bound runtime operand observation', value, predicate.checkpoint)

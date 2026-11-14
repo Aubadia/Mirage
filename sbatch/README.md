@@ -113,3 +113,16 @@ for ten sequential 300-second API budgets; the helper still respects allocation
 time remaining and reserves cleanup time. It snapshots benchmark scripts as well
 as production code, tests and batch helpers. Leave the service healthy after
 ordinary test failures; stop it and verify all owned steps exit at task completion.
+
+## Qwen3.8 Native MTP validation
+
+Use `source result/benchmark-revalidation-qwen38/serving.env` for the prepared
+Qwen3.8-27B BF16 snapshot. Set `MIRAGE_MTP_TOKENS=0` (default/off), `1`, `2` or `3`
+before submitting a service session. Nonzero enables vLLM native `mtp` using the
+model's own prediction head; it requires a compatible model and installed vLLM.
+The serving environment records the setting. Prefix caching is explicitly enabled;
+CUDA graph and attention choices remain vLLM's hardware/model-specific automatic
+selection and must be verified from startup logs. Do not claim an acceleration
+from flags alone. Compare identical structured-output requests, record speculative
+acceptance, latency, tokens and JSON validity, then compare valid cases/second.
+Changing MTP requires restarting the service; preserve per-configuration artifacts.

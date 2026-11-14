@@ -765,3 +765,167 @@ Evidence:
 - [Integrity](../result/benchmark-revalidation-qwen38/775287/integrity-check.json)
 - [Accounting](../result/benchmark-revalidation-qwen38/slurm-accounting.tsv)
 - [Cleanup](../result/benchmark-revalidation-qwen38/775287/cleanup.json)
+
+## Approved continuation: explicit state plans and serving validation
+
+User approved the proposed repair scope and automatic continuation between phases
+on 2026-11-14. First implement and validate explicit LLM state-goal planning,
+operand-bound runtime predicates, goal-compatible bounded edits, no-op feedback,
+and installed API reference documentation. Then validate Native MTP and retain
+CUDA graphs, optimized attention and prefix caching with measured performance.
+
+Authorized production files: generator/state_plan.py (new), contracts/capabilities.py,
+contracts/exploration.py, generator/provider.py, generator/program.py,
+generator/mutation.py, generator/http_provider.py, sampler/policy.py, workflow.py,
+runtime/api_metadata.py, runtime/worker.py, runtime/stateful.py,
+inspector/stateful.py, artifacts/corpus.py, artifacts/report.py.
+Also authorized: sbatch/lib/serving.sh, sbatch/README.md,
+benchmarks/stateful_search.py, tests/test_state_plan.py (new), existing
+ test_mutation.py, test_adaptive.py, test_corpus.py, test_stateful.py,
+ test_program.py, test_http_provider.py, test_capabilities.py, test_exploration.py,
+and this roadmap. Artifacts go under result/.
+
+Sequence and acceptance:
+1. Implement explicit plans with up to three candidates, novelty/compatibility
+   filtering, bounded multi-region patches and independently verified predicates.
+2. Expand installed API doc references with provenance; improve parameter errors
+   and stable-prefix prompt layout. Run deterministic regressions through Slurm.
+3. Validate real-model generation on disjoint APIs and fixed benchmark controls.
+4. Compare frozen baseline, repaired engine MTP off, repaired engine MTP on with
+   seed 0 and ten APIs at 300 seconds/API; planning/repair count against budgets.
+   Measure MTP request replay first, including JSON validity, tokens and latency.
+5. Review actual results, update evidence, stop owned services and allocations.
+
+Planning and generated AST changes are not runtime state evidence. Unknown remains
+unknown, coverage-only remains correctness-unassessed. Preserve existing canonical
+initial-state execution and MR preconditions. No unrelated refactoring/dependencies.
+
+Status: implementation started; no new runtime validation yet.
+
+Implementation progress: explicit `state_goal` requests, validated goal identifiers,
+operand/path predicates, immutable multi-region patch preimages, scoped no-op retry,
+goal-specific sampler feedback and planner token accounting are implemented.
+Installed API references now expand one hop with source hashes. Parameter errors
+identify the exact field/property. MTP supports 0/1/2/3 tokens and records its
+configuration. AST parsing, shell syntax and submission preflight passed.
+Slurm job 775669 (explicit dev partition, two isolated GPUs) is running the first
+frozen regression snapshot and starting the MTP-off service. Further edits and
+added regressions will be validated from a separate immutable snapshot.
+
+Validation progress (775669): first regression 212 tests exposed one outdated
+initial-predicate/dimension assertion; corrected for operand-bound dimensions.
+Second regression: 216 tests, 215 passed, one saved-fixture audit skipped until
+fresh benchmark artifacts exist. Targeted follow-ups: 20 tests and then 28 tests passed. First
+real-model smoke reached additional backward/target and compiled states on cos,
+but insertion prompts caused protected-boundary copies; tightened the prompt.
+A tanh generation exceeded the smoke's 60-second worker cap. Server metrics later
+verified zero running/waiting requests; recorded drain evidence before reusing
+service. Subsequent smoke uses the formal 120-second worker cap.
+Second smoke exposed tuple/list normalization at corpus admission for operand
+paths. Fixed JSON normalization and added an end-to-end representation corpus
+roundtrip regression. Added explicit measurement definitions distinguishing
+negative view bits from negative values and forward boundaries from backward
+counts. All unsuccessful attempts remain in their immutable iteration artifacts.
+
+Phase 1 acceptance: the third unrestricted disjoint-API smoke produced 7/11 valid
+cos cases and 8/11 valid tanh cases, with five attained planned cases per API.
+These are smoke observations, not controlled performance claims. A separate
+explicit non-contiguous goal with `operand_gradient_contribution` passed on two
+planned attempts (representation-smoke/acceptance.json). Coverage-only remained
+unassessed. Added a count-bucket filter (one -> multiple, no automatic 2 -> 3
+novelty claim) and retained verified operand backward requirements in automatic
+representation/data goals. Explicit goals now follow a verified canonical.
+
+Final source/test/script snapshots are under result/state-plan-repair/fixed-code;
+original engine snapshot under baseline-code. Eight fixed HTTP requests (two
+canonical, two plans, four patches) are saved for identical MTP performance
+replays. Formal treatment arguments remain seed 0, ten APIs, 300 seconds/API,
+120-second workers, planning/repair included in search budgets. Service remains
+MTP off for the original and repaired-engine comparison.
+
+Pre-formal correction: final review identified a mixed-path hidden-obligation
+change: an operand-only edit could inherit a forward-only parent but be assigned
+requires_backward=True by the attempt rotation. Child obligations now inherit the
+parent's required/observed backward path. Added a real two-case workflow regression
+with a forward-only parent and a second target call. Preserved the unused first
+snapshot as fixed-code-v1, froze the corrected fixed-code, and required the entire
+state-plan regression suite in the formal runner before its fixture/search gates.
+The original-engine formal search is unaffected; repaired-engine formal search
+had not started before this correction.
+
+Formal MTP-off comparison completed (job 775669, same H200 service): original
+530 attempts / 88 valid / 71 AST no-ops; repaired 271 attempts / 110 valid /
+0 AST no-ops / 54 attained goal cases. Local validity improved from 29/294 to
+46/96. Search time was 2803.52s versus 2641.98s, with planning included. Both
+fixed-fixture gates detected 10/10; both autonomous searches confirmed 0/10
+rediscoveries. Independent audits retained 74 and 80 unknown valid cases,
+respectively. Repaired token accounting is incomplete for a truncated response.
+Evidence: result/state-plan-repair/comparison-off.json. Two original-driver
+preflight failures (bytecode inventory, legacy relative path) are preserved;
+formal results use comparison-driver-v2.py and autonomous-final directories.
+
+Eight fixed measured requests with MTP off completed in 25.464s, 1667 output
+tokens, 8/8 JSON-shape-valid responses (not semantic correctness). Request hash
+and raw responses/metrics are preserved. No requests remained running/waiting
+before shutdown. Job 775669 and its test step completed, service step cancelled
+by normal cleanup; allocation 02:12:21 at two GPUs, not GPU utilization.
+MTP 1/2/3 measurements and the final repaired-engine MTP-on arm remain pending.
+
+MTP fixed-request measurements completed on the same H200 node: off 25.464s,
+MTP1 14.061s, MTP2 10.782s, MTP3 9.313s for eight measured requests after
+one warmup pass. Every setting returned 8/8 valid JSON shapes. MTP1/2/3 emitted
+1592 tokens each versus off 1667; MTP3 throughput ratio is 2.611x, batch latency
+ratio 2.734x. Draft-token acceptance including warmup: 93.22%, 87.79%, 83.46%.
+These are one-batch observations, not semantic correctness or general speedup.
+Counter deltas include warmup; pre-warmup cache history differed. All raw
+responses, metrics and startup logs are preserved in performance-comparison.json
+and referenced directories. MTP1 job 776358 and MTP2 job 776428 cleaned up;
+MTP3 job 776501 retains its healthy service for the final formal arm. Selected
+configuration is result/state-plan-repair/selected-serving.env. Native MTP,
+CUDA graphs, FlashAttention/FlashInfer and prefix caching are visible in logs.
+
+All three formal arms completed. Repaired engine + MTP3 (776501): 454 attempts,
+174 runtime-valid, 93 attained goal cases, 81 applicable comparisons and 93
+coverage-only cases, 0 AST no-ops, 1 suspected failure. Search time 2802.10s;
+valid cases/s 0.062096 versus repaired/off 0.041636 and original/off 0.031389.
+All three fixed fixture/control gates passed 10/10, including benchmark regressions.
+The fixed automatic independent audit confirmed 0/10 rediscoveries in each arm;
+unknown valid audits were 74 / 80 / 143 and remain unadjudicated.
+
+Additional post-hoc confirmation: generated slogdet case 204407/attempt-0038
+(fresh canonical plus negative representation MR) reproduced the known gradient
+failure. Immutable replay passed and reproduced saved observations. A minimized
+2x2 real-matrix test used exact Python Fraction cofactors as an independent
+inverse-transpose derivative. Four negative-bit cases (float32/64, log-only and
+sign+log losses) yielded an incorrect transposed gradient, max absolute error 0.5.
+Twenty controls passed: direct, materialized, identical-stride non-negative, and
+identity transformation derivatives. All logical inputs/forward results agreed.
+The original source gradient matches the analytic derivative, follow-up does not.
+This is one additional manually corroborated benchmark rediscovery; automatic
+metrics are intentionally unchanged. See posthoc-confirmation.json and analytic
+review-v3/review.json. Review-v2 had an artifact filename lookup failure; preserved
+its nonzero log and reran corrected immutable v3 successfully. No evaluator edit.
+
+Remaining limitations: make_graphed_callables and torch.compile had zero valid
+canonical cases in all three arms (parameter/device/capture and configured target
+contract failures). Backward saved-tensor representation is still unsupported;
+entry representation plus verified backward relation is not an internal-kernel
+representation witness. Fixed-off token usage is incomplete for a truncated
+response. One seed and one short performance batch do not establish general or
+causal gains. No new framework defect is claimed.
+
+Phase implementation, regressions, real-model smokes, MTP selection, formal arms,
+and reproduction/corroboration are complete. Final cleanup/accounting verification
+is in progress; results: result/state-plan-repair/comparison.json and
+performance-comparison.json. Selected config: selected-serving.env.
+
+Final verification complete: jobs 775669, 776358, 776428, 776501 are COMPLETED;
+all owned test/service steps exited, PTY sessions closed, and each service had
+zero running/waiting requests before shutdown. Disposable test caches removed.
+Four service starts / three configuration changes / zero failure restarts.
+Allocation total 12023 seconds at two GPUs = 6.6794 allocated GPU-hours, not
+utilization. Individual startup/iteration/Slurm accounting is saved separately
+in execution-ledger.json; overlapping durations are not added as wall time.
+Final git diff --check, serving shell syntax, and byte-for-byte comparison of
+89 frozen source/test/benchmark/script files passed. No source changes after
+formal freezing. All approved phases are complete; no service remains running.

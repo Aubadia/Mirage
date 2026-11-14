@@ -6,6 +6,7 @@ from typing import Protocol
 
 
 class Stage(StrEnum):
+    STATE_GOAL = "state_goal"
     CANONICAL = "canonical"
     TRANSITION = "transition"
 

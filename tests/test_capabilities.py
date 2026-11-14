@@ -24,7 +24,13 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(TypeError): Evidence("verified")
         with self.assertRaises(ValueError): InputCoverage(("issue-specific-input",))
         with self.assertRaises(ValueError): StatePredicate("unknown", "x", 0, "final")
-        self.assertEqual(set(p.dimension for p in INITIAL_PREDICATES), set(STATE_DIMENSIONS))
+        self.assertEqual(set(p.dimension for p in INITIAL_PREDICATES),
+                         set(STATE_DIMENSIONS) - {"representation", "data"})
+        for dimension in ("representation", "data"):
+            with self.assertRaisesRegex(ValueError, "call index"):
+                StatePredicate(dimension, "dtype", "torch.float32", "final")
+        with self.assertRaisesRegex(ValueError, "Scoped"):
+            StatePredicate("gradient", "backward_count", 2, "final", relation="target_backward_node")
         self.assertEqual(len(set(Verdict)), 5)
 
     def test_relation_requires_all_evidence_at_checkpoint(self):

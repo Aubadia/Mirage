@@ -149,3 +149,16 @@ class HTTPProviderTests(unittest.TestCase):
             for values in ({"max_tokens": 0}, {"temperature": float("nan")}, {"timeout": 0}):
                 with self.assertRaises(ValueError):
                     HTTPConfig(url, **values)
+
+
+class StatePlanPayloadTests(unittest.TestCase):
+    def test_separate_schemas_and_stable_api_prefix(self):
+        provider = HTTPProvider(HTTPConfig('http://localhost:8000/v1'))
+        for contract, field in [('state-goal-plan','plans'), ('region-patches','patches')]:
+            request = Request(Stage.STATE_GOAL, 'variable task', {'contract':contract,
+                'api_context':{'documentation':'installed spec', 'documentation_references':[{'documentation':'referenced spec'}]}})
+            payload = provider._payload(request)
+            self.assertEqual(payload['response_format']['json_schema']['schema']['required'], [field])
+            content = payload['messages'][1]['content']
+            self.assertLess(content.index('installed spec'), content.index('variable task'))
+            self.assertIn('referenced spec', content)

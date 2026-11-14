@@ -52,8 +52,8 @@ class FeedbackSampler:
         return {'attempts':0, 'valid':0, 'gain':0., 'seconds':0.}
 
     def _estimate(self, candidate):
-        family = self.families.get((candidate['api'], candidate['kind']), self._empty())
-        own = self.parents.get((candidate['api'], candidate.get('parent'), candidate['kind']), self._empty())
+        family = self.families.get((candidate['api'], candidate['kind'], candidate.get('goal')), self._empty())
+        own = self.parents.get((candidate['api'], candidate.get('parent'), candidate['kind'], candidate.get('goal')), self._empty())
         # Family evidence transfers across freshly admitted seeds; two prior trials
         # keep an untested parent from being treated as certainly good or bad.
         validity = (family['valid'] + 1) / (family['attempts'] + 2)
@@ -68,7 +68,7 @@ class FeedbackSampler:
     def choose(self, candidates, *, reason='adaptive'):
         if not candidates:
             raise ValueError('No statically plannable candidates')
-        if len({(c['api'], c.get('parent'), c['kind']) for c in candidates}) != len(candidates):
+        if len({(c['api'], c.get('parent'), c['kind'], c.get('goal')) for c in candidates}) != len(candidates):
             raise ValueError('Candidates must be distinct')
         estimates = [self._estimate(c) for c in candidates]
         total = sum(e['score'] for e in estimates)
@@ -90,8 +90,13 @@ class FeedbackSampler:
         new_units, new_pairs = units - self.seen, pairs - self.relations
         self.seen.update(units); self.relations.update(pairs)
         gain = float(bool(new_units)) + float(bool(new_pairs))
-        for table, key in ((self.families, (candidate['api'], candidate['kind'])),
-                           (self.parents, (candidate['api'], candidate.get('parent'), candidate['kind']))):
+        keys = [(self.families, (candidate['api'], candidate['kind'], candidate.get('goal'))),
+                (self.parents, (candidate['api'], candidate.get('parent'), candidate['kind'], candidate.get('goal')))]
+        if candidate.get('goal') is not None:
+            # Seed selection uses aggregate plan cost; goal selection retains its own feedback.
+            keys.extend([(self.families, (candidate['api'], candidate['kind'], None)),
+                         (self.parents, (candidate['api'], candidate.get('parent'), candidate['kind'], None))])
+        for table, key in keys:
             stats = table.setdefault(key, self._empty())
             stats['attempts'] += 1
             stats['valid'] += bool(units)

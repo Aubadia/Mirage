@@ -75,9 +75,19 @@ class HTTPProvider:
             "type": "object", "properties": {field: PROGRAM_SCHEMA["properties"][field]},
             "required": [field], "additionalProperties": False,
         }
+        if contract == "state-goal-plan":
+            from mirage.generator.state_plan import PLAN_SCHEMA
+            schema = PLAN_SCHEMA
+        elif contract == "region-patches":
+            from mirage.generator.mutation import PATCH_SCHEMA
+            schema = PATCH_SCHEMA
+        # Stable API evidence precedes per-attempt goals and patches for prefix caching.
+        context = dict(request.context)
+        api_context = context.pop('api_context', None)
+        prefix = ("Installed API specification:\n" + json.dumps(api_context, sort_keys=True) + "\n") if api_context else ""
         messages = [
             {"role": "system", "content": "Follow the supplied testing contract. Return only the requested JSON object."},
-            {"role": "user", "content": request.prompt + "\nContext:\n" + json.dumps(request.context)},
+            {"role": "user", "content": prefix + request.prompt + "\nContext:\n" + json.dumps(context)},
         ]
         if request.previous_content is not None:
             messages.extend([
