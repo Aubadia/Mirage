@@ -422,3 +422,172 @@ def run(ctx,probe):
 """
         record=execute(source,dict(CONFIG,requires_backward=False),Recorder())
         self.assertTrue(record['inspection']['valid'])
+
+
+class SemanticCoverageTests(unittest.TestCase):
+    def coverage(self, source=SOURCE, **config):
+        result = execute(source, dict(CONFIG, **config), Recorder())
+        return result, result['inspection']['semantic_coverage']
+
+    def witness(self, coverage, call=0, path=('args', 0), checkpoint='final'):
+        return next(w for w in coverage['witnesses'] if w['call'] == call
+                    and w['operand_path'] == list(path) and w['checkpoint'] == checkpoint)
+
+    def test_output_gradient_does_not_certify_node_execution(self):
+        source = SOURCE.replace('y.sum().backward()', 'torch.autograd.grad(y.sum(), y)')
+        result, coverage = self.coverage(source)
+        self.assertTrue(result['target_gradients'])
+        self.assertFalse(result['target_backward_nodes'])
+        self.assertFalse(result['backward_executed'])
+        self.assertFalse(result['inspection']['valid'])
+        relations = self.witness(coverage)['relations']
+        self.assertEqual(relations['output_gradient']['status'], 'verified')
+        self.assertEqual(relations['target_backward_node']['status'], 'unknown')
+        self.assertEqual(coverage['signatures'], [])
+
+    def test_unrelated_branch_gradient_is_not_a_target_path(self):
+        result, coverage = self.coverage(SOURCE.replace('y.sum().backward()', 'x.square().sum().backward()'))
+        self.assertIsNotNone(result['observations']['gradient'])
+        self.assertFalse(result['backward_executed'])
+        self.assertEqual(self.witness(coverage)['relations']['operand_gradient_contribution']['status'], 'unknown')
+
+    def test_zero_gradient_is_still_a_verified_path(self):
+        result, coverage = self.coverage(SOURCE.replace('y.sum().backward()', '(y * 0).sum().backward()'))
+        self.assertTrue(result['backward_executed'])
+        self.assertTrue(torch.equal(result['observations']['gradient'], torch.zeros(2, dtype=torch.float64)))
+        self.assertEqual(self.witness(coverage)['relations']['operand_gradient_contribution']['status'], 'verified')
+        self.assertEqual(coverage['correctness'], 'unassessed')
+        self.assertIsNone(coverage['denominator'])
+
+    def test_calls_and_operand_representations_cannot_be_cross_joined(self):
+        source = SOURCE.replace('    y = probe.call(torch.sin, x)',
+            '    ignored = probe.call(torch.sin, torch._neg_view(-x))\n    y = probe.call(torch.sin, x)')
+        result, coverage = self.coverage(source)
+        first, second = self.witness(coverage), self.witness(coverage, call=1)
+        self.assertTrue(first['metadata']['properties']['negative'])
+        self.assertFalse(second['metadata']['properties']['negative'])
+        self.assertEqual(first['relations']['target_backward_node']['status'], 'unknown')
+        self.assertEqual(second['relations']['target_backward_node']['status'], 'verified')
+        self.assertTrue(result['inspection']['valid'])
+
+    def test_materialization_before_target_does_not_credit_negative_bit(self):
+        source = SOURCE.replace('probe.call(torch.sin, x)', 'probe.call(torch.sin, torch._neg_view(-x).resolve_neg())')
+        _, coverage = self.coverage(source)
+        self.assertFalse(self.witness(coverage)['metadata']['properties']['negative'])
+        self.assertTrue(all(not s['representation']['negative'] for s in coverage['signatures']))
+        self.assertEqual(self.witness(coverage)['relations']['backward_representation']['status'], 'unsupported')
+
+    def test_nondifferentiable_operand_does_not_inherit_another_operand_gradient(self):
+        source = SOURCE.replace('probe.call(torch.sin, x)', 'probe.call(torch.add, x, x.detach())')
+        _, coverage = self.coverage(source, api='torch.add')
+        self.assertEqual(self.witness(coverage)['relations']['operand_gradient_contribution']['status'], 'verified')
+        other = self.witness(coverage, path=('args', 1))
+        self.assertEqual(other['relations']['operand_gradient_contribution']['status'], 'unknown')
+        self.assertEqual(other['relations']['target_backward_node']['status'], 'verified')
+
+    def test_shared_coordinate_slots_keep_operand_attribution_unknown(self):
+        source = SOURCE.replace('probe.call(torch.sin, x)', 'probe.call(torch.add, x, x)')
+        result, coverage = self.coverage(source, api='torch.add')
+        self.assertTrue(result['backward_executed'])
+        self.assertFalse(result['target_operand_gradients'])
+        self.assertEqual(self.witness(coverage)['relations']['operand_gradient_contribution']['status'], 'unknown')
+
+    def test_checkpoint_does_not_acquire_future_backward_evidence(self):
+        source = SOURCE.replace('    y.sum().backward()', "    probe.mark('before_backward')\n    y.sum().backward()")
+        _, coverage = self.coverage(source)
+        self.assertEqual(self.witness(coverage, checkpoint='before_backward')['relations']['target_backward_node']['status'], 'unknown')
+        self.assertEqual(self.witness(coverage)['relations']['target_backward_node']['status'], 'verified')
+
+    def test_incomplete_backward_does_not_certify_a_completed_path(self):
+        source = SOURCE.replace('    y.sum().backward()', '''    def fail(gradient):
+        raise RuntimeError('authored backward interruption')
+    handle = x.register_hook(fail)
+    try:
+        y.sum().backward()
+    except RuntimeError:
+        pass
+    handle.remove()''')
+        result, coverage = self.coverage(source)
+        self.assertTrue(result['target_backward_nodes'])
+        self.assertFalse(result['backward_invocations'][0]['completed'])
+        self.assertFalse(result['backward_executed'])
+        self.assertEqual(self.witness(coverage)['relations']['target_backward_node']['status'], 'unknown')
+
+    def test_normalized_signatures_ignore_variable_names_and_repeated_counts(self):
+        twice = SOURCE.replace('    y.sum().backward()', '    for _ in range(2):\n        y.sum().backward(retain_graph=True)')
+        thrice = twice.replace('range(2)', 'range(3)').replace('    y =', '    result =').replace('y.sum()', 'result.sum()').replace("'output': y", "'output': result")
+        _, left = self.coverage(twice)
+        _, right = self.coverage(thrice)
+        self.assertTrue(left['signatures'])
+        self.assertEqual(left['signatures'], right['signatures'])
+        self.assertNotEqual(left['events'], right['events'])
+
+    def test_configuration_cannot_claim_compiled_coverage(self):
+        _, coverage = self.coverage(backend='inductor')
+        self.assertTrue(all(s['execution_mode'] == 'eager' for s in coverage['signatures']))
+
+    def test_replay_compares_new_relation_evidence(self):
+        from copy import deepcopy
+        from mirage.runtime.worker import stateful_replay_evidence
+        result, _ = self.coverage()
+        changed = deepcopy(result)
+        changed['inspection']['semantic_coverage']['events']['nodes'].clear()
+        self.assertFalse(PyTorchBackend().compare(stateful_replay_evidence(result),
+                         stateful_replay_evidence(changed), 'exact')['equal'])
+
+    def test_duplicate_outputs_do_not_duplicate_node_execution(self):
+        from mirage.runtime.stateful import Probe
+        from mirage.runtime.operands import discover
+        x = torch.tensor([1.], requires_grad=True)
+        probe = Probe(torch.sin, {'parameters': {'x': x}}, CONFIG, Recorder())
+        probe.calls.append({'index': 0})
+        y = torch.sin(x)
+        probe.observe_outputs(0, [('first', y), ('second', y)],
+                              probe._backend.gradient_edges(discover({'args': (x,)}, probe._backend)))
+        try:
+            y.sum().backward()
+            self.assertEqual(len(probe.backward), 2)
+            self.assertEqual(len(probe.backward_nodes), 1)
+        finally:
+            probe.close()
+        self.assertEqual(probe._hook_handles, [])
+
+    def test_unknown_legacy_backward_flag_is_not_runtime_proof(self):
+        from mirage.inspector.stateful import inspect_state
+        result, _ = self.coverage()
+        del result['target_backward_nodes']
+        self.assertTrue(result['backward_executed'])
+        self.assertFalse(inspect_state(result)['required_backward_executed'])
+
+    def test_target_entry_context_is_distinct_from_final_checkpoint(self):
+        source = SOURCE.replace('    y = probe.call(torch.sin, x)',
+                                '    with torch.no_grad():\n        y = probe.call(torch.sin, x)')
+        source = source.replace('    y.sum().backward()\n', '')
+        result, coverage = self.coverage(source, requires_backward=False)
+        witness = self.witness(coverage)
+        self.assertFalse(witness['entry_context']['grad_enabled'])
+        self.assertTrue(witness['state_facts']['context.grad_enabled'])
+        self.assertTrue(result['inspection']['valid'])
+
+    def test_compiled_composite_output_keeps_backward_attribution_unknown(self):
+        source = SOURCE.replace('    y = probe.call(torch.sin, x)',
+            "    compiled = torch.compile(lambda value: torch.sin(value) * 2, backend='eager', fullgraph=True)\n    y = compiled(x)")
+        result, coverage = self.coverage(source)
+        self.assertTrue(result['api_executed'])
+        self.assertTrue(result['target_gradients'])
+        self.assertFalse(result['backward_executed'])
+        self.assertFalse(result['target_calls'][0]['target_operands_observed'])
+        self.assertFalse(coverage['eligible'])
+
+    def test_observation_hooks_are_removed_after_failed_run(self):
+        from mirage.runtime.stateful import Probe
+        from unittest.mock import patch
+        closed = []
+        original = Probe.close
+        def close(probe):
+            original(probe)
+            closed.append(probe)
+        with patch.object(Probe, 'close', close), self.assertRaisesRegex(RuntimeError, 'authored failure'):
+            self.coverage(SOURCE.replace('    y.sum().backward()', "    raise RuntimeError('authored failure')"))
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]._hook_handles, [])

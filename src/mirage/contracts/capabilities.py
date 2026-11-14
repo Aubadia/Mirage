@@ -4,6 +4,7 @@ from enum import StrEnum
 from typing import Any
 
 CONTRACT_VERSION = "stateful-1"
+SEMANTIC_COVERAGE_VERSION = "state-semantic-1"
 STATE_DIMENSIONS = ("gradient", "context", "graph_lifecycle", "execution_mode")
 INPUT_CATEGORIES = ("ordinary", "zero", "small_finite", "large_finite", "repeated",
                     "nonuniform", "mixed_sign", "singleton", "broadcast", "supported_layout")
@@ -135,3 +136,20 @@ INITIAL_PREDICATES = (
     StatePredicate("graph_lifecycle", "target_backward_count", 2, "final"),
     StatePredicate("execution_mode", "compiled_execution", True, "final"),
 )
+
+
+@dataclass(frozen=True)
+class PathEvidence:
+    """A scoped relation; unknown observations never become positive coverage."""
+    status: EvidenceStatus
+    reason: str
+    events: tuple[int, ...] = ()
+
+    def __post_init__(self):
+        if not isinstance(self.status, EvidenceStatus):
+            raise TypeError("Use an explicit EvidenceStatus")
+        if self.status == EvidenceStatus.VERIFIED and not self.events:
+            raise ValueError("Verified paths require runtime event references")
+
+    def record(self):
+        return {'status': self.status.value, 'reason': self.reason, 'events': list(self.events)}

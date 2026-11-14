@@ -219,7 +219,7 @@ def analyze_stateful(source):
             "determinism": "runtime_evidence_required"}
 
 
-def stateful_request(metadata, configuration, *, edges=True, canonical=None, predicates=(), relation=None):
+def stateful_request(metadata, configuration, *, edges=True, canonical=None, predicates=(), relation=None, mutation=None):
     import copy
     context = copy.deepcopy(metadata)
     raw = context.get("documentation", "")
@@ -287,14 +287,48 @@ def stateful_request(metadata, configuration, *, edges=True, canonical=None, pre
         "members; actual target values, not comments describing them as small/large, establish coverage. "
         "If a requested capability is unavailable, preserve legal coverage and do not invent evidence."
     )
+    if mutation is not None:
+        if canonical is None:
+            raise ContractError("A local mutation requires its immutable parent source")
+        prompt = prompt.replace(
+            "Return one JSON object with exactly source (a complete Python source string). ",
+            "Return one JSON object with exactly source (replacement Python statements for the editable region only). ")
+        prompt = prompt.replace(
+            "canonical_source is a starting point, not a mandatory program structure. Rewrite it as needed to reach the supplied predicates at ",
+            "canonical_source is an immutable parent. Edit only mutation_contract.editable_region to reach predicates at ")
+        region = mutation['editable_region']
+        location = f"{region['function']} body statements [{region['start']}:{region['stop']}]"
+        instructions = {
+            'operand_setup': "Insert operand preparation immediately before the existing target call. "
+                "The target call and all following loss/backward/return statements stay in place. "
+                "Do not include probe.call, backward, grad, return or unrelated setup statements.",
+            'initialization': "Replace only the selected build assignment, preserving the names needed by "
+                "the remaining build statements. Do not include the build return, run body or target call.",
+            'run_tail': "Replace only the suffix after the last protected target call. Its output variables "
+                "already exist. Do not repeat that call or its earlier setup; include the required return."
+        }
+        prompt = ("LOCAL EDIT TASK: Return source containing only statements for " + location + ". "
+                  "These are zero-based top-level statement indices, not line numbers. Equal bounds "
+                  "mean insertion into an empty region, not replacement of the whole function. "
+                  + instructions[mutation['kind']] + " The build/run rules below constrain the assembled "
+                  "parent plus edit; they do not ask you to generate those functions again.\n\n" + prompt)
+        prompt += ("\nLOCAL MUTATION: The build/run requirements above describe the assembled program. "
+                   "Return only unindented replacement statements for mutation_contract.editable_region. "
+                   "Do not return imports, a complete program, or definitions of build/run. "
+                   "Mirage preserves all other statements and the original target calls. "
+                   "Respect the supplied edit budget and preserved obligations. For run_tail include "
+                   "a return of the required observables. The parent/child pair is exploration lineage, "
+                   "not an MR pair. Each child's MR applicability is independently checked at runtime.")
     if edges: prompt += "\n\n" + EDGE_CASE_PROMPT
     return Request(Stage.TRANSITION if canonical else Stage.CANONICAL, prompt,
                    {"contract": "training-program", "program_kind": "stateful-1", "api_context": context, "configuration": configuration,
                     "canonical_source": canonical, "state_predicates": list(predicates),
+                    "mutation_contract": copy.deepcopy(mutation),
                     "state_measurement_units": {
                         "target_boundary_count": "Completed eager probe target boundaries or executed target-containing compiler graph boundaries. For a factory, construction is one boundary; using a returned context is measured separately.",
                         "backward_count": "Observed backward/grad invocations in run.",
                         "target_backward_count": "Observed target-connected output gradient events.",
+                        "target_backward_node_count": "Attributable backward Node execution events; output gradients alone do not prove target backward.",
                         "restoration_count": "Observed balanced enter/exit scopes of the target context type.",
                         "compiled_execution": "True only after a graph produced by an explicit torch.compile call actually executes. Supported backends: eager, aot_eager, inductor; choose your own legal computation and history."},
                     "input_category_definitions": {
@@ -305,5 +339,5 @@ def stateful_request(metadata, configuration, *, edges=True, canonical=None, pre
                     "relation_requirements": relation or {
                         "representation": "Preserve initial logical inputs and training semantics; expose target outputs and registered parameter gradients. Applicability is checked at runtime, including write roles and gradient coordinates.",
                         "context_restore": "Expose genuine entry/exit scopes; the original context contract determines restoration, not generated expected answers.",
-                        "execution_mode": "Use source-owned compilation/capture when selected. Expose output, parameter gradients and related alias partners. The same authored computation is compared under certified execution configurations."}, "prompt_version": ("stateful-3" if graph_guidance else "stateful-2") + ("-edges" if edges else "-base"),
+                        "execution_mode": "Use source-owned compilation/capture when selected. Expose output, parameter gradients and related alias partners. The same authored computation is compared under certified execution configurations."}, "prompt_version": ("stateful-5-local" if mutation is not None else ("stateful-3" if graph_guidance else "stateful-2")) + ("-edges" if edges else "-base"),
                     "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()})

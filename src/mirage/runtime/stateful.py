@@ -6,7 +6,7 @@ import math
 from mirage.generator.program import analyze_stateful, ContractError
 from mirage.contracts.programs import validate_checkpoint_data, bind_call
 from mirage.contracts.capabilities import EvidenceStatus, MutationObligations
-from mirage.backends.pytorch import PyTorchBackend
+from mirage.backends.pytorch import PyTorchBackend, context_state
 from mirage.runtime.operands import discover, candidates, apply, canonicalize
 from mirage.runtime.api_metadata import resolve
 from mirage.runtime.program import leaves
@@ -76,6 +76,9 @@ class Probe:
         self._target, self._ctx, self._config, self._recorder = target, ctx, config, recorder
         self._backend = PyTorchBackend()
         self.calls, self.checkpoints, self.backward = [], [], []
+        self.backward_nodes, self.operand_gradients, self.backward_invocations = [], [], []
+        self._backward_invocation = None
+        self._hook_handles = []
         self.mutations, self.candidates = [], []
         self.operations = []
         self.context_events = []
@@ -101,6 +104,7 @@ class Probe:
             'gradient.none': bool(gradient_values) and all(g is None for g in gradient_values),
             'gradient.zero': bool(gradient_values) and all(g is not None and bool((g == 0).all()) for g in gradient_values),
             'graph_lifecycle.target_backward_count': len(self.backward),
+            'graph_lifecycle.target_backward_node_count': len(self.backward_nodes),
             'graph_lifecycle.target_call_count': len(self.calls),
             'graph_lifecycle.target_boundary_count': len(self.calls),
         }
@@ -108,9 +112,52 @@ class Probe:
             data['state_facts']['execution_mode.compiled_execution'] = True
         if self.capture_replays:
             data['state_facts']['execution_mode.captured_execution'] = True
+        data['completed_backward_invocations'] = [e['index'] for e in self.backward_invocations if e['completed']]
+        data['evidence_offsets'] = {'calls': len(self.calls), 'outputs': len(self.backward),
+                                    'nodes': len(self.backward_nodes), 'operands': len(self.operand_gradients),
+                                    'invocations': len(self.backward_invocations)}
         data['observable_metadata'] = [asdict(d) for d, _ in discover(values, self._backend)]
         self.checkpoints.append(data)
         self._recorder.emit("checkpoint", name=name, grad_enabled=data['grad_enabled'])
+
+    @observational
+    def observe_outputs(self, index, outputs, input_edges, *, node_admissible=True, boundary=False):
+        """Keep output-gradient and Node-execution evidence independent."""
+        bindings, seen = [], set()
+        for path, tensor in outputs:
+            if not tensor.requires_grad:
+                continue
+            def observe(gradient, i=index, p=path):
+                event = {"call": i, "path": p, "invocation": self._backward_invocation}
+                self.backward.append(event)
+                self._recorder.emit("target_output_gradient", **event)
+                return gradient
+            self._hook_handles.append(tensor.register_hook(observe))
+            node, links, reason = self._backend.backward_binding(tensor, input_edges, boundary=boundary)
+            if not node_admissible:
+                node, links, reason = None, [], "target backward attribution unsupported for this graph"
+            bindings.append({'output_path': path, 'status': 'verified' if node is not None else 'unknown',
+                             'reason': reason, 'operand_paths': [list(p) for _, p in links]})
+            if node is None or node in seen:
+                continue
+            seen.add(node)
+            node_index = len(seen) - 1
+            def node_executed(grad_inputs, grad_outputs, i=index, n=node_index, edges=tuple(links)):
+                event = {'call': i, 'node': n, 'invocation': self._backward_invocation}
+                self.backward_nodes.append(event)
+                self._recorder.emit('target_backward', **event)
+                for slot, operand_path in edges:
+                    if slot < len(grad_inputs) and grad_inputs[slot] is not None:
+                        contribution = dict(event, path=list(operand_path), slot=slot)
+                        self.operand_gradients.append(contribution)
+                        self._recorder.emit('target_operand_gradient', **contribution)
+            self._hook_handles.append(node.register_hook(node_executed))
+        self.calls[index]['backward_bindings'] = bindings
+
+    def close(self):
+        for handle in self._hook_handles:
+            handle.remove()
+        self._hook_handles.clear()
 
     @observational
     def call(self, target, *args, **kwargs):
@@ -157,6 +204,8 @@ class Probe:
         shapes = [d.shape for d, _ in operands]
         for item, shape in zip(properties, shapes):
             item['facts']['broadcast'] = any(shape != other and _broadcastable(shape, other) for other in shapes)
+        input_edges = self._backend.gradient_edges(operands)
+        entry_context = dict(context_state(), inference_enabled=torch.is_inference_mode_enabled())
         self.operations.append({'name': 'target_enter'})
         self._recorder.emit("api_enter", call=index, metadata=descriptors)
         self._observing = False
@@ -168,17 +217,14 @@ class Probe:
                            "output": snapshot(output) if isinstance(output, (torch.Tensor, dict, list, tuple, int, float, str, bool, type(None)))
                                      else {'opaque_type':type(output).__qualname__},
                            "binding": evidence_record(binding), "input_properties": properties,
+                           "execution_mode": "eager", "entry_context": entry_context,
                            "write_effects": [list(d.path) for (d,t),(_,v) in zip(operands,versions) if v is not None and tensor_version(t) != v],
                            "writable_paths": writable_paths})
         self._recorder.emit("api_exit", call=index)
         self.operations.append({'name': 'target_return'})
-        for path, tensor in leaves(output):
-            if tensor.requires_grad:
-                def observe(gradient, i=index, p=path):
-                    self.backward.append({"call": i, "path": p})
-                    self._recorder.emit("target_backward", call=i, path=p)
-                    return gradient
-                tensor.register_hook(observe)
+        import inspect
+        self.observe_outputs(index, leaves(output), input_edges,
+                             node_admissible=inspect.isbuiltin(target) or inspect.ismethoddescriptor(target))
         return output
 
 
@@ -229,7 +275,18 @@ def execute(source, config, recorder, initial_reference=None):
     class ObserveActions(TorchFunctionMode):
         def __torch_function__(self, func, types, args=(), kwargs=None):
             name = getattr(func, '__name__', str(func))
-            result = func(*args, **(kwargs or {}))
+            backward = not probe._observing and name in ('backward', 'grad') and probe._backward_invocation is None
+            if backward:
+                invocation = {'index': len(probe.backward_invocations), 'kind': name, 'completed': False}
+                probe.backward_invocations.append(invocation)
+                probe._backward_invocation = invocation['index']
+            try:
+                result = func(*args, **(kwargs or {}))
+                if backward:
+                    invocation['completed'] = True
+            finally:
+                if backward:
+                    probe._backward_invocation = None
             if not probe._observing and name in ('backward', 'grad', 'zero_', 'detach', 'detach_', 'requires_grad_'):
                 if len(probe.operations) >= 4096:
                     raise ContractError('Observed action budget exceeded')
@@ -237,15 +294,18 @@ def execute(source, config, recorder, initial_reference=None):
                 recorder.emit('training_action', name=name)
             return result
     from mirage.backends.pytorch import ContextObserver, CompilerObserver, CaptureObserver, OptimizerObserver, capture_source_certificate, execution_source_certificate
-    with ContextObserver(probe._target, probe.context_events, lambda name: probe.operations.append({'name':name})) as contexts:
-        with CompilerObserver(probe, namespace, config) as compiler, CaptureObserver(probe, namespace, config) as capture:
-            probe.compiled_graphs = compiler.graphs
-            probe.capture_replays = capture.replays
-            with ObserveActions() as action_observer, OptimizerObserver(ctx.get('optimizer'), lambda name: probe.operations.append({'name':name})):
-                probe._action_observer = action_observer
-                output = namespace['run'](ctx, probe)
-        probe.mark('final', output)
-        final_training_state = training_snapshot(ctx)
+    try:
+        with ContextObserver(probe._target, probe.context_events, lambda name: probe.operations.append({'name':name})) as contexts:
+            with CompilerObserver(probe, namespace, config) as compiler, CaptureObserver(probe, namespace, config) as capture:
+                probe.compiled_graphs = compiler.graphs
+                probe.capture_replays = capture.replays
+                with ObserveActions() as action_observer, OptimizerObserver(ctx.get('optimizer'), lambda name: probe.operations.append({'name':name})):
+                    probe._action_observer = action_observer
+                    output = namespace['run'](ctx, probe)
+            probe.mark('final', output)
+            final_training_state = training_snapshot(ctx)
+    finally:
+        probe.close()
     final_rng = rng_state(config['device'])
     rng_unchanged = PyTorchBackend().compare(initial_rng, final_rng, 'exact')['equal'] is True
     result = {"version": "stateful-1", "environment": environment, "run_rng_unchanged": rng_unchanged,
@@ -253,13 +313,16 @@ def execute(source, config, recorder, initial_reference=None):
             "initial": initial, "initial_metadata": initial_metadata, "final_training_state": final_training_state,
             "program_certificate": PyTorchBackend().program_certificate(source), "observations": snapshot(output), "checkpoints": probe.checkpoints,
             "target_calls": probe.calls, "target_gradients": probe.backward,
+            "target_backward_nodes": probe.backward_nodes, "target_operand_gradients": probe.operand_gradients,
+            "backward_invocations": probe.backward_invocations,
             "compiled_graphs": probe.compiled_graphs, "capture_replays": capture.replays,
             "capture_factories": capture.factory_records, "reference_substitutions": capture.substitutions,
             "capture_source_certificate": capture_source_certificate(source),
             "execution_source_certificate": execution_source_certificate(source),
             "context_events": probe.context_events, "context_contract": contexts.supported,
             "mutation_candidates": probe.candidates, "mutations": probe.mutations,
-            "api_executed": bool(probe.calls) and not bool(capture.substitutions), "backward_executed": bool(probe.backward),
+            "api_executed": bool(probe.calls) and not bool(capture.substitutions), "backward_executed": any(e["invocation"] is not None and
+                probe.backward_invocations[e["invocation"]]["completed"] for e in probe.backward_nodes),
             "initialization_rng_changed": rng_changed,
             "determinism": "unresolved" if rng_changed or graph['initialization_review'] else "not_certified",
             "correctness": "unassessed", "verdict": None,

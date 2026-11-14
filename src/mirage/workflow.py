@@ -516,8 +516,9 @@ def replay_property(path, *, timeout, allow_environment_change=False, cancel=Non
 
 
 
-def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="backward", coverage_refinement=True):
-    """Full-program generation, runtime mutation and conditional MR assessment.
+def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="backward", coverage_refinement=True,
+                 search_policy="adaptive", generation_mode="local", coverage_basis="semantic"):
+    """Corpus-guided local generation, runtime mutation and conditional MR assessment.
 
     API/issue benchmark data never enters this path. Every candidate and repair
     retains its request, response and execution evidence under one bounded run.
@@ -527,6 +528,12 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
     from mirage.contracts.exploration import stateful_input_profile, stateful_state_predicates, stateful_diversity_predicates
     from mirage.generator.provider import ProviderFailure
     from mirage.inspector.stateful import failure_record, input_category_feedback
+    from mirage.generator.mutation import plan_mutation, apply_mutation
+    from mirage.artifacts.corpus import Corpus
+    from mirage.sampler.policy import FeedbackSampler
+    from mirage.artifacts.report import summarize_search
+    if search_policy not in ('adaptive', 'round_robin') or generation_mode not in ('local', 'full') or coverage_basis not in ('semantic', 'transition'):
+        raise ValueError('Unsupported stateful search treatment')
     if path_policy not in ('backward','mixed'):
         raise ValueError('Unsupported stateful path policy')
     root = Path(options.output).resolve()
@@ -547,7 +554,12 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
     metadata_seconds = time.monotonic()-metadata_started
     started = time.monotonic(); deadline = started+options.time_limit
     pending = None; repair_count = 0; stop = 'case_limit'
-    canonicals, signatures, canonical_evidence = {}, {}, {}
+    corpus = Corpus(root, coverage_basis=coverage_basis)
+    feedback = FeedbackSampler(seed=options.seed, epsilon=options.epsilon, coverage_basis=coverage_basis)
+    source_cache = {}
+    pending_selection = None
+    corpus.save()
+    signatures, proposal_counts = {}, Counter()
     dispatch_reserve = 10.
     input_index = 0
     for index in range(options.cases):
@@ -555,43 +567,119 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
             dispatch_reserve = max(10., 1.5*max(r['finished_seconds']-r['started_seconds'] for r in rows)+5.)
         if deadline-time.monotonic() <= dispatch_reserve:
             stop = 'time_limit'; break
-        api = apis[index % len(apis)]
-        config = {'api':api, 'device':options.device, 'seed':options.seed, 'attempt':index, 'proposal_index':input_index,
-                  'requires_backward':not options.forward_only and (path_policy != 'mixed' or index % 3 != 0) and not metadata[api].get('callable_capabilities',{}).get('context_manager_factory',False),
-                  'input_categories':list(stateful_input_profile(input_index).requested),
-                  'predicates':(list(predicates) if predicates is not None else
-                                stateful_state_predicates(canonical_evidence[api], input_index)) if api in canonicals else [],
-                  'canonical_reference':bool(index % 2)}
-        if not config['requires_backward'] and predicates is None:
-            config['predicates'] = [p for p in config['predicates'] if p['dimension'] == 'context']
-        config['predicates'] = stateful_diversity_predicates(config['predicates'],input_index)
-        request = stateful_request(metadata[api], config, edges=edges, predicates=config['predicates'],
-                                   canonical=canonicals.get(api))
-        request.context['prior_transition_signatures'] = signatures.get(api, [])[-8:]
         if pending:
-            request = pending; config = dict(request.context['configuration']); api = config['api']; pending = None
+            request = pending
+            choice, selection = pending_selection
+            config = dict(request.context['configuration'])
+            api = config['api']
+            pending = None
         else:
+            mutation = None
+            if search_policy == 'adaptive':
+                candidates = [{'api':a, 'parent':None, 'kind':'fresh'} for a in apis]
+                for entry in corpus.entries:
+                    if not entry['active']:
+                        continue
+                    if entry['id'] not in source_cache:
+                        source_cache[entry['id']] = corpus.source(entry)
+                    goals = list(predicates) if predicates is not None else stateful_state_predicates(entry['evidence'], input_index)
+                    needs_full = generation_mode == 'full' or any(p['dimension'] == 'execution_mode' and p['expected'] is True for p in goals)
+                    for kind in (('full',) if needs_full else ('run_tail', 'operand_setup', 'initialization')):
+                        if kind == 'full' or plan_mutation(source_cache[entry['id']], entry['id'], input_index, kind=kind):
+                            candidates.append({'api':entry['configuration']['api'], 'parent':entry['id'], 'kind':kind})
+                known_count = len(candidates)
+                unseen = next((a for a in apis if not proposal_counts[a]), None)
+                if unseen:
+                    candidates = [c for c in candidates if c['api'] == unseen and c['kind'] == 'fresh']
+                    selection_reason = 'api_bootstrap'
+                elif input_index % 4 == 0:
+                    candidates = [c for c in candidates if c['kind'] == 'fresh']
+                    selection_reason = 'fresh_generation_quota'
+                else:
+                    selection_reason = 'adaptive'
+                choice, selection = feedback.choose(candidates, reason=selection_reason)
+                selection['known_candidate_count'] = known_count
+                api = choice['api']
+                parent = corpus.select(api, seed_id=choice['parent']) if choice['parent'] else None
+            else:
+                api = apis[index % len(apis)]
+                parent = corpus.select(api) if proposal_counts[api] % 4 else None
+                choice = {'api':api, 'parent':parent['id'] if parent else None, 'kind':'fresh'}
+                selection = {'policy':'round_robin', 'candidate_count':1, 'selected_probability':1.}
+            proposal = proposal_counts[api]
+            proposal_counts[api] += 1
+            config = {'api':api, 'device':options.device, 'seed':options.seed, 'attempt':index, 'proposal_index':input_index,
+                      'requires_backward':not options.forward_only and (path_policy != 'mixed' or index % 3 != 0)
+                          and not metadata[api].get('callable_capabilities',{}).get('context_manager_factory',False),
+                      'input_categories':list(stateful_input_profile(input_index).requested),
+                      'predicates':list(predicates) if predicates is not None else
+                          (stateful_state_predicates(parent['evidence'], input_index) if parent else []),
+                      'canonical_reference':bool(index % 2)}
+            if parent and parent['evidence'].get('backward_executed'):
+                config['requires_backward'] = True
+            if not config['requires_backward'] and predicates is None:
+                config['predicates'] = [p for p in config['predicates'] if p['dimension'] == 'context']
+            config['predicates'] = stateful_diversity_predicates(config['predicates'],input_index)
+            mutation, parent_source = None, None
+            reason = 'periodic_fresh_generation' if proposal % 4 == 0 else 'no_verified_seed'
+            if parent:
+                parent_source = corpus.source(parent)
+                mutation = plan_mutation(parent_source, parent['id'], proposal - 1,
+                                         kind=choice['kind'] if search_policy == 'adaptive' and choice['kind'] != 'full' else None)
+                if generation_mode == 'full' or choice['kind'] == 'full':
+                    mutation = None
+                    reason = 'full_regeneration'
+                elif any(p['dimension'] == 'execution_mode' and p['expected'] is True for p in config['predicates']):
+                    mutation = None
+                    reason = 'execution_mode_goal_requires_fresh_structure'
+                elif mutation is None:
+                    reason = 'no_bounded_edit_region'
+                else:
+                    reason = 'local_mutation'
+                    mutation['required_backward_calls'] = parent['evidence'].get('backward_calls', [])
+                    mutation['desired_coverage'] = {'predicates':config['predicates'], 'input_categories':config['input_categories']}
+                choice = dict(choice, kind=mutation['kind'] if mutation else 'full')
+            request = stateful_request(metadata[api], config, edges=edges, predicates=config['predicates'],
+                                       canonical=parent_source, mutation=mutation)
+            request.context['generation_parent_id'] = parent['id'] if parent else None
+            request.context['generation_reason'] = reason
+            request.context['prior_transition_signatures'] = signatures.get(api, [])[-8:]
             input_index += 1
+        mutation = request.context.get('mutation_contract')
+        parent_id = request.context.get('generation_parent_id') or (mutation['parent_id'] if mutation else None)
         directory = root/f'attempt-{index:04d}';directory.mkdir()
         write_json(directory/'request.json', asdict(request))
         row = {'attempt':index, 'api':api, 'directory':str(directory), 'generated':False,
                'contract_valid':False, 'executable':False, 'api_executed':False,
                'repair_index':repair_count, 'refinement_kind':request.context.get('refinement_kind'), 'started_seconds':time.monotonic()-started,
-               'configuration':config, 'verdict':None, 'generation_stage':request.stage.value}
-        phase = 'generation'; response = None; repairable = False; coverage_feedback = None
+               'configuration':config, 'verdict':None, 'generation_stage':request.stage.value,
+               'generation_reason':request.context.get('generation_reason'), 'parent_seed_id':parent_id,
+               'generation_mode':'local' if mutation else 'full', 'selection':selection, 'candidate':choice}
+        phase = 'generation'; response = None; repairable = False; coverage_feedback = None; edit = None
         try:
             response = provider.generate(request, deadline=deadline)
             write_json(directory/'response.json', asdict(response))
+            row['generation_usage'] = asdict(response.usage)
             phase = 'parse'
             value = json.loads(response.content)
             if not isinstance(value, dict) or set(value) != {'source'}:
                 raise ContractError('Response must have exactly the source field')
             source = value['source']; row['generated'] = True
-            (directory/'raw-program.py').write_text(source)
-            from mirage.generator.repair import normalize_source_delimiter
-            source, normalization = normalize_source_delimiter(source)
-            row['source_normalization'] = normalization
-            row['raw_syntax_valid'] = normalization is None
+            if not isinstance(source, str):
+                raise ContractError('source must be a Python string')
+            if mutation:
+                (directory/'replacement.py').write_text(source)
+                phase = 'static_contract'
+                source, edit = apply_mutation(request.context['canonical_source'], source, mutation)
+                write_json(directory/'edit.json', edit)
+                row['source_normalization'] = None
+                row['raw_syntax_valid'] = True
+            else:
+                (directory/'raw-program.py').write_text(source)
+                from mirage.generator.repair import normalize_source_delimiter
+                source, normalization = normalize_source_delimiter(source)
+                row['source_normalization'] = normalization
+                row['raw_syntax_valid'] = normalization is None
             (directory/'program.py').write_text(source)
             phase = 'static_contract'; graph = analyze_stateful(source)
             row.update(contract_valid=True, fingerprint=graph['fingerprint'])
@@ -606,6 +694,10 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
             outcome_path = directory/'execution/summary.json'
             if process.outcome == 'completed' and outcome_path.exists():
                 outcome = json.loads(outcome_path.read_text()); row.update(outcome, status='executed', executable=True)
+                required_calls = set(mutation.get('required_backward_calls', [])) if mutation else set()
+                backward_calls = {w['call'] for w in outcome.get('inspection', {}).get('semantic_coverage', {}).get('witnesses', [])
+                                  if w['checkpoint'] == 'final' and w['relations']['target_backward_node']['status'] == 'verified'}
+                row['mutation_obligations_valid'] = required_calls <= backward_calls
                 if not outcome.get('inspection', {}).get('valid'):
                     check = outcome.get('inspection', {})
                     blocking = ('target_return' if not check.get('api_executed') else
@@ -613,17 +705,14 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                     row.update(failure_record(blocking, 'Required runtime evidence missing: '+json.dumps(check)))
                     repairable = True
                 else:
-                    canonicals.setdefault(api, source)
-                    if api not in canonical_evidence:
-                        canonical_evidence[api] = dict(outcome)
-                    else:
-                        canonical_evidence[api]['backward_executed'] |= outcome.get('backward_executed',False)
-                        if 'context_exit' in outcome.get('transition_signature',[]):
-                            canonical_evidence[api]['transition_signature'] = outcome['transition_signature']
                     signature = outcome.get('transition_signature', [])
                     if signature not in signatures.setdefault(api, []): signatures[api].append(signature)
-                    coverage_feedback = input_category_feedback(outcome) if coverage_refinement else None
-                    if coverage_feedback: row['coverage_refinement_requested'] = coverage_feedback
+                    if not row['mutation_obligations_valid']:
+                        row.update(failure_record('backward', 'Mutation lost a protected target backward path'))
+                        repairable = True
+                    else:
+                        coverage_feedback = input_category_feedback(outcome) if coverage_refinement else None
+                        if coverage_feedback: row['coverage_refinement_requested'] = coverage_feedback
             else:
                 # Exception location is not inferred from worker exit alone.
                 row.update(status='execution_failed', reason=process.error,
@@ -641,14 +730,16 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                 if session: (Path(session)/'cancellation-unconfirmed').write_text(str(error))
         except Exception as error:
             row.update(status='unresolved', reason=f'{type(error).__name__}: {error}')
-        if (repairable or coverage_feedback) and response is not None and repair_count < 2:
+        if repairable and row.get('verdict') != 'suspected_failure' and response is not None and repair_count < 2:
             repair_count += 1
-            diagnostic=row.get('reason','contract violation') if repairable else 'The requested input category was not observed at the target. Use its measured dtype thresholds and actual operands to generate a new legal case. '+json.dumps(coverage_feedback)
-            context=dict(request.context,refinement_kind='contract_or_state' if repairable else 'input_coverage')
+            diagnostic=row.get('reason','contract violation')
+            context=dict(request.context,refinement_kind='contract_or_state')
             pending = replace(request, context=context,previous_content=response.content, diagnostic=diagnostic)
+            pending_selection = (choice, {'policy':'contract_repair', 'candidate_count':1, 'selected_probability':1.})
         else:
             repair_count = 0
         row['finished_seconds'] = time.monotonic()-started
+        row['search_feedback'] = feedback.observe(choice, row)
         write_json(directory/'outcome.json', row);rows.append(row)
         if (directory/'execution/source.pt').exists():
             write_json(directory/'stateful-manifest.json', {
@@ -656,14 +747,34 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                 'engine':str(root/'engine'), 'engine_inventory':inventory(root/'engine'),
                 'files':inventory(directory), 'initial_reference':'execution/source.pt',
                 'expected_verdict':row.get('verdict')})
+            row['corpus_admission'] = corpus.admit(source, row, directory/'stateful-manifest.json',
+                                                   parent_id=parent_id, edit=edit)
+            if (generation_mode == 'local' and coverage_feedback and row['corpus_admission'].get('admitted') and not repairable
+                    and row.get('verdict') != 'suspected_failure' and request.context.get('refinement_kind') != 'input_coverage'):
+                refinement = plan_mutation(source, row['corpus_admission']['seed_id'], input_index, kind='initialization')
+                if refinement is not None:
+                    refinement['required_backward_calls'] = sorted(backward_calls)
+                    refinement['desired_coverage'] = {'input_categories':config['input_categories'], 'predicates':config['predicates']}
+                    pending = stateful_request(metadata[api], config, edges=edges, canonical=source,
+                                               predicates=config['predicates'], mutation=refinement)
+                    pending.context.update(refinement_kind='input_coverage', generation_reason='local_input_refinement',
+                                           coverage_feedback=coverage_feedback, generation_parent_id=refinement['parent_id'])
+                    pending_selection = ({'api':api, 'parent':refinement['parent_id'], 'kind':'initialization'},
+                                         {'policy':'input_refinement', 'candidate_count':1, 'selected_probability':1.})
         result = {'strategy':'stateful', 'records':rows, 'stop_reason':stop, 'provider_calls':provider.calls,
                   'elapsed_seconds':time.monotonic()-started, 'metadata_seconds':metadata_seconds,
-                  'dispatch_reserve_seconds':dispatch_reserve, 'prompt_treatment':'base_plus_edges' if edges else 'base'}
+                  'dispatch_reserve_seconds':dispatch_reserve, 'prompt_treatment':'base_plus_edges' if edges else 'base',
+                  'corpus':corpus.summary(), 'search_policy':search_policy,
+                  'generation_mode':generation_mode, 'coverage_basis':coverage_basis}
+        result['search_metrics'] = summarize_search(result)
         write_json(root/'summary.json', result)
         if stop == 'provider_cancellation_unconfirmed': break
     result = {'strategy':'stateful', 'records':rows, 'stop_reason':stop, 'provider_calls':provider.calls,
               'elapsed_seconds':time.monotonic()-started, 'metadata_seconds':metadata_seconds,
-              'dispatch_reserve_seconds':dispatch_reserve, 'prompt_treatment':'base_plus_edges' if edges else 'base'}
+              'dispatch_reserve_seconds':dispatch_reserve, 'prompt_treatment':'base_plus_edges' if edges else 'base',
+                  'corpus':corpus.summary(), 'search_policy':search_policy,
+                  'generation_mode':generation_mode, 'coverage_basis':coverage_basis}
+    result['search_metrics'] = summarize_search(result)
     write_json(root/'summary.json', result)
     return result
 

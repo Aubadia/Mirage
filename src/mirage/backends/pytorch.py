@@ -30,7 +30,38 @@ class PyTorchBackend:
             requires_grad=value.requires_grad, leaf=value.is_leaf,
             properties={"complex": value.is_complex(), "floating": value.is_floating_point(),
                         "conjugate": value.is_conj(), "negative": value.is_neg(),
-                        "mkldnn": value.is_mkldnn})
+                        "mkldnn": value.is_mkldnn,
+                        "contiguous": value.is_contiguous() if dense else None})
+
+    def gradient_edges(self, operands):
+        """Capture edges before the call, including before any in-place mutation."""
+        import torch
+        return [(tuple(d.path), torch.autograd.graph.get_gradient_edge(t))
+                for d, t in operands if t.requires_grad]
+
+    def backward_binding(self, tensor, input_edges, *, boundary=False):
+        """Certify only a fresh direct node with known operand edges.
+
+        Composite/fused internals and repeated differentiation coordinates do not
+        acquire per-operand attribution from a tensor hook or a shared leaf grad.
+        Factory-result boundaries explicitly certify the callable, not its internals.
+        """
+        node = tensor.grad_fn
+        if node is None or any(node is edge.node for _, edge in input_edges):
+            return None, [], "no fresh attributable output node"
+        links = []
+        for slot, (parent, output_nr) in enumerate(node.next_functions):
+            if parent is None:
+                continue
+            paths = [path for path, edge in input_edges
+                     if parent is edge.node and output_nr == edge.output_nr]
+            if not paths and not boundary:
+                return None, [], "composite or unobserved input edge"
+            if len(paths) == 1 and not boundary:
+                links.append((slot, paths[0]))
+        if not input_edges and not boundary:
+            return None, [], "no differentiable operand edge"
+        return node, links, "factory-result boundary" if boundary else "direct operand edges"
 
     def capability(self, name):
         if name in ("tensor_descriptors", "dense_storage_identity"):
@@ -499,14 +530,6 @@ class CompilerObserver:
             compiled = actual_backend(graph, examples, **backend_options)
 
             def invoke(*values):
-                input_snapshot = snapshot(values)
-                outputs = compiled(*values)
-                self.graphs.append({'fingerprint':fingerprint, 'backend':str(selected),
-                                    'target_matches':len(matches), 'macro_target':macro, 'inputs':input_snapshot,
-                                    'target_execution_certified':selected in ('eager','inductor','aot_eager') and bool(matches or macro)})
-                probe.operations.append({'name':'compiled_execute'})
-                probe._recorder.emit('compiled_execute', fingerprint=fingerprint, target_matches=len(matches))
-                if (not matches and not macro) or selected not in ('eager','inductor','aot_eager'): return outputs
                 mapping = dict(zip(placeholders, values))
                 def resolve_node(value):
                     if isinstance(value, torch.fx.Node):
@@ -516,28 +539,45 @@ class CompilerObserver:
                     if isinstance(value, list): return [resolve_node(v) for v in value]
                     if isinstance(value, dict): return {k:resolve_node(v) for k,v in value.items()}
                     return value
-                tree, descriptors, properties = None, [], []
-                if len(matches) == 1:
+                # Boundary metadata is valid only when graph inputs directly feed
+                # the sole operation, without intervening mutations/materialization.
+                direct = (len(matches) == 1 and
+                          sum(n.op.startswith('call_') for n in graph.graph.nodes) == 1 and
+                          not getattr(probe._target, '__name__', '').endswith('_'))
+                tree, descriptors, properties, edges = None, [], [], []
+                if direct:
                     try:
                         tree = {'args':resolve_node(matches[0].args), 'kwargs':resolve_node(matches[0].kwargs)}
                         operands = discover(tree, probe._backend)
                         descriptors = [asdict(d) for d,_ in operands]
                         properties = [{'path':list(d.path), 'facts':probe._backend.input_properties(t)} for d,t in operands]
-                    except ValueError: pass
+                        edges = probe._backend.gradient_edges(operands)
+                    except ValueError:
+                        tree, descriptors, properties, edges = None, [], [], []
+                entry_context = dict(context_state(), inference_enabled=torch.is_inference_mode_enabled())
+                target_snapshot = snapshot(tree)
+                input_snapshot = snapshot(values)
+                outputs = compiled(*values)
+                self.graphs.append({'fingerprint':fingerprint, 'backend':str(selected),
+                                    'target_matches':len(matches), 'macro_target':macro, 'inputs':input_snapshot,
+                                    'target_execution_certified':selected in ('eager','inductor','aot_eager') and bool(matches or macro)})
+                probe.operations.append({'name':'compiled_execute'})
+                probe._recorder.emit('compiled_execute', fingerprint=fingerprint, target_matches=len(matches))
+                if (not matches and not macro) or selected not in ('eager','inductor','aot_eager'): return outputs
                 index = len(probe.calls)
-                probe.calls.append({'index':index, 'inputs':snapshot(tree), 'metadata':descriptors,
+                probe.calls.append({'index':index, 'inputs':target_snapshot, 'metadata':descriptors,
                                     'input_properties':properties, 'output':snapshot(outputs),
-                                    'evidence':'executed FX graph', 'target_operands_observed':tree is not None})
+                                    'evidence':'executed FX graph', 'target_operands_observed':tree is not None,
+                                    'execution_mode':'compiled', 'backend':str(selected), 'entry_context':entry_context})
                 probe._recorder.emit('api_exit', call=index, evidence='executed FX graph')
                 actual_outputs, _ = tree_flatten(outputs)
                 if len(actual_outputs) == len(differentiable):
-                    for position,(tensor,reaches) in enumerate(zip(actual_outputs,differentiable)):
-                        if reaches and isinstance(tensor,torch.Tensor) and tensor.requires_grad:
-                            def hook(gradient, i=index, p=position):
-                                probe.backward.append({'call':i,'path':str(p)})
-                                probe._recorder.emit('target_backward',call=i,path=str(p))
-                                return gradient
-                            tensor.register_hook(hook)
+                    observed = [(str(position), tensor) for position, (tensor, reaches)
+                                in enumerate(zip(actual_outputs, differentiable))
+                                if reaches and isinstance(tensor, torch.Tensor)]
+                    direct = (direct and tree is not None and
+                              all(o is matches[0] for o, reaches in zip(output_nodes, differentiable) if reaches))
+                    probe.observe_outputs(index, observed, edges, node_admissible=direct)
                 return outputs
             return invoke
         compiled_model = self.original(model, backend=backend, **kwargs)
@@ -620,28 +660,36 @@ class CaptureObserver:
             def __init__(self, original): self.original = original
             def __getattr__(self, name): return getattr(self.original, name)
             def __call__(self, *args, **kw):
+                tree = {'args':args,'kwargs':kw}
+                observing = probe._observing; probe._observing = True
+                try:
+                    operands = discover(tree, probe._backend)
+                    descriptors = [asdict(d) for d, _ in operands]
+                    properties = [{'path':list(d.path),'facts':probe._backend.input_properties(t)} for d,t in operands]
+                    entry_context = dict(context_state(), inference_enabled=torch.is_inference_mode_enabled())
+                    before = snapshot(tree)
+                    input_edges = probe._backend.gradient_edges(operands)
+                    reference = bool(owner.config.get('capture_reference'))
+                    if reference and isinstance(self.original, torch.nn.Module):
+                        input_edges += probe._backend.gradient_edges(discover(
+                            {'parameters':dict(self.original.named_parameters())}, probe._backend))
+                finally:
+                    probe._observing = observing
                 start = len(owner.replays)
                 output = self.original(*args, **kw)
                 completed_replays = len(owner.replays)-start
                 index = len(probe.calls)
-                tree = {'args':args,'kwargs':kw}
-                observing = probe._observing;probe._observing = True
+                probe._observing = True
                 try:
-                    operands = discover(tree,probe._backend)
                     probe.calls.append({'index':index,'kind':'factory_result_execution',
-                                        'inputs':snapshot(tree),'metadata':[asdict(d) for d,_ in operands],
-                                        'input_properties':[{'path':list(d.path),'facts':probe._backend.input_properties(t)} for d,t in operands],
+                                        'inputs':before,'metadata':descriptors, 'input_properties':properties,
                                         'output':snapshot(output),'completed_replays':completed_replays,
-                                        'reference':bool(owner.config.get('capture_reference'))})
+                                        'reference':reference, 'entry_context':entry_context,
+                                        'execution_mode':'reference' if reference else 'captured'})
                     probe.operations.append({'name':'factory_result_execution'})
                     probe._recorder.emit('factory_result_execution',call=index,completed_replays=completed_replays)
-                    for path,tensor in leaves(output):
-                        if tensor.requires_grad:
-                            def hook(gradient,i=index,p=path):
-                                probe.backward.append({'call':i,'path':p})
-                                probe._recorder.emit('target_backward',call=i,path=p)
-                                return gradient
-                            tensor.register_hook(hook)
+                    probe.observe_outputs(index, leaves(output), input_edges, boundary=not reference,
+                                          node_admissible=reference or completed_replays > 0)
                 finally: probe._observing = observing
                 return output
         return tuple(ObservedCallable(x) for x in result) if isinstance(result,tuple) else ObservedCallable(result)
