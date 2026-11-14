@@ -701,6 +701,13 @@ def stateful_independent_audit(issue,record):
     """Audit saved observations independently. Unsupported gradients remain unknown."""
     import math
     import torch
+    from mirage.inspector.oracles import verified_violation_calls
+    gradient_calls = verified_violation_calls(record)
+    if gradient_calls:
+        return dict(label='positive', scope='target_vjp', call_indices=list(gradient_calls),
+                    method='Generic multi-step directional finite differences against observed VJP',
+                    reason='Original-call baseline verified; numerical gradient inconsistency',
+                    limitation='Scoped numerical consistency evidence, not universal forward semantic correctness')
     unknown=lambda reason: dict(label='unknown',reason=reason,scope='target_outputs')
     if issue=='202706':
         events=record.get('context_events',[])
@@ -746,6 +753,30 @@ def stateful_independent_audit(issue,record):
 
 
 def stateful_attribution(issue, record, audit):
+    if audit.get('scope') == 'target_vjp':
+        from mirage.inspector.oracles import verified_violation_calls
+        # A violation and its benchmark mechanism must belong to the same call.
+        # Whole-run context/capture events cannot certify a local VJP mechanism.
+        certified = set(verified_violation_calls(record))
+        requested = audit.get('call_indices', [])
+        indices = {index for index in requested if type(index) is int} & certified
+        mechanisms = []
+        for call in record.get('target_calls', []):
+            if call.get('index') not in indices:
+                continue
+            scoped = dict(record, target_calls=[call], backward_executed=True,
+                          target_gradients=[event for event in record.get('target_gradients', [])
+                                            if event.get('call') == call['index']],
+                          context_events=[], capture_replays=[], compiled_graphs=[])
+            mechanisms.append(stateful_mechanism(issue, scoped))
+        mechanism = (True if any(value is True for value in mechanisms) else
+                     None if any(value is None for value in mechanisms) else False)
+        reproduced = mechanism is True and audit.get('label') == 'positive'
+        return dict(version='stateful-mechanism-1', scope='target_vjp',
+                    call_indices=sorted(indices), structural_trigger=mechanism,
+                    benchmark_reproduction=reproduced,
+                    reason='Numerical VJP violation and benchmark mechanism on the same call' if reproduced else
+                           'No numerically corroborated benchmark mechanism on the same call')
     if audit.get('scope') == 'target_outputs':
         record = dict(record, target_calls=[call for call in record.get('target_calls', [])
                                            if call.get('evidence') != 'executed FX graph'])
@@ -924,7 +955,7 @@ def stateful_run_metrics(run):
             evidence=torch.load(saved,map_location='cpu',weights_only=True)
             if evidence.get('inspection',{}).get('valid'):
                 validated_followup.update(evidence.get('input_coverage',{}).get('target_observed',{}))
-        if r.get('verdict') in ('pass','suspected_failure'):
+        if r.get('mr_verdict', r.get('verdict')) in ('pass','suspected_failure'):
             eligible.update(r.get('input_coverage',{}).get('target_observed',{}))
             eligible.update(r.get('followup_input_coverage',{}).get('target_observed',{}))
     return dict(raw_syntax_valid=sum(r.get('raw_syntax_valid',False) for r in rows),
@@ -940,7 +971,8 @@ def stateful_run_metrics(run):
         completed_followup_executions=sum(bool(r.get('followup_completed')) for r in rows),
         requested_categories=dict(requested),requested_category_witnesses=dict(witnessed),
         cases_with_eligible_mutations=sum(r.get('eligible_mutations',0)>0 for r in rows),
-        applicable_comparisons=sum(r.get('verdict') in ('pass','suspected_failure') for r in rows),
+        applicable_comparisons=sum(r.get('mr_verdict', r.get('verdict')) in ('pass','suspected_failure') for r in rows),
+        numerical_violation_cases=sum(bool(r.get('numerical_violation_members')) for r in rows),
         runtime_valid=len(valid),state_attained=len(transitions),
         distinct_verified_signatures=[list(x) for x in signatures],
         signature_count=len(signatures),source_categories=sorted(observed),

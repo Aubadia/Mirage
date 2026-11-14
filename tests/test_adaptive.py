@@ -98,6 +98,20 @@ class AdaptiveTests(unittest.TestCase):
         rows[0]['generation_usage'] = None
         self.assertIsNone(summarize_search({'records':rows})['semantic_units_per_1000_tokens'])
 
+    def test_numerical_report_does_not_invent_mr_applicability(self):
+        row = record(verdict='suspected_failure')
+        row['mr_verdict'] = 'inapplicable'
+        row['numerical_violation_members'] = ['followup']
+        row['gradient_audits'] = {
+            'source': {'status': 'agreement', 'cost': {'seconds': 0.1}},
+            'followup': {'status': 'violation', 'cost': {'seconds': 0.2}}}
+        metrics = summarize_search({'records': [row], 'elapsed_seconds': 1})
+        self.assertEqual(metrics['applicable_comparisons'], 0)
+        self.assertEqual(metrics['numerically_reported_cases'], 1)
+        self.assertAlmostEqual(metrics['numerical_audit_seconds'], 0.3)
+        self.assertEqual(metrics['numerical_audit_statuses'], {'agreement': 1, 'violation': 1})
+        self.assertIsNone(metrics['confirmed_defects'])
+
     def test_corpus_transition_ablation_and_explicit_selection(self):
         from mirage.artifacts.corpus import Corpus
         from test_corpus import fixture_bundle

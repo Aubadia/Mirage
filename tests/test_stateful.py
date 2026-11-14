@@ -591,3 +591,138 @@ class SemanticCoverageTests(unittest.TestCase):
             self.coverage(SOURCE.replace('    y.sum().backward()', "    raise RuntimeError('authored failure')"))
         self.assertEqual(len(closed), 1)
         self.assertEqual(closed[0]._hook_handles, [])
+
+
+class NumericalGradientEvidenceTests(unittest.TestCase):
+    """Observe runtime derivatives without installing API-specific references."""
+
+    def test_numeric_events_are_bounded_snapshots_outside_coverage(self):
+        record = execute(SOURCE, CONFIG, Recorder())
+        evidence = record['gradient_evidence']
+        self.assertEqual(evidence['version'], 'gradient-evidence-1')
+        self.assertEqual(len(evidence['events']), 1)
+        event = evidence['events'][0]
+        self.assertEqual(event['status'], 'complete')
+        self.assertEqual(event['inputs'][0]['path'], ['args', 0])
+        self.assertEqual(event['outputs'][0]['path'], '')
+        self.assertEqual(event['invocation'], 0)
+        self.assertTrue(torch.equal(event['inputs'][0]['gradient'], record['observations']['gradient']))
+        for item in event['inputs'] + event['outputs']:
+            self.assertEqual(str(item['gradient'].device), 'cpu')
+            self.assertFalse(item['gradient'].requires_grad)
+            self.assertIsNone(item['gradient'].grad_fn)
+        self.assertTrue(record['target_calls'][0]['schema_read_only'])
+        json.dumps(record['inspection']['semantic_coverage'])
+        self.assertNotIn('detach', record['observed_actions'])
+
+    def test_shared_node_binds_every_output_slot_before_backward(self):
+        source = '''import torch
+
+def build(device, seed):
+    x = torch.tensor([[2., 1.], [0., 3.]], dtype=torch.float64, device=device, requires_grad=True)
+    return {'inputs': {'x': x}, 'parameters': {}}
+
+def run(ctx, probe):
+    sign, magnitude = probe.call(torch.linalg.slogdet, ctx['inputs']['x'])
+    (2 * sign + 3 * magnitude).backward()
+    return {'gradient': ctx['inputs']['x'].grad}
+'''
+        record = execute(source, dict(CONFIG, api='torch.linalg.slogdet'), Recorder())
+        events = record['gradient_evidence']['events']
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['status'], 'complete')
+        outputs = {v['path']: v for v in events[0]['outputs']}
+        self.assertEqual(set(outputs), {'.0', '.1'})
+        self.assertEqual({v['slot'] for v in outputs.values()}, {0, 1})
+        self.assertEqual(outputs['.0']['gradient'].item(), 2.)
+        self.assertEqual(outputs['.1']['gradient'].item(), 3.)
+        self.assertTrue(torch.equal(events[0]['inputs'][0]['gradient'], record['observations']['gradient']))
+
+    def test_repeated_backward_events_retain_invocation_coordinates(self):
+        source = SOURCE.replace('    y.sum().backward()',
+            '    y.sum().backward(retain_graph=True)\n    (3 * y).sum().backward()')
+        record = execute(source, CONFIG, Recorder())
+        events = record['gradient_evidence']['events']
+        self.assertEqual([e['invocation'] for e in events], [0, 1])
+        self.assertTrue(torch.equal(events[1]['outputs'][0]['gradient'], 3 * events[0]['outputs'][0]['gradient']))
+        self.assertEqual(len(record['inspection']['semantic_coverage']['events']['nodes']), 2)
+
+    def test_ambiguous_operand_and_output_coordinates_remain_unknown(self):
+        source = SOURCE.replace('probe.call(torch.sin, x)', 'probe.call(torch.add, x, x)')
+        record = execute(source, dict(CONFIG, api='torch.add'), Recorder())
+        event = record['gradient_evidence']['events'][0]
+        self.assertEqual(event['status'], 'unknown')
+        self.assertIn('ambiguous', event['reason'])
+        self.assertEqual(event['inputs'], [])
+        from mirage.runtime.stateful import Probe
+        from mirage.runtime.operands import discover
+        x = torch.tensor([1.], requires_grad=True)
+        probe = Probe(torch.sin, {'parameters': {}}, CONFIG, Recorder())
+        probe.calls.append({'index': 0})
+        y = torch.sin(x)
+        probe.observe_outputs(0, [('first', y), ('second', y)],
+            probe._backend.gradient_edges(discover({'args': (x,)}, probe._backend)))
+        try:
+            y.sum().backward()
+            self.assertEqual(probe.gradient_evidence['events'][0]['status'], 'unknown')
+            self.assertIn('share one', probe.gradient_evidence['events'][0]['reason'])
+        finally:
+            probe.close()
+
+    def test_incomplete_backward_retains_unfinished_invocation(self):
+        source = SOURCE.replace('    y.sum().backward()', '''    def fail(gradient):
+        raise RuntimeError('authored backward interruption')
+    handle = x.register_hook(fail)
+    try:
+        y.sum().backward()
+    except RuntimeError:
+        pass
+    handle.remove()''')
+        record = execute(source, CONFIG, Recorder())
+        self.assertFalse(record['backward_invocations'][0]['completed'])
+        self.assertEqual(record['gradient_evidence']['events'][0]['invocation'], 0)
+        self.assertFalse(record['backward_executed'])
+
+    def test_gradient_budgets_record_limits_without_modifying_execution(self):
+        from unittest.mock import patch
+        repeated = SOURCE.replace('    y.sum().backward()',
+            '    for _ in range(3):\n        y.sum().backward(retain_graph=True)')
+        with patch('mirage.runtime.stateful.GRADIENT_EVIDENCE_MAX_EVENTS', 2):
+            record = execute(repeated, CONFIG, Recorder())
+        self.assertEqual(len(record['gradient_evidence']['events']), 2)
+        self.assertEqual(record['gradient_evidence']['dropped_events'], 1)
+        self.assertEqual(len(record['backward_invocations']), 3)
+        self.assertTrue(record['inspection']['valid'])
+        with patch('mirage.runtime.stateful.GRADIENT_EVIDENCE_MAX_ELEMENTS', 1):
+            record = execute(SOURCE, CONFIG, Recorder())
+        event = record['gradient_evidence']['events'][0]
+        self.assertEqual(event['status'], 'unknown')
+        self.assertIn('element budget', event['reason'])
+        self.assertEqual(event['inputs'], [])
+        self.assertTrue(record['inspection']['valid'])
+
+    def test_configured_write_role_cannot_certify_readonly_replay(self):
+        source = SOURCE.replace('    y = probe.call(torch.sin, x)',
+            '    temp = x * 1\n    y = probe.call(torch.Tensor.add_, temp, 1)')
+        record = execute(source, dict(CONFIG, api='torch.Tensor.add_', writable=False), Recorder())
+        self.assertFalse(record['target_calls'][0]['schema_read_only'])
+        self.assertTrue(record['target_calls'][0]['write_effects'])
+
+    def test_replay_rejects_modified_or_missing_numeric_gradients(self):
+        from copy import deepcopy
+        from mirage.runtime.worker import stateful_replay_evidence
+        record = execute(SOURCE, CONFIG, Recorder())
+        changed = deepcopy(record)
+        changed['gradient_evidence']['events'][0]['inputs'][0]['gradient'][0] += 1
+        backend = PyTorchBackend()
+        self.assertFalse(backend.compare(stateful_replay_evidence(record),
+            stateful_replay_evidence(changed), 'exact')['equal'])
+        changed = deepcopy(record)
+        del changed['gradient_evidence']
+        self.assertFalse(backend.compare(stateful_replay_evidence(record),
+            stateful_replay_evidence(changed), 'exact')['equal'])
+        # Auxiliary timing and numerical scheduling are not replay identity.
+        changed = deepcopy(record)
+        changed['gradient_audit'] = {'cost': {'seconds': 999}}
+        self.assertTrue(backend.compare(stateful_replay_evidence(record),
+            stateful_replay_evidence(changed), 'exact')['equal'])

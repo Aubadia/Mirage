@@ -13,8 +13,11 @@ def stateful_replay_evidence(record):
     keys=('observations','final_training_state','checkpoints','transition_signature',
           'inspection','target_gradients','context_events','input_coverage')
     result={key:record.get(key) for key in keys}
+    # Compare captured tensors; audit timings are not replay evidence.
+    if 'gradient_evidence' in record:
+        result['gradient_evidence'] = record['gradient_evidence']
     result['target_calls']=[{key:call.get(key) for key in
-        ('index','inputs','output','metadata','write_effects','writable_paths','kind','evidence')}
+        ('index','inputs','output','metadata','write_effects','writable_paths','kind','evidence','schema_read_only','entry_context')}
         for call in record.get('target_calls',[])]
     return result
 
@@ -86,6 +89,16 @@ def dispatch(request: dict, directory: Path) -> None:
         except MutationInapplicable as error:
             summary.update(verdict='inapplicable', correctness='unassessed', reason=str(error),
                            first_blocking_stage='mutation_application')
+        from mirage.inspector.oracles import audit_pair
+        selected = (request['config'].get('numerical_audit') is True
+                    or summary.get('verdict') == 'suspected_failure'
+                    or request['config'].get('attempt', 0) % 4 == 0)
+        if request['config'].get('numerical_audit') is False:
+            selected = False
+        audit_pair(left, right, summary, budget_seconds=request.get('audit_budget_seconds', 10), enabled=selected)
+        torch.save(left, directory / 'source.pt')
+        if right is not None:
+            torch.save(right, directory / 'followup.pt')
         if initial_reference is not None:
             comparator=PyTorchBackend()
             summary['replay_source_evidence_equal']=comparator.compare(

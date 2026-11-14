@@ -79,6 +79,66 @@ class BenchmarkTests(unittest.TestCase):
         self.assertFalse(evaluate.stateful_attribution('200613',record({}),positive)['benchmark_reproduction'])
         self.assertFalse(evaluate.stateful_attribution('197089',{},positive)['benchmark_reproduction'])
 
+    def test_generated_gradient_audit_is_generic_and_same_call_attributed(self):
+        from copy import deepcopy
+        from mirage.inspector.oracles import AUDIT_VERSION
+        evaluate = load('evaluate')
+        def call(index, negative):
+            return {'index': index, 'metadata': [
+                {'path': ['args', 0], 'shape': [2, 2], 'strides': [2, 1],
+                 'properties': {'negative': negative}}]}
+        reference = {'call': 0, 'node': 0, 'invocation': 0}
+        record = {'completed': True, 'inspection': {'valid': True},
+                  'backward_executed': True,
+                  'target_calls': [call(0, False), call(1, True)],
+                  'backward_invocations': [{'index': 0, 'completed': True}],
+                  'gradient_evidence': {'version': 'gradient-evidence-1',
+                                       'events': [dict(reference, status='complete')]},
+                  'gradient_audit': {'version': AUDIT_VERSION, 'scope': 'target_vjp',
+                                    'status': 'violation', 'events': [dict(reference,
+                                        status='violation', baseline_verified=True, scope='target_vjp',
+                                        stable_steps=True, one_sided_consistent=True,
+                                        directions=[{'status': 'violation', 'stable_steps': True,
+                                                     'one_sided_consistent': True}])]}}
+        # The synthetic numerical result is routed regardless of the issue ID.
+        for issue in ('204407', 'unlisted-issue'):
+            audit = evaluate.stateful_independent_audit(issue, record)
+            self.assertEqual(audit['label'], 'positive')
+            self.assertEqual(audit['scope'], 'target_vjp')
+            self.assertEqual(audit['call_indices'], [0])
+        audit = evaluate.stateful_independent_audit('204407', record)
+        self.assertFalse(evaluate.stateful_attribution('204407', record, audit)['benchmark_reproduction'])
+        changed = deepcopy(record)
+        changed['gradient_evidence']['events'][0]['call'] = 1
+        changed['gradient_audit']['events'][0]['call'] = 1
+        audit = evaluate.stateful_independent_audit('204407', changed)
+        self.assertTrue(evaluate.stateful_attribution('204407', changed, audit)['benchmark_reproduction'])
+        # Unbound capture evidence elsewhere in the run cannot explain this VJP.
+        changed['capture_replays'] = [{'graph': 0}]
+        changed['target_gradients'] = [{'call': 1}, {'call': 1}]
+        self.assertFalse(evaluate.stateful_attribution('181723', changed, audit)['benchmark_reproduction'])
+        changed['gradient_audit']['events'][0]['baseline_verified'] = False
+        self.assertEqual(evaluate.stateful_independent_audit('204407', changed)['label'], 'unknown')
+
+    def test_generated_gradient_agreement_is_not_full_correctness_certificate(self):
+        from mirage.inspector.oracles import AUDIT_VERSION
+        evaluate = load('evaluate')
+        for result in ({}, {'gradient_audit': {'version': AUDIT_VERSION,
+                         'scope': 'target_vjp', 'status': 'agreement', 'events': []}}):
+            self.assertEqual(evaluate.stateful_independent_audit('204407', result)['label'], 'unknown')
+
+    def test_numerical_failure_does_not_create_mr_applicability(self):
+        evaluate = load('evaluate')
+        with tempfile.TemporaryDirectory() as temp:
+            row = {'directory': temp, 'verdict': 'suspected_failure',
+                   'mr_verdict': 'inapplicable', 'numerical_violation_members': ['source'],
+                   'input_coverage': {'target_observed': {'finite': [{}]}},
+                   'inspection': {'valid': True}}
+            result = evaluate.stateful_run_metrics({'records': [row]})
+            self.assertEqual(result['applicable_comparisons'], 0)
+            self.assertEqual(result['relation_eligible_categories'], [])
+            self.assertEqual(result['numerical_violation_cases'], 1)
+
     def test_stateful_metrics_separate_generation_and_detection_failures(self):
         import json
         import torch

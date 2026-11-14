@@ -5,6 +5,9 @@ from typing import Any
 
 CONTRACT_VERSION = "stateful-1"
 SEMANTIC_COVERAGE_VERSION = "state-semantic-1"
+GRADIENT_EVIDENCE_VERSION = "gradient-evidence-1"
+GRADIENT_EVIDENCE_MAX_EVENTS = 16
+GRADIENT_EVIDENCE_MAX_ELEMENTS = 4096
 STATE_DIMENSIONS = ("gradient", "context", "graph_lifecycle", "execution_mode", "representation", "data")
 INPUT_CATEGORIES = ("ordinary", "zero", "small_finite", "large_finite", "repeated",
                     "nonuniform", "mixed_sign", "singleton", "broadcast", "supported_layout")

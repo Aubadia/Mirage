@@ -5,7 +5,8 @@ import math
 
 from mirage.generator.program import analyze_stateful, ContractError
 from mirage.contracts.programs import validate_checkpoint_data, bind_call
-from mirage.contracts.capabilities import EvidenceStatus, MutationObligations
+from mirage.contracts.capabilities import (EvidenceStatus, MutationObligations,
+    GRADIENT_EVIDENCE_VERSION, GRADIENT_EVIDENCE_MAX_EVENTS, GRADIENT_EVIDENCE_MAX_ELEMENTS)
 from mirage.backends.pytorch import PyTorchBackend, context_state
 from mirage.runtime.operands import discover, candidates, apply, canonicalize
 from mirage.runtime.api_metadata import resolve
@@ -77,6 +78,8 @@ class Probe:
         self._backend = PyTorchBackend()
         self.calls, self.checkpoints, self.backward = [], [], []
         self.backward_nodes, self.operand_gradients, self.backward_invocations = [], [], []
+        self.gradient_evidence = {'version': GRADIENT_EVIDENCE_VERSION, 'events': [],
+                                  'limitations': [], 'dropped_events': 0, 'dropped_limitations': 0}
         self._backward_invocation = None
         self._hook_handles = []
         self.mutations, self.candidates = [], []
@@ -120,10 +123,58 @@ class Probe:
         self.checkpoints.append(data)
         self._recorder.emit("checkpoint", name=name, grad_enabled=data['grad_enabled'])
 
+    def _gradient_limitation(self, call, reason):
+        limitation = {'call': call, 'reason': reason}
+        limits = self.gradient_evidence['limitations']
+        if limitation in limits:
+            return
+        if len(limits) < GRADIENT_EVIDENCE_MAX_EVENTS:
+            limits.append(limitation)
+        else:
+            self.gradient_evidence['dropped_limitations'] += 1
+
+    @observational
+    def _capture_gradients(self, event, grad_inputs, grad_outputs, edges, outputs, reason):
+        """Snapshot one Node invocation without retaining its graph or tensor storage."""
+        import torch
+        events = self.gradient_evidence['events']
+        if len(events) >= GRADIENT_EVIDENCE_MAX_EVENTS:
+            self.gradient_evidence['dropped_events'] += 1
+            self._gradient_limitation(event['call'], 'gradient event budget exceeded')
+            return
+        item = dict(event, inputs=[], outputs=[], status='unknown', reason=reason)
+        if reason:
+            events.append(item)
+            return
+        input_slots = {slot for slot, _ in edges}
+        output_slots = {slot for slot, _ in outputs}
+        if any(g is not None and slot not in input_slots for slot, g in enumerate(grad_inputs)):
+            item['reason'] = 'unbound differentiable input slot'
+        elif any(g is not None and slot not in output_slots for slot, g in enumerate(grad_outputs)):
+            item['reason'] = 'unbound differentiable output slot'
+        elif any(slot >= len(grad_inputs) for slot, _ in edges) or any(slot >= len(grad_outputs) for slot, _ in outputs):
+            item['reason'] = 'node gradient arity differs from bindings'
+        else:
+            values = [grad_inputs[slot] for slot, _ in edges] + [grad_outputs[slot] for slot, _ in outputs]
+            if any(g is not None and (not isinstance(g, torch.Tensor) or g.layout != torch.strided) for g in values):
+                item['reason'] = 'unsupported gradient value or layout'
+            elif sum(g.numel() for g in values if g is not None) > GRADIENT_EVIDENCE_MAX_ELEMENTS:
+                item['reason'] = 'gradient element budget exceeded'
+            else:
+                try:
+                    item['inputs'] = [{'path': list(path), 'slot': slot, 'gradient': snapshot(grad_inputs[slot])}
+                                      for slot, path in edges]
+                    item['outputs'] = [{'path': path, 'slot': slot, 'gradient': snapshot(grad_outputs[slot])}
+                                       for slot, path in outputs]
+                    item.update(status='complete', reason='observed direct Node input/output gradients')
+                except (RuntimeError, ValueError, TypeError) as error:
+                    item.update(inputs=[], outputs=[], reason=f'gradient snapshot failed: {type(error).__name__}')
+        events.append(item)
+
     @observational
     def observe_outputs(self, index, outputs, input_edges, *, node_admissible=True, boundary=False):
-        """Keep output-gradient and Node-execution evidence independent."""
-        bindings, seen = [], set()
+        """Keep numerical Node evidence separate from semantic execution events."""
+        bindings, nodes = [], {}
         for path, tensor in outputs:
             if not tensor.requires_grad:
                 continue
@@ -138,11 +189,25 @@ class Probe:
                 node, links, reason = None, [], "target backward attribution unsupported for this graph"
             bindings.append({'output_path': path, 'status': 'verified' if node is not None else 'unknown',
                              'reason': reason, 'operand_paths': [list(p) for _, p in links]})
-            if node is None or node in seen:
+            if node is None:
+                self._gradient_limitation(index, reason)
                 continue
-            seen.add(node)
-            node_index = len(seen) - 1
-            def node_executed(grad_inputs, grad_outputs, i=index, n=node_index, edges=tuple(links)):
+            data = nodes.setdefault(node, {'edges': tuple(links), 'outputs': [], 'reason': None})
+            data['outputs'].append((tensor.output_nr, path))
+            if data['edges'] != tuple(links):
+                data['reason'] = 'inconsistent operand bindings for shared output node'
+        # All output slots must be known before registering a shared Node hook.
+        for node_index, (node, data) in enumerate(nodes.items()):
+            edges, output_bindings = data['edges'], tuple(data['outputs'])
+            reason = data['reason']
+            if boundary:
+                reason = 'factory boundary has no direct operand VJP certificate'
+            elif {path for _, path in edges} != {path for path, _ in input_edges} or not edges:
+                reason = 'missing or ambiguous differentiable operand bindings'
+            elif len({slot for slot, _ in output_bindings}) != len(output_bindings):
+                reason = 'multiple output paths share one differentiation coordinate'
+            def node_executed(grad_inputs, grad_outputs, i=index, n=node_index,
+                              edges=edges, outputs=output_bindings, reason=reason):
                 event = {'call': i, 'node': n, 'invocation': self._backward_invocation}
                 self.backward_nodes.append(event)
                 self._recorder.emit('target_backward', **event)
@@ -151,6 +216,7 @@ class Probe:
                         contribution = dict(event, path=list(operand_path), slot=slot)
                         self.operand_gradients.append(contribution)
                         self._recorder.emit('target_operand_gradient', **contribution)
+                self._capture_gradients(event, grad_inputs, grad_outputs, edges, outputs, reason)
             self._hook_handles.append(node.register_hook(node_executed))
         self.calls[index]['backward_bindings'] = bindings
 
@@ -206,6 +272,10 @@ class Probe:
             item['facts']['broadcast'] = any(shape != other and _broadcastable(shape, other) for other in shapes)
         input_edges = self._backend.gradient_edges(operands)
         entry_context = dict(context_state(), inference_enabled=torch.is_inference_mode_enabled())
+        # User-supplied MR obligations cannot certify a numerical replay as read-only.
+        native_roles = self._backend.operand_obligations(target, tree)
+        schema_read_only = (all(native_roles[d.path].writable is False for d, _ in operands)
+                            if isinstance(native_roles, dict) and operands else False)
         self.operations.append({'name': 'target_enter'})
         self._recorder.emit("api_enter", call=index, metadata=descriptors)
         self._observing = False
@@ -218,6 +288,7 @@ class Probe:
                                      else {'opaque_type':type(output).__qualname__},
                            "binding": evidence_record(binding), "input_properties": properties,
                            "execution_mode": "eager", "entry_context": entry_context,
+                           "schema_read_only": schema_read_only,
                            "write_effects": [list(d.path) for (d,t),(_,v) in zip(operands,versions) if v is not None and tensor_version(t) != v],
                            "writable_paths": writable_paths})
         self._recorder.emit("api_exit", call=index)
@@ -318,6 +389,7 @@ def execute(source, config, recorder, initial_reference=None):
             "initial": initial, "initial_metadata": initial_metadata, "final_training_state": final_training_state,
             "program_certificate": PyTorchBackend().program_certificate(source), "observations": snapshot(output), "checkpoints": probe.checkpoints,
             "target_calls": probe.calls, "target_gradients": probe.backward,
+            "gradient_evidence": probe.gradient_evidence,
             "target_backward_nodes": probe.backward_nodes, "target_operand_gradients": probe.operand_gradients,
             "backward_invocations": probe.backward_invocations,
             "compiled_graphs": probe.compiled_graphs, "capture_replays": capture.replays,

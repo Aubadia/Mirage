@@ -63,7 +63,7 @@ def summarize_search(report):
     valid = [r for r in rows if verified_search_units(r)]
     semantic = {unit for r in valid for unit in verified_search_units(r)}
     transitions = {unit for r in valid for unit in verified_search_units(r, 'transition')}
-    applicable = [r for r in valid if r.get('relation') and r.get('verdict') in ('pass', 'suspected_failure')]
+    applicable = [r for r in valid if r.get('relation') and r.get('mr_verdict', r.get('verdict')) in ('pass', 'suspected_failure')]
     pairs = {(r['api'], r['relation']) for r in applicable}
     state_relations = {(unit, r['relation']) for r in applicable for unit in verified_search_units(r)}
     elapsed = report.get('elapsed_seconds', 0)
@@ -71,7 +71,12 @@ def summarize_search(report):
              if key in r or key == 'generation_usage' and r.get('first_blocking_stage') != 'state_plan']
     known_tokens = sum(u.get('input_tokens') or 0 for u in usage) + sum(u.get('output_tokens') or 0 for u in usage)
     tokens_complete = bool(rows) and all(u.get('input_tokens') is not None and u.get('output_tokens') is not None for u in usage)
+    audits = [a for r in rows for a in r.get('gradient_audits', {}).values()]
     return {'attempts':len(rows), 'runtime_valid':len(valid),
+            'numerical_audit_statuses':dict(Counter(a.get('status', 'unknown') for a in audits)),
+            'numerical_audit_seconds':sum(a.get('cost', {}).get('seconds', 0) for a in audits),
+            'numerical_unknown_reasons':dict(Counter(a.get('reason', 'unspecified') for a in audits if a.get('status') in ('unknown','unsupported'))),
+            'numerically_reported_cases':sum(bool(r.get('numerical_violation_members')) for r in rows),
             'planning_calls':sum('planning_usage' in r for r in rows),
             'program_generation_calls':sum(r.get('program_generation_dispatched', 'generation_usage' in r) for r in rows),
             'planning_rejections':sum(r.get('first_blocking_stage') == 'state_plan' for r in rows),

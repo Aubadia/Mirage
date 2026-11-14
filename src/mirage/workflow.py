@@ -745,7 +745,8 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
             remaining = deadline-time.monotonic()
             if remaining <= 0: raise TimeoutError('Budget exhausted before execution')
             process = run_worker({'mode':'execute_stateful_pair', 'source':source, 'config':config,
-                                  'engine':str(root/'engine')}, directory/'execution',
+                                  'engine':str(root/'engine'),
+                                  'audit_budget_seconds':min(10, max(0.1, min(options.worker_timeout, remaining) / 8))}, directory/'execution',
                                  min(options.worker_timeout, remaining))
             row['process'] = asdict(process)
             write_json(directory/'execution-sha256.json', inventory(directory/'execution'))
@@ -812,7 +813,8 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
         else:
             repair_count = 0
         row['finished_seconds'] = time.monotonic()-started
-        row['search_feedback'] = feedback.observe(choice, row)
+        # MR novelty must retain its own applicability when numerical evidence raises suspicion.
+        row['search_feedback'] = feedback.observe(choice, dict(row, verdict=row.get('mr_verdict', row.get('verdict'))))
         write_json(directory/'outcome.json', row);rows.append(row)
         if (directory/'execution/source.pt').exists():
             write_json(directory/'stateful-manifest.json', {

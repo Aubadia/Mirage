@@ -446,3 +446,62 @@ values are explicit. These limitations are retained in the measured run instead
 of changing the protocol after observing outcomes. Static contract validity is
 reported explicitly and must not be interpreted as semantic validity of every
 rejected or accepted PyTorch program.
+
+## Generic numerical VJP audit (new evaluation version)
+
+The generic auditor contains no API derivative formula or issue-specific checker.
+It compares observed direct-node cotangents with multi-step directional forward
+differences in reconstructed occupied storage coordinates. Storage aliases,
+strides, offsets and negative view bits are checked before baseline evaluation;
+logical inputs, baseline outputs and the pulled-back observed VJP must agree.
+The reconstruction certifies a local call chart, not arbitrary pre-target history.
+
+Only completed, attributable, bounded eager real FP32/FP64 read-only executions
+are candidates. Evidence gaps, unsupported effects/modes, ambiguous coordinates,
+nonfinite values, non-reproducibility, numerical instability and budget exhaustion
+remain unknown/unsupported. One-sided slope checks screen nonsmooth points;
+finite differences remain a numerical consistency check, not a proof of forward
+semantics or universal differentiability. Full coordinate directions are used for
+up to 16 independent coordinates, otherwise seeded random directions are used.
+Three step sizes and an uncertainty band are recorded per direction.
+
+Runtime numerical evidence is separate from coverage events. Immutable replay
+compares captured gradients and applicability context; timing is excluded. MR
+verdicts are retained separately from numerical status. A verified violation can
+raise overall suspicion but an agreement never creates an MR Pass. Audits target
+MR suspects and every fourth candidate by default; numerical_audit=True forces
+selection, False disables it for explicit ablations. Selected records have a
+bounded auxiliary budget (normally 10 seconds/member, also bounded by the worker).
+
+Benchmark attribution requires the numerical violation and structural trigger
+at the same call. Local agreement cannot label a whole gradient MR negative.
+Confirmation additionally requires a fresh audit of an immutable replay; an old
+MR suspicion reproduced by itself is insufficient. Re-auditing historical code
+with a new engine is labelled separately and never changes the historical 0/10
+or counts as a new autonomous discovery. Injected-gradient controls test the
+auditor and are never reported as framework defects.
+
+Use sbatch/validation/oracle_audit.sbatch with MIRAGE_ORACLE_STAGE=regression,
+candidate, fixtures or heldout. Candidate mode requires MIRAGE_ORACLE_CANDIDATE.
+All artifacts and exact code snapshots are per-job; no LLM service is needed.
+
+Validation on 2026-11-14 (PyTorch 2.15.0+cu132, Slurm dev/H200):
+
+| Check | Result | Artifact under result/general-oracle/ |
+| --- | --- | --- |
+| Development regressions | 118 passed, 2 deferred; deferred checks run separately | 777299/run/summary.json |
+| Numerical controls | 17 CPU tests plus CUDA FP32/FP64 control passed | 777299/run/test_numerical_gradients.py.log; 777321/run/cuda-gradient.log |
+| Historical generated candidate | Source agreement; negative-view follow-up violation in 2/4 directions; immutable replay corroborated | 777303/run/summary.json |
+| Fixed fixtures | 10/10 re-executed and independently corroborated | 777308/run/fixed/independent-controls.json |
+| Frozen held-out APIs | 6 agreement, 2 unknown, all 4 families covered | 777321/run/summary.json |
+
+The two held-out unknowns are repeated-operand addcmul/baddbmm cases whose
+backward edge bindings were ambiguous. They are not correctness passes. The
+checker was not tuned after held-out results. Fixed-fixture correctness controls
+remain their existing benchmark references; 10/10 is a regression result, not
+a claim that the new numerical oracle detects every benchmark. The historical
+autonomous 0/10 is unchanged; this task re-audited one existing generated case.
+
+The local chart also cannot certify unrecorded pinning/full-storage-capacity
+properties or original pre-target leaf/history. Numerical consistency should
+be interpreted within the recorded coordinate and execution contract.
