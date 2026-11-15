@@ -2,6 +2,18 @@
 from mirage.contracts.capabilities import Evidence, EvidenceStatus, OperandDescriptor
 
 
+_REPRESENTATION_SEMANTIC_CLASSES = {
+    'pointwise': {'sin', 'cos', 'exp', 'log', 'sqrt', 'tanh', 'sigmoid', 'abs', 'neg',
+                  'add', 'sub', 'mul', 'div', 'square'},
+    'reduction': {'sum', 'mean', 'std'},
+    'multiplication': {'matmul', 'mm', 'bmm'},
+    'linear_algebra': {'slogdet', 'lu_solve'},
+    'indexed_values': {'gather', 'scatter_add'},
+    'normalization': {'batch_norm', 'layer_norm', 'group_norm'},
+    'write_values': {'copy_', 'add_', 'sub_', 'mul_', 'div_', 'fill_', 'zero_'},
+}
+
+
 class PyTorchBackend:
     name = "pytorch"
 
@@ -62,6 +74,45 @@ class PyTorchBackend:
         if not input_edges and not boundary:
             return None, [], "no differentiable operand edge"
         return node, links, "factory-result boundary" if boundary else "direct operand edges"
+
+    def local_vjp_coordinate_edges(self, node, input_edges, descriptors):
+        """Bind exact-object repeats only for their summed storage-coordinate VJP.
+
+        Slot-to-path order is not observable for repeated identical operands. It
+        cannot support per-position semantic or optimizer provenance; any bijection
+        has the same pullback only when every occurrence is the exact same object.
+        """
+        by_path = {tuple(d['path']): d for d in descriptors}
+        if len(by_path) != len(descriptors) or len({p for p, _ in input_edges}) != len(input_edges):
+            return None
+        groups = {}
+        for path, edge in input_edges:
+            groups.setdefault((id(edge.node), edge.output_nr), []).append(path)
+        slots = {}
+        for slot, (parent, output_nr) in enumerate(node.next_functions):
+            if parent is None:
+                continue
+            key = (id(parent), output_nr)
+            if key not in groups:
+                return None
+            slots.setdefault(key, []).append(slot)
+        links = []
+        for key, paths in groups.items():
+            positions = slots.get(key, [])
+            if len(paths) != len(positions):
+                return None
+            if len(paths) > 1:
+                metadata = [by_path.get(path) for path in paths]
+                if any(d is None for d in metadata):
+                    return None
+                first = metadata[0]
+                fields = ('object_group', 'storage_group', 'shape', 'strides', 'offset',
+                          'dtype', 'device', 'layout', 'requires_grad', 'properties')
+                if (first.get('object_group') is None or first.get('storage_group') is None
+                        or any(any(d.get(field) != first.get(field) for field in fields) for d in metadata[1:])):
+                    return None
+            links.extend(zip(positions, paths))
+        return tuple(sorted(links)) if links else None
 
     def capability(self, name):
         if name in ("tensor_descriptors", "dense_storage_identity"):
@@ -211,19 +262,100 @@ class PyTorchBackend:
                 'reason': '; '.join(uncertainties) if uncertainties else 'comparison completed',
                 'policy': policy, 'screening_only': True}
 
+    def reduction_numerical_domain(self, operation, call):
+        """Bound rounding amplification for the existing 64-epsilon screen.
+
+        Admission depends on operands, never agreement of the compared outputs.
+        Wider or cancellation-dominated reductions require another numerical policy.
+        """
+        import math
+        import torch
+        tree = call.get('inputs') or {}
+        args, kwargs = tree.get('args', ()), tree.get('kwargs', {})
+        value = args[0] if args else kwargs.get('input')
+        if (not isinstance(value, torch.Tensor) or value.layout != torch.strided
+                or value.is_mkldnn or value.dtype not in (torch.float32, torch.float64)
+                or not value.numel() or not bool(torch.isfinite(value).all())
+                or kwargs.get('dtype', value.dtype) != value.dtype):
+            return False
+        dim = kwargs.get('dim', args[1] if len(args) > 1 else None)
+        correction = kwargs.get('correction', 1)
+        if operation == 'std':
+            unbiased = kwargs.get('unbiased', args[2] if len(args) > 2 else None)
+            if type(dim) is bool:
+                unbiased, dim = dim, None
+            if unbiased is not None:
+                if type(unbiased) is not bool or 'correction' in kwargs: return False
+                correction = int(unbiased)
+            if type(correction) not in (int, float) or not math.isfinite(correction): return False
+        if dim is None or isinstance(dim, (list, tuple)) and not dim:
+            dims = tuple(range(value.ndim))
+        else:
+            dims = (dim,) if type(dim) is int else dim
+            if not isinstance(dims, (list, tuple)) or any(type(d) is not int for d in dims): return False
+            if value.ndim == 0:
+                if tuple(dims) not in ((0,), (-1,)): return False
+                dims = ()
+            else:
+                if any(d < -value.ndim or d >= value.ndim for d in dims): return False
+                dims = tuple(d % value.ndim for d in dims)
+                if len(set(dims)) != len(dims): return False
+        width = math.prod(value.shape[d] for d in dims)
+        if width > (8 if operation == 'std' else 16): return False
+        normalized = value.to(torch.float64)
+        scale = normalized.abs().amax(dim=dims, keepdim=True)
+        normalized = normalized / torch.where(scale > 0, scale, torch.ones_like(scale))
+        limits = torch.finfo(value.dtype)
+        if operation == 'std':
+            if not 0 <= correction < width: return False
+            centered = normalized - normalized.mean(dim=dims, keepdim=True)
+            spread = (centered.square().sum(dim=dims, keepdim=True) / (width-correction)).sqrt()
+            # Near-constant inputs amplify subtraction and derivative roundoff.
+            expected_scale = spread * scale
+            return bool((spread >= .25).all() and (expected_scale >= limits.tiny).all()
+                        and (expected_scale <= limits.max).all())
+        total = normalized.sum(dim=dims, keepdim=True).abs()
+        mass = normalized.abs().sum(dim=dims, keepdim=True)
+        expected_scale = total * (scale / width if operation == 'mean' else scale)
+        normal_or_zero = (expected_scale >= limits.tiny) | (mass == 0)
+        return bool((total >= .5 * mass).all() and normal_or_zero.all()
+                    and (expected_scale <= limits.max).all())
+
+    def multiplication_numerical_domain(self, call):
+        """Rectangular products need a contraction bound, not invertibility."""
+        import math
+        import torch
+        tree = call.get('inputs') or {}
+        args, kwargs = tree.get('args', ()), tree.get('kwargs', {})
+        left = args[0] if args else kwargs.get('input')
+        right = args[1] if len(args) > 1 else kwargs.get('other', kwargs.get('mat2'))
+        operands = (left, right)
+        if any(not isinstance(t, torch.Tensor) or t.layout != torch.strided or t.is_mkldnn
+               or t.dtype not in (torch.float32, torch.float64) or not t.numel()
+               or t.ndim == 0 or not bool(torch.isfinite(t).all()) for t in operands):
+            return False
+        width = left.shape[-1]
+        if width != right.shape[-2 if right.ndim > 1 else 0] or width > 16: return False
+        a, b = [t.to(torch.float64) for t in operands]
+        scales = (float(a.abs().max()), float(b.abs().max()))
+        if 0 in scales: return True
+        a = a / scales[0]
+        b = b / scales[1]
+        try:
+            magnitude = (a @ b).abs().max()
+            mass = (a.abs() @ b.abs()).max()
+        except RuntimeError:
+            return False
+        if not bool(torch.isfinite(magnitude) and torch.isfinite(mass) and magnitude >= .5 * mass): return False
+        if magnitude == 0: return False
+        log_scale = math.log(float(magnitude)) + math.log(scales[0]) + math.log(scales[1])
+        limits = torch.finfo(left.dtype)
+        return math.log(limits.tiny) <= log_scale <= math.log(limits.max)
+
     def representation_evidence(self, left, right):
-        from mirage.runtime.program import leaves
         # One semantic-class registry serves all value-representation comparisons.
         # This is capability admission, never an API-specific expected-value formula.
-        classes = {
-            'pointwise': {'sin', 'cos', 'exp', 'log', 'sqrt', 'tanh', 'sigmoid', 'abs', 'neg',
-                          'add', 'sub', 'mul', 'div', 'square'},
-            'reduction': {'sum', 'mean', 'std'},
-            'linear_algebra': {'matmul', 'mm', 'bmm', 'slogdet', 'lu_solve'},
-            'indexed_values': {'gather', 'scatter_add'},
-            'normalization': {'batch_norm', 'layer_norm', 'group_norm'},
-            'write_values': {'copy_', 'add_', 'sub_', 'mul_', 'div_', 'fill_', 'zero_'},
-        }
+        classes = _REPRESENTATION_SEMANTIC_CLASSES
         api = left.get('config', {}).get('api', '')
         operation = api.rsplit('.', 1)[-1]
         value_semantics = any(operation in names for names in classes.values())
@@ -235,18 +367,36 @@ class PyTorchBackend:
         fact('logical_value_semantics', value_semantics, 'reviewed semantic class')
         numerical = operation in classes['pointwise'] | classes['indexed_values'] | classes['normalization'] | classes['write_values']
         numerical_reason = 'pointwise representation screening'
-        if operation in classes['linear_algebra']:
+        if operation in classes['reduction']:
+            numerical = all(self.reduction_numerical_domain(operation, call)
+                            for record in (left, right) for call in record.get('target_calls', ()))
+            numerical_reason = 'bounded reduction width and operand cancellation/spread'
+        elif operation in classes['multiplication']:
+            numerical = all(self.multiplication_numerical_domain(call)
+                            for record in (left, right) for call in record.get('target_calls', ()))
+            numerical_reason = 'bounded contraction width and product cancellation; no square-matrix requirement'
+        elif operation in classes['linear_algebra']:
             import torch
-            matrices = [t for call in left.get('target_calls', ())
-                        for _, t in leaves(call['inputs'])
-                        if t.ndim >= 2 and t.shape[-1] == t.shape[-2] and (t.is_floating_point() or t.is_complex())]
+            matrices = []
             try:
-                numerical = bool(matrices) and all(bool(torch.isfinite(t).all())
+                for record in (left, right):
+                    for call in record.get('target_calls', ()):
+                        tree = call['inputs']
+                        args, kwargs = tree.get('args', ()), tree.get('kwargs', {})
+                        matrix = args[0] if args else (kwargs.get('LU') if operation == 'lu_solve' else kwargs.get('A', kwargs.get('input')))
+                        if operation == 'lu_solve':
+                            pivots = args[1] if len(args) > 1 else kwargs.get('pivots')
+                            permutation, lower, upper = torch.lu_unpack(matrix, pivots)
+                            matrix = permutation @ lower @ upper
+                        matrices.append(matrix)
+                numerical = bool(matrices) and all(isinstance(t, torch.Tensor) and t.ndim >= 2
+                    and t.shape[-1] == t.shape[-2] and t.numel() > 0
+                    and (t.is_floating_point() or t.is_complex()) and bool(torch.isfinite(t).all())
                     and bool((torch.linalg.cond(t.to(torch.complex128 if t.is_complex() else torch.float64)) <= 100).all())
                     for t in matrices)
-            except (RuntimeError, ValueError):
+            except (RuntimeError, ValueError, TypeError):
                 numerical = False
-            numerical_reason = 'bounded observed matrix conditioning; no universal matrix certificate'
+            numerical_reason = 'bounded coefficient-matrix conditioning; RHS shape and conditioning are not invertibility requirements'
         fact('numerical_domain', numerical, numerical_reason)
 
         fact('read_only_target', value_semantics and operation not in classes['write_values'] and all(not c.get('write_effects') for r in (left,right) for c in r.get('target_calls',())), 'reviewed value/effect class')
@@ -266,73 +416,452 @@ class PyTorchBackend:
         return results
 
     def program_certificate(self, source):
-        """Conservative straight-line certificate; unsupported source remains executable.
+        """Compatibility tag for the reviewed source subset, never runtime proof."""
+        return self.explain_certificate(source)['certificate']
 
-        This admits a semantic subset, not arbitrary Python purity. In particular,
-        callbacks, modules, data-dependent control flow and metadata inspection
-        cannot acquire a certificate merely from successful execution.
+    def numerical_source_certificate(self, source):
+        """Source effects eligible for local VJP replay, not a representation MR."""
+        return self.explain_certificate(source, local_vjp=True)['certificate']
+
+    def optimizer_source_certificate(self, source):
+        """Restricted source effects for the separate optimizer-gradient MR."""
+        return self.explain_certificate(source, local_vjp=True, optimizer_update=True)['certificate']
+
+    def scoped_vjp_source_certificate(self, source):
+        """Reviewed surrounding effects; runtime local evidence is also mandatory."""
+        return self.explain_certificate(source, local_vjp=True, scoped_vjp=True)['certificate']
+
+    def explain_certificate(self, source, *, local_vjp=False, optimizer_update=False, scoped_vjp=False):
+        """Bounded binding/effect diagnostics; unsupported programs stay executable.
+
+        Values are tracked through straight-line assignments and the build context.
+        A method spelling is insufficient: its receiver must have a reviewed kind.
+        Target semantics, numerical domains and runtime MR conditions remain separate.
         """
         import ast
-        from mirage.generator.program import analyze_stateful
-        graph = analyze_stateful(source)
-        tree = ast.parse(source)
-        functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
-        if {n.name for n in functions} != {'build', 'run'}:
-            return None
-        aliases = graph['aliases']
-        def name(node):
-            if isinstance(node, ast.Name): return aliases.get(node.id, node.id)
-            if isinstance(node, ast.Attribute): return name(node.value) + '.' + node.attr
-            return ''
+        from mirage.generator.program import analyze_stateful, ContractError
+        report = {'version': 'source-certificate-analysis-1', 'status': 'unknown',
+                  'certificate': None, 'blockers': [],
+                  'scope': 'reviewed straight-line source bindings/effects around the target; target value/effect semantics and runtime MR conditions remain separate'}
+        phase = 'module'
+        optimizer_effects = optimizer_update or scoped_vjp
+
+        class Uncertified(Exception):
+            pass
+
+        def reject(node, code, reason):
+            report['blockers'].append({'code': code, 'phase': phase,
+                'line': getattr(node, 'lineno', 0), 'expression': ast.unparse(node)[:160], 'reason': reason})
+            raise Uncertified
+
+        # These describe reviewed value/effect and return kinds, not correctness
+        # formulas. Target calls outside this table can execute, but their return
+        # values cannot acquire arbitrary Tensor methods from a spelling alone.
+        value_ops = {'sin', 'cos', 'exp', 'log', 'sqrt', 'tanh', 'sigmoid', 'abs', 'neg',
+                     'add', 'sub', 'mul', 'div', 'square', 'sum', 'mean', 'std', 'matmul',
+                     'mm', 'bmm', 'gather', 'scatter_add', 'lu_solve'}
+        views = {'reshape', 'view', 'expand', 'conj', 'conj_physical', 'detach', 'clone',
+                 'contiguous', 'transpose', 'permute', 'unsqueeze', 'squeeze', 'to',
+                 'float', 'double', 'resolve_conj', 'resolve_neg', 'to_mkldnn'}
+        factories = {'torch.tensor', 'torch.zeros', 'torch.ones', 'torch.arange', 'torch.linspace',
+                     'torch.full', 'torch.complex', 'torch.sparse_csr_tensor', 'torch.eye'}
+        pure_functions = {'torch.' + name for name in value_ops | views - {'to', 'float', 'double', 'to_mkldnn'}}
+        pure_functions |= {'torch.zeros_like', 'torch.ones_like', 'torch.cat', 'torch.stack'}
+        tuple_methods = {'slogdet': ('sign', 'logabsdet'), 'lu_factor': ('LU', 'pivots')}
+        tuple_functions = {prefix + name: fields for name, fields in tuple_methods.items()
+                           for prefix in ('torch.', 'torch.linalg.', 'torch.Tensor.')}
+        target_tensor_ops = set().union(*_REPRESENTATION_SEMANTIC_CLASSES.values()) - set(tuple_methods)
+        target_tensor_functions = {prefix + name for name in target_tensor_ops for prefix in ('torch.', 'torch.Tensor.')}
+        target_tensor_functions |= {'torch.nn.functional.' + name for name in _REPRESENTATION_SEMANTIC_CLASSES['normalization']}
+        target_tensor_functions.add('torch.linalg.lu_solve')
+        pure_functions |= {'torch.linalg.lu_solve'}
+        optimizers = {'torch.optim.SGD', 'torch.optim.Adam', 'torch.optim.AdamW'}
+        # Native dtype aliases retain the same binding kind as their canonical
+        # names; operator/dtype support is still checked by runtime MR guards.
+        dtype_names = {'torch.' + name for name in ('float16', 'float32', 'float64', 'bfloat16',
+                       'complex32', 'complex64', 'complex128', 'int8', 'int16', 'int32', 'int64', 'uint8', 'bool',
+                       'half', 'float', 'double', 'short', 'int', 'long', 'chalf', 'cfloat', 'cdouble')}
+        tensor = ('tensor', None)
+        scalar = ('scalar', None)
+        protected = set()
+
+        def safe(value, *, build=False, active=None):
+            kind, payload = value
+            if kind in ('tensor', 'scalar', 'dtype', 'device', 'shape', 'target_result'):
+                return True
+            if kind in ('sequence', 'result_tuple', 'dict'):
+                active = set() if active is None else active
+                if id(value) in active:
+                    return False
+                active.add(id(value))
+                children = payload.values() if isinstance(payload, dict) else payload
+                result = all(safe(item, build=build, active=active) for item in children)
+                active.remove(id(value))
+                return result
+            return build and kind == 'optimizer'
+
+        def contains(value, sought, visited=None):
+            if value is sought:
+                return True
+            visited = set() if visited is None else visited
+            if id(value) in visited or value[0] not in ('dict', 'sequence', 'result_tuple'):
+                return False
+            visited.add(id(value))
+            children = value[1].values() if isinstance(value[1], dict) else value[1]
+            return any(contains(item, sought, visited) for item in children)
+
         def primitive_helper(node):
             def literal(item):
                 if isinstance(item, ast.Call) and isinstance(item.func, ast.Name) and item.func.id in ('min', 'max') and not item.keywords:
-                    values = [literal(argument) for argument in item.args]
-                    return (min if item.func.id == 'min' else max)(*values)
+                    return (min if item.func.id == 'min' else max)(*[literal(arg) for arg in item.args])
                 value = ast.literal_eval(item)
                 def primitive(v):
                     return type(v) in (int, float, bool) or isinstance(v, (list, tuple)) and all(primitive(x) for x in v)
-                if not primitive(value): raise ValueError('nonprimitive helper operand')
+                if not primitive(value):
+                    raise ValueError('nonprimitive helper operand')
                 return value
             try:
-                if sum(1 for _ in ast.walk(node)) > 64: return False
+                if sum(1 for _ in ast.walk(node)) > 64:
+                    return False
                 literal(node)
                 return True
             except (ValueError, TypeError, SyntaxError):
                 return False
-        constructors = {'torch.tensor', 'torch.zeros', 'torch.ones', 'torch.arange',
-                        'torch.linspace', 'torch.full', 'torch.finfo', 'torch.complex',
-                        'torch.sparse_csr_tensor', 'torch.linalg.lu_factor', 'torch.manual_seed',
-                        'torch.optim.SGD', 'torch.optim.Adam', 'torch.optim.AdamW'}
-        value_ops = {'sin', 'cos', 'exp', 'log', 'sqrt', 'tanh', 'sigmoid', 'abs', 'neg',
-                     'add', 'sub', 'mul', 'div', 'square', 'sum', 'mean', 'std', 'matmul',
-                     'mm', 'bmm', 'slogdet', 'lu_solve', 'gather', 'scatter_add'}
-        forbidden_attributes = {'data', 'grad_fn', 'is_leaf', 'is_conj', 'is_neg',
-                                'stride', 'storage_offset', 'is_contiguous', 'data_ptr'}
-        for function in functions:
-            local_dicts = {target.id for statement in function.body if isinstance(statement,ast.Assign)
-                           and isinstance(statement.value,ast.Dict) for target in statement.targets if isinstance(target,ast.Name)}
-            for node in ast.walk(function):
-                if isinstance(node, (ast.For, ast.While, ast.If, ast.IfExp, ast.Try, ast.With,
-                                     ast.Lambda, ast.ClassDef, ast.ListComp, ast.DictComp,
-                                     ast.SetComp, ast.GeneratorExp, ast.Await, ast.Yield)):
-                    return None
-                if isinstance(node, ast.FunctionDef) and node is not function: return None
-                if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, ast.Store):
-                    local_build_write = (function.name == 'build' and isinstance(node,ast.Subscript)
-                        and isinstance(node.value,ast.Name) and node.value.id in local_dicts
-                        and isinstance(node.slice,ast.Constant) and isinstance(node.slice.value,str))
-                    if not local_build_write: return None
-                if isinstance(node, ast.Attribute) and (node.attr.startswith('_') or node.attr in forbidden_attributes): return None
-                if isinstance(node, ast.Call):
-                    qualified = name(node.func)
-                    leaf = node.func.attr if isinstance(node.func, ast.Attribute) else ''
-                    if qualified in ('min', 'max') and primitive_helper(node): continue
-                    if function.name == 'build':
-                        if qualified not in constructors and leaf not in ('requires_grad_', 'reshape', 'view', 'expand', 'conj', 'conj_physical', 'detach', 'to_mkldnn', 'clone', 'contiguous', 'zeros_like', 'ones_like'): return None
-                    elif qualified not in ('probe.call', 'probe.mark') and leaf not in value_ops | {'backward', 'clone'}:
-                        return None
-        return 'explicit_straight_line_values_v1'
+
+        def native_tensor_result(binding, positional, keywords):
+            # Native schemas establish return kinds, not derivative correctness.
+            # Restrict this extension to the scoped route; unknown Python wrappers
+            # and heterogeneous overload returns cannot acquire Tensor methods.
+            if not scoped_vjp:
+                return False
+            import inspect
+            import torch
+            from mirage.runtime.api_metadata import resolve
+            name = ('torch.Tensor.' + binding[1] if binding[0] == 'tensor_method'
+                    else binding[1])
+            try:
+                target = resolve(name)
+                if not (inspect.isbuiltin(target) or inspect.ismethoddescriptor(target)):
+                    return False
+                owner = getattr(target, '__objclass__', None)
+                module = getattr(target, '__module__', None) or getattr(owner, '__module__', '')
+                if module != 'torch' and not module.startswith('torch.'):
+                    return False
+                operator = 'aten::' + target.__name__
+                schemas = torch._C._jit_get_schemas_for_operator(operator)
+                supplied = ([tensor] if binding[0] == 'tensor_method' else []) + positional
+                def accepts_tensor(kind):
+                    tag = kind.kind()
+                    if tag == 'OptionalType':
+                        return accepts_tensor(kind.getElementType())
+                    # Unknown schema types remain possible, so their return kinds
+                    # must still pass. Never discard an overload by guesswork.
+                    return tag not in {'NumberType', 'FloatType', 'IntType', 'ComplexType',
+                                       'BoolType', 'StringType', 'NoneType', 'ListType',
+                                       'TupleType', 'DictType', 'DeviceObjType', 'SymIntType'}
+                def compatible(schema):
+                    args = [a for a in schema.arguments if not a.kwarg_only]
+                    for index, value in enumerate(supplied):
+                        if value[0] == 'tensor' and (index >= len(args) or not accepts_tensor(args[index].type)):
+                            return False
+                    named = {a.name: a for a in schema.arguments}
+                    for key, (value, _) in keywords.items():
+                        if value[0] == 'tensor' and key in named and not accepts_tensor(named[key].type):
+                            return False
+                    return True
+                schemas = [schema for schema in schemas if compatible(schema)]
+                established = bool(schemas) and all(len(schema.returns) == 1
+                    and schema.returns[0].type.kind() == 'TensorType' for schema in schemas)
+            except (AttributeError, ValueError, RuntimeError, TypeError):
+                return False
+            if established:
+                fact = {'target': name, 'operator': operator, 'return_kind': 'Tensor',
+                        'source': 'installed native schemas compatible with proven Tensor arguments',
+                        'overloads': len(schemas)}
+                facts = report.setdefault('native_return_bindings', [])
+                if fact not in facts:
+                    facts.append(fact)
+            return established
+
+        def expr(node, env, *, target=False):
+            if isinstance(node, ast.Constant) and type(node.value) in (type(None), bool, int, float, complex, str):
+                return scalar
+            if isinstance(node, ast.Name):
+                if node.id in env:
+                    return env[node.id]
+                reject(node, 'unbound_name', 'No reviewed binding for this name')
+            if isinstance(node, (ast.List, ast.Tuple)):
+                return ('sequence', [expr(item, env) for item in node.elts])
+            if isinstance(node, ast.Dict):
+                if any(not isinstance(key, ast.Constant) or type(key.value) not in (str, int) for key in node.keys):
+                    reject(node, 'dynamic_container', 'Only explicit primitive dictionary keys are reviewed')
+                return ('dict', {key.value: expr(value, env) for key, value in zip(node.keys, node.values)})
+            if isinstance(node, ast.Attribute):
+                if node.attr.startswith('_'):
+                    reject(node, 'private_attribute', 'Private attributes and overrides are not reviewed')
+                base = expr(node.value, env)
+                kind, payload = base
+                if kind == 'symbol':
+                    qualified = payload + '.' + node.attr
+                    if qualified in dtype_names:
+                        return ('dtype', qualified)
+                    if qualified in ('math.pi', 'math.e'):
+                        return scalar
+                    return ('symbol', qualified)
+                if kind == 'tensor':
+                    if node.attr in ('grad', 'real', 'imag', 'T', 'mT'):
+                        return tensor
+                    if node.attr in ('dtype', 'device', 'shape'):
+                        return (node.attr, None)
+                    if node.attr in value_ops | views | set(tuple_methods) | {'backward', 'requires_grad_'} or target:
+                        return ('tensor_method', node.attr)
+                    reject(node, 'metadata_or_unknown_attribute', 'Tensor metadata is not a logical-value observable under this certificate')
+                if kind == 'optimizer' and optimizer_effects and phase == 'run' and node.attr in ('step', 'zero_grad'):
+                    return ('optimizer_method', node.attr)
+                if scoped_vjp and kind == 'dict' and node.attr == 'values':
+                    return ('dict_values', list(payload.values()))
+                if kind == 'finfo' and node.attr in ('tiny', 'max', 'min', 'eps', 'smallest_normal', 'bits'):
+                    return scalar
+                if kind == 'result_tuple' and node.attr in payload:
+                    return payload[node.attr]
+                reject(node, 'unproved_receiver', 'Attribute receiver has no reviewed Tensor, namespace or result binding')
+            if isinstance(node, ast.Subscript):
+                kind, payload = expr(node.value, env)
+                if kind in ('dict', 'sequence', 'result_tuple'):
+                    if not isinstance(node.slice, ast.Constant) or type(node.slice.value) not in (int, str):
+                        reject(node, 'dynamic_container', 'Container binding requires a literal key/index')
+                    try:
+                        return (list(payload.values())[node.slice.value] if kind == 'result_tuple' else payload[node.slice.value])
+                    except (KeyError, IndexError, TypeError):
+                        reject(node, 'missing_container_binding', 'Container key/index is not established by build')
+                if kind in ('tensor', 'shape'):
+                    def index(item):
+                        if isinstance(item, ast.Slice):
+                            for part in (item.lower, item.upper, item.step):
+                                if part is not None and expr(part, env)[0] != 'scalar':
+                                    reject(part, 'index_binding', 'Slice bounds must be primitive')
+                        elif isinstance(item, ast.Tuple):
+                            for part in item.elts: index(part)
+                        elif expr(item, env)[0] not in ('scalar', 'tensor'):
+                            reject(item, 'index_binding', 'Index is not a reviewed primitive/Tensor')
+                    index(node.slice)
+                    return tensor if kind == 'tensor' else scalar
+                reject(node, 'unproved_receiver', 'Subscript receiver binding is unknown')
+            if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.MatMult)):
+                values = [expr(node.left, env), expr(node.right, env)]
+                if all(value[0] in ('tensor', 'scalar') for value in values):
+                    return tensor if any(value[0] == 'tensor' for value in values) else scalar
+                reject(node, 'overloaded_operator', 'Operators require known primitive or Tensor operands')
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+                value = expr(node.operand, env)
+                if value[0] in ('tensor', 'scalar'):
+                    return value
+                reject(node, 'overloaded_operator', 'Unary operator receiver is not proven')
+            if isinstance(node, ast.Call):
+                if scoped_vjp and isinstance(node.func, ast.Name) and node.func.id == 'list' and node.func.id not in env:
+                    if len(node.args) == 1 and not node.keywords:
+                        value = expr(node.args[0], env)
+                        if value[0] == 'sequence':
+                            return value
+                    reject(node, 'container_construction', 'list requires an established finite sequence')
+                if isinstance(node.func, ast.Name) and node.func.id in ('min', 'max') and node.func.id not in env:
+                    if primitive_helper(node):
+                        return scalar
+                    reject(node, 'overloaded_helper', 'min/max are admitted only on bounded literal primitive operands')
+                function = expr(node.func, env)
+                is_target = function == ('symbol', 'probe.call')
+                positional = []
+                keywords = {}
+                for arg in node.args:
+                    if isinstance(arg, ast.Starred):
+                        value = expr(arg.value, env)
+                        if value[0] not in ('sequence', 'result_tuple'):
+                            reject(arg, 'dynamic_arguments', 'Positional expansion requires a known sequence binding')
+                        positional.extend(value[1].values() if value[0] == 'result_tuple' else value[1])
+                    else:
+                        positional.append(expr(arg, env, target=is_target and not positional))
+                for keyword in node.keywords:
+                    value = expr(keyword.value, env)
+                    if keyword.arg is None:
+                        if value[0] != 'dict' or any(type(key) is not str for key in value[1]):
+                            reject(keyword.value, 'dynamic_arguments', 'Keyword expansion requires a known string-key dictionary binding')
+                        entries = [(key, child, None) for key, child in value[1].items()]
+                    else:
+                        entries = [(keyword.arg, value, keyword.value)]
+                    for key, child, origin in entries:
+                        if key in keywords:
+                            reject(node, 'duplicate_keyword', 'Expanded and explicit keyword bindings must not overlap')
+                        keywords[key] = (child, origin)
+                keyword_values = [value for value, _ in keywords.values()]
+                if is_target:
+                    if not positional:
+                        reject(node, 'target_binding', 'Target callable is missing')
+                    target_value = positional[0]
+                    if target_value[0] != 'tensor_method' and not (target_value[0] == 'symbol' and target_value[1].startswith('torch.')):
+                        reject(node, 'target_binding', 'Target must retain its imported framework or native Tensor binding')
+                    arguments = positional[1:] + keyword_values
+                    if not all(safe(value) for value in arguments):
+                        reject(node, 'target_arguments', 'Unknown target argument binding')
+                    qualified = target_value[1]
+                    fields = tuple_methods.get(qualified) if target_value[0] == 'tensor_method' else tuple_functions.get(qualified)
+                    if fields:
+                        return ('result_tuple', {key: tensor for key in fields})
+                    method_tensor = target_value[0] == 'tensor_method' and qualified in target_tensor_ops | views
+                    return tensor if (method_tensor or qualified in pure_functions | factories | target_tensor_functions
+                                      or native_tensor_result(target_value, positional[1:], keywords)) else ('target_result', None)
+                arguments = positional + keyword_values
+                if not all(safe(value) for value in arguments):
+                    reject(node, 'argument_binding', 'Callbacks, opaque objects and framework bindings are not value arguments')
+                if any(key in ('out', 'inplace') and not (key == 'out' and isinstance(origin, ast.Constant) and origin.value is None)
+                       for key, (_, origin) in keywords.items()):
+                    reject(node, 'write_argument', 'Write-capable helper arguments require a separate effect certificate')
+                kind, qualified = function
+                unbound_tensor_method = kind == 'symbol' and qualified.startswith('torch.Tensor.')
+                if unbound_tensor_method:
+                    if not positional or positional[0][0] != 'tensor':
+                        reject(node, 'unproved_receiver', 'Unbound Tensor methods require an explicit reviewed Tensor receiver')
+                    kind, qualified = 'tensor_method', qualified.rsplit('.', 1)[-1]
+                if kind == 'symbol':
+                    if qualified == 'torch.nn.Parameter' and optimizer_effects and phase == 'build':
+                        # Native Parameter construction gets no general constructor
+                        # exemption: data must retain its reviewed Tensor binding.
+                        data = positional[0] if len(positional) == 1 and 'data' not in keywords else (
+                            keywords['data'][0] if not positional and 'data' in keywords else None)
+                        flag = keywords.get('requires_grad')
+                        if (data is not None and data[0] == 'tensor' and len(positional) <= 1
+                                and set(keywords) <= {'data', 'requires_grad'}
+                                and not any(isinstance(arg, ast.Starred) for arg in node.args)
+                                and not any(keyword.arg is None for keyword in node.keywords)
+                                and (flag is None or isinstance(flag[1], ast.Constant) and flag[1].value is True)):
+                            return tensor
+                        reject(node, 'parameter_constructor', 'Parameter requires reviewed Tensor data and literal requires_grad=True')
+                    if qualified in ('probe.mark',):
+                        return scalar
+                    if qualified in factories | pure_functions:
+                        return tensor
+                    if qualified in tuple_functions:
+                        return ('result_tuple', {key: tensor for key in tuple_functions[qualified]})
+                    if qualified == 'torch.finfo':
+                        return ('finfo', None)
+                    if qualified in optimizers and phase == 'build':
+                        return ('optimizer', None)
+                    if qualified == 'torch.manual_seed' and phase == 'build' and all(value[0] == 'scalar' for value in arguments):
+                        return ('seed_result', None)
+                if kind == 'dict_values' and scoped_vjp and not node.args and not node.keywords:
+                    return ('sequence', qualified)
+                if kind == 'optimizer_method':
+                    if qualified == 'step' and not node.args and not node.keywords:
+                        return scalar
+                    if qualified == 'zero_grad' and not node.args and (not node.keywords or
+                            len(node.keywords) == 1 and node.keywords[0].arg == 'set_to_none'
+                            and isinstance(node.keywords[0].value, ast.Constant) and node.keywords[0].value.value is True):
+                        return scalar
+                    reject(node, 'optimizer_effect', 'Reviewed optimizer actions exclude closures, dynamic flags and step arguments')
+                if kind == 'tensor_method':
+                    if qualified in tuple_methods:
+                        return ('result_tuple', {key: tensor for key in tuple_methods[qualified]})
+                    if qualified in value_ops | views:
+                        return tensor
+                    if qualified == 'requires_grad_' and phase == 'build':
+                        return tensor
+                    if qualified == 'requires_grad_' and phase == 'run' and local_vjp:
+                        # Only explicit native gradient enabling is reviewed here.
+                        # Keep literal provenance; expanded/dynamic flags can hide effects.
+                        arguments = node.args[1:] if unbound_tensor_method else node.args
+                        flag = (arguments[0] if len(arguments) == 1 and not node.keywords
+                                else node.keywords[0].value if not arguments and len(node.keywords) == 1
+                                and node.keywords[0].arg == 'requires_grad' else None)
+                        if (not any(isinstance(arg, ast.Starred) for arg in node.args)
+                                and isinstance(flag, ast.Constant) and flag.value is True):
+                            return tensor
+                        reject(node, 'gradient_setup', 'Local VJP gradient setup requires an explicit literal True')
+                    if qualified == 'backward' and phase == 'run':
+                        return scalar
+                reject(node, 'unsupported_call', 'Callable or phase lacks a reviewed value/effect binding')
+            reject(node, 'unsupported_expression', 'Expression is outside the reviewed straight-line value subset')
+
+        def assign(target, value, env, origin=None):
+            if (scoped_vjp and phase == 'run' and isinstance(target, ast.Attribute)
+                    and target.attr == 'grad' and isinstance(origin, ast.Constant) and origin.value is None
+                    and expr(target.value, env)[0] == 'tensor'):
+                return
+            if isinstance(target, ast.Name):
+                if target.id in protected:
+                    reject(target, 'binding_reassignment', 'Framework, builtin or interface bindings cannot be replaced')
+                env[target.id] = value
+                return
+            if isinstance(target, (ast.Tuple, ast.List)) and value[0] in ('sequence', 'result_tuple'):
+                values = list(value[1].values()) if value[0] == 'result_tuple' else value[1]
+                if len(target.elts) != len(values):
+                    reject(target, 'unpacking_binding', 'Unpacking arity is not established')
+                for item, child in zip(target.elts, values): assign(item, child, env)
+                return
+            if isinstance(target, ast.Subscript) and phase == 'build' and isinstance(target.value, ast.Name):
+                base = env.get(target.value.id)
+                if base and base[0] == 'dict' and isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str):
+                    if contains(value, base):
+                        reject(target, 'container_cycle', 'Direct or indirect context container cycles are not reviewed')
+                    base[1][target.slice.value] = value
+                    return
+            reject(target, 'write_effect', 'Only local bindings and owned build dictionary entries may be assigned')
+
+        def body(function, env):
+            result = None
+            for statement in function.body:
+                if result is not None:
+                    reject(statement, 'unreachable_statement', 'Statements after return are not reviewed')
+                if isinstance(statement, ast.Assign):
+                    value = expr(statement.value, env)
+                    for target in statement.targets: assign(target, value, env, statement.value)
+                elif isinstance(statement, ast.Expr):
+                    expr(statement.value, env)
+                elif isinstance(statement, ast.Return):
+                    result = expr(statement.value, env)
+                    if not safe(result, build=phase == 'build'):
+                        reject(statement, 'opaque_return', 'Returned state/observations must have reviewed value bindings')
+                elif not isinstance(statement, ast.Pass):
+                    reject(statement, 'statement_effect', 'Control flow, deletion, augmented assignment and definitions are not certified')
+            if result is None:
+                reject(function, 'missing_return', 'Explicit return required for binding analysis')
+            return result
+
+        try:
+            graph = analyze_stateful(source)
+            tree = ast.parse(source)
+            definitions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+            if set(definitions) != {'build', 'run'}:
+                reject(tree, 'helper_definition', 'Only build/run functions are reviewed; helper bodies cannot be hidden')
+            if any(not isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef)) for node in tree.body):
+                reject(next(node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef))),
+                       'module_definition', 'Classes and opaque method receivers require a separate certificate')
+            aliases = graph['aliases']
+            imported = {key: (('dtype', value) if value in dtype_names else ('symbol', value)) for key, value in aliases.items()}
+            if scoped_vjp:
+                protected.add('list')
+            protected.update(aliases.keys() | {'min', 'max', 'build', 'run', 'ctx', 'probe', 'device', 'seed'})
+            for node in tree.body:
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        local = alias.asname or alias.name.split('.')[0]
+                        if local in ('build', 'run', 'ctx', 'probe', 'device', 'seed', 'min', 'max'):
+                            reject(node, 'binding_reassignment', 'Import shadows an interface or reviewed builtin')
+            phase = 'build'
+            context = body(definitions['build'], dict(imported, device=('device', None), seed=scalar))
+            if context[0] != 'dict':
+                reject(definitions['build'], 'context_binding', 'build must return a known context dictionary')
+            phase = 'run'
+            body(definitions['run'], dict(imported, ctx=context, probe=('symbol', 'probe')))
+        except Uncertified:
+            return report
+        except (ContractError, SyntaxError, ValueError, TypeError, RecursionError) as error:
+            report['blockers'].append({'code': 'source_contract', 'phase': phase,
+                'line': getattr(error, 'lineno', 0) or 0, 'expression': '', 'reason': str(error)[:240]})
+            return report
+        report.update(status='verified', certificate=('explicit_scoped_local_vjp_v1' if scoped_vjp else
+                      'explicit_optimizer_gradient_update_v1' if optimizer_update else
+                      'explicit_straight_line_local_vjp_v1'
+                      if local_vjp else 'explicit_straight_line_values_v1'))
+        return report
 
     def operand_obligations(self, target, tree):
         """Obtain write roles from installed native schemas, never mutation recipes."""
@@ -470,6 +999,7 @@ class CompilerObserver:
     def __init__(self, probe, namespace, config):
         self.probe, self.namespace, self.config = probe, namespace, config
         self.graphs = []
+        self.factory_records = []
 
     def __enter__(self):
         import torch
@@ -501,6 +1031,10 @@ class CompilerObserver:
         from mirage.runtime.program import leaves
         from mirage.runtime.operands import discover
         from dataclasses import asdict
+        self.probe._validate_callable_model(model)
+        factory_id = len(self.factory_records)
+        callable_id = factory_id
+        invocation = {'next': 0, 'active': None}
         requested = kwargs.pop('backend', 'inductor')
         selected = 'eager' if self.config.get('compiler_reference') else requested
         actual_backend = lookup_backend(selected) if isinstance(selected, str) else selected
@@ -554,12 +1088,18 @@ class CompilerObserver:
                         edges = probe._backend.gradient_edges(operands)
                     except ValueError:
                         tree, descriptors, properties, edges = None, [], [], []
+                if macro:
+                    # Graph-input edges protect identity outputs from being credited
+                    # as a backward through the returned compiled callable.
+                    edges = probe._backend.gradient_edges(discover({'args': values}, probe._backend))
                 entry_context = dict(context_state(), inference_enabled=torch.is_inference_mode_enabled())
                 target_snapshot = snapshot(tree)
                 input_snapshot = snapshot(values)
                 outputs = compiled(*values)
                 self.graphs.append({'fingerprint':fingerprint, 'backend':str(selected),
                                     'target_matches':len(matches), 'macro_target':macro, 'inputs':input_snapshot,
+                                    'factory_id':factory_id, 'callable_id':callable_id,
+                                    'invocation_index':invocation['active'],
                                     'target_execution_certified':selected in ('eager','inductor','aot_eager') and bool(matches or macro)})
                 probe.operations.append({'name':'compiled_execute'})
                 probe._recorder.emit('compiled_execute', fingerprint=fingerprint, target_matches=len(matches))
@@ -568,7 +1108,11 @@ class CompilerObserver:
                 probe.calls.append({'index':index, 'inputs':target_snapshot, 'metadata':descriptors,
                                     'input_properties':properties, 'output':snapshot(outputs),
                                     'evidence':'executed FX graph', 'target_operands_observed':tree is not None,
-                                    'execution_mode':'compiled', 'backend':str(selected), 'entry_context':entry_context})
+                                    'execution_mode':'compiled', 'backend':str(selected), 'entry_context':entry_context,
+                                    **({'kind':'compiled_callable_execution', 'factory_target':'torch.compile',
+                                        'factory_id':factory_id, 'callable_id':callable_id,
+                                        'invocation_index':invocation['active'],
+                                        'callable_identity_verified':invocation['active'] is not None} if macro else {})})
                 probe._recorder.emit('api_exit', call=index, evidence='executed FX graph')
                 actual_outputs, _ = tree_flatten(outputs)
                 if len(actual_outputs) == len(differentiable):
@@ -577,7 +1121,7 @@ class CompilerObserver:
                                 if reaches and isinstance(tensor, torch.Tensor)]
                     direct = (direct and tree is not None and
                               all(o is matches[0] for o, reaches in zip(output_nodes, differentiable) if reaches))
-                    probe.observe_outputs(index, observed, edges, node_admissible=direct)
+                    probe.observe_outputs(index, observed, edges, node_admissible=macro or direct, boundary=macro)
                 return outputs
             return invoke
         compiled_model = self.original(model, backend=backend, **kwargs)
@@ -585,7 +1129,17 @@ class CompilerObserver:
             # Only suspend our observation mode, never a user-selected mode.
             mode = (_pop_mode_temporarily() if _get_current_function_mode() is getattr(probe, '_action_observer', None)
                     and _get_current_function_mode() is not None else nullcontext())
-            with mode: return compiled_model(*args, **kw)
+            previous = invocation['active']
+            invocation['active'] = invocation['next']
+            invocation['next'] += 1
+            try:
+                with mode: return compiled_model(*args, **kw)
+            finally:
+                invocation['active'] = previous
+        self.factory_records.append({'factory_id':factory_id, 'factory_target':'torch.compile',
+                                     'callable_ids':[callable_id]})
+        probe._register_callable(invoke_model, factory_target='torch.compile',
+                                 factory_id=factory_id, callable_id=callable_id)
         return invoke_model
 
 
@@ -633,6 +1187,8 @@ class CaptureObserver:
         from dataclasses import asdict
         modules = callables if isinstance(callables, tuple) else (callables,)
         probe = self.probe
+        probe._validate_capture_callables(callables, sample_args)
+        factory_id = len(self.factory_records)
         def model_state():
             observing=probe._observing;probe._observing=True
             try: return [snapshot(m.state_dict()) if isinstance(m,torch.nn.Module) else None for m in modules]
@@ -652,14 +1208,21 @@ class CaptureObserver:
         finally:
             self.active = False; probe._observing = previous
         model_after = model_state()
-        self.factory_records.append({'before':model_before,'after':model_after,
+        self.factory_records.append({'factory_id':factory_id, 'factory_target':'torch.cuda.make_graphed_callables',
+                                     'callable_ids':list(range(len(modules))),
+                                     'before':model_before,'after':model_after,
                                      'buffer_free':all(isinstance(m,torch.nn.Module) and not list(m.buffers()) for m in modules),
                                      'reference':bool(self.config.get('capture_reference'))})
         owner = self
         class ObservedCallable:
-            def __init__(self, original): self.original = original
+            def __init__(self, original, callable_id):
+                self.original, self.callable_id, self.invocations = original, callable_id, 0
             def __getattr__(self, name): return getattr(self.original, name)
             def __call__(self, *args, **kw):
+                if probe._target is not owner.original:
+                    return self.original(*args, **kw)
+                invocation_index = self.invocations
+                self.invocations += 1
                 tree = {'args':args,'kwargs':kw}
                 observing = probe._observing; probe._observing = True
                 try:
@@ -670,7 +1233,7 @@ class CaptureObserver:
                     before = snapshot(tree)
                     input_edges = probe._backend.gradient_edges(operands)
                     reference = bool(owner.config.get('capture_reference'))
-                    if reference and isinstance(self.original, torch.nn.Module):
+                    if isinstance(self.original, torch.nn.Module):
                         input_edges += probe._backend.gradient_edges(discover(
                             {'parameters':dict(self.original.named_parameters())}, probe._backend))
                 finally:
@@ -685,14 +1248,21 @@ class CaptureObserver:
                                         'inputs':before,'metadata':descriptors, 'input_properties':properties,
                                         'output':snapshot(output),'completed_replays':completed_replays,
                                         'reference':reference, 'entry_context':entry_context,
+                                        'factory_target':'torch.cuda.make_graphed_callables',
+                                        'factory_id':factory_id, 'callable_id':self.callable_id,
+                                        'invocation_index':invocation_index, 'callable_identity_verified':True,
                                         'execution_mode':'reference' if reference else 'captured'})
                     probe.operations.append({'name':'factory_result_execution'})
                     probe._recorder.emit('factory_result_execution',call=index,completed_replays=completed_replays)
-                    probe.observe_outputs(index, leaves(output), input_edges, boundary=not reference,
+                    probe.observe_outputs(index, leaves(output), input_edges, boundary=True,
                                           node_admissible=reference or completed_replays > 0)
                 finally: probe._observing = observing
                 return output
-        return tuple(ObservedCallable(x) for x in result) if isinstance(result,tuple) else ObservedCallable(result)
+        wrapped = tuple(ObservedCallable(x, i) for i, x in enumerate(result)) if isinstance(result,tuple) else (ObservedCallable(result, 0),)
+        for item in wrapped:
+            probe._register_callable(item, factory_target='torch.cuda.make_graphed_callables',
+                                     factory_id=factory_id, callable_id=item.callable_id)
+        return wrapped if isinstance(result,tuple) else wrapped[0]
 
 
 def capture_source_certificate(source):
@@ -713,18 +1283,27 @@ def capture_source_certificate(source):
 
 class OptimizerObserver:
     """Observe completed source-owned updates and clearing; never schedule them."""
-    def __init__(self,optimizer,on_action):
+    def __init__(self,optimizer,on_action, *, before_step=None, after_step=None):
         self.optimizer,self.on_action=optimizer,on_action
+        self.before_step,self.after_step=before_step,after_step
 
     def __enter__(self):
         import sys
         import inspect
-        self.previous=sys.getprofile();self.handle=None;self.zero_code=None
+        self.previous=sys.getprofile();self.handle=None;self.pre_handle=None;self.zero_code=None
         if self.optimizer is not None:
             import torch
             if not isinstance(self.optimizer,torch.optim.Optimizer):
-                raise ValueError('Registered optimizer must implement the PyTorch optimizer contract')
-            self.handle=self.optimizer.register_step_post_hook(lambda *args:self.on_action('optimizer_step'))
+                # Custom stateful objects may execute but cannot supply native
+                # optimizer completion or gradient-consumption evidence.
+                return self
+            if self.before_step is not None:
+                self.pre_handle=self.optimizer.register_step_pre_hook(self.before_step)
+            def completed(*args):
+                if self.after_step is not None:
+                    self.after_step(*args)
+                self.on_action('optimizer_step')
+            self.handle=self.optimizer.register_step_post_hook(completed)
             self.zero_code=getattr(inspect.unwrap(self.optimizer.zero_grad),'__code__',None)
             sys.setprofile(self.profile)
         return self
@@ -738,6 +1317,7 @@ class OptimizerObserver:
         import sys
         if self.optimizer is not None: sys.setprofile(self.previous)
         if self.handle is not None: self.handle.remove()
+        if self.pre_handle is not None: self.pre_handle.remove()
 
 
 def execution_source_certificate(source):

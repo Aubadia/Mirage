@@ -154,11 +154,62 @@ class HTTPProviderTests(unittest.TestCase):
 class StatePlanPayloadTests(unittest.TestCase):
     def test_separate_schemas_and_stable_api_prefix(self):
         provider = HTTPProvider(HTTPConfig('http://localhost:8000/v1'))
-        for contract, field in [('state-goal-plan','plans'), ('region-patches','patches')]:
+        for contract, fields in [('state-goal-plan',['plans', 'examined_goal_ids']), ('region-patches',['patches'])]:
             request = Request(Stage.STATE_GOAL, 'variable task', {'contract':contract,
                 'api_context':{'documentation':'installed spec', 'documentation_references':[{'documentation':'referenced spec'}]}})
             payload = provider._payload(request)
-            self.assertEqual(payload['response_format']['json_schema']['schema']['required'], [field])
+            schema = payload['response_format']['json_schema']['schema']
+            self.assertEqual(schema['required'], fields)
+            if contract == 'state-goal-plan':
+                for branch in schema['properties']['plans']['items']['anyOf']:
+                    self.assertIn('status', branch['required'])
+                    self.assertIn('blockers', branch['required'])
             content = payload['messages'][1]['content']
             self.assertLess(content.index('installed spec'), content.index('variable task'))
             self.assertIn('referenced spec', content)
+
+
+    def test_plan_payload_limits_both_id_fields_to_this_request_without_mutating_template(self):
+        from mirage.generator.state_plan import PLAN_SCHEMA
+        provider = HTTPProvider(HTTPConfig('http://localhost:8000/v1'))
+        original = json.dumps(PLAN_SCHEMA, sort_keys=True)
+        def payload(ids):
+            request = Request(Stage.STATE_GOAL, 'Plan', {'contract':'state-goal-plan',
+                'goal_catalog':[{'id':identifier} for identifier in ids]})
+            return provider._payload(request)['response_format']['json_schema']['schema']
+        first, second = payload(['goal-a', 'goal-b']), payload(['goal-c'])
+        for schema, identifiers in ((first, ['goal-a','goal-b']), (second, ['goal-c'])):
+            self.assertEqual(schema['properties']['examined_goal_ids']['items']['enum'], identifiers)
+            for branch in schema['properties']['plans']['items']['anyOf']:
+                self.assertEqual(branch['properties']['goal_ids']['items']['enum'], identifiers)
+        first['properties']['plans']['items']['anyOf'][0]['properties']['goal_ids']['items']['enum'].append('changed')
+        self.assertEqual(json.dumps(PLAN_SCHEMA, sort_keys=True), original)
+        self.assertEqual(second['properties']['examined_goal_ids']['items']['enum'], ['goal-c'])
+        self.assertEqual(first['properties']['examined_goal_ids']['items']['enum'], ['goal-a','goal-b'])
+
+    def test_plan_schema_discriminates_executable_actions_from_unresolved_blockers(self):
+        from mirage.generator.state_plan import planning_schema
+        schema = planning_schema([{'id':'goal-a'}])
+        branches = {branch['properties']['status']['enum'][0]:branch
+                    for branch in schema['properties']['plans']['items']['anyOf']}
+        self.assertEqual(set(branches), {'planned', 'unresolved'})
+        for status, branch in branches.items():
+            self.assertFalse(branch['additionalProperties'])
+            self.assertEqual(set(branch['required']), set(branch['properties']))
+        planned, unresolved = (branches[status]['properties'] for status in ('planned','unresolved'))
+        self.assertEqual(planned['actions']['minItems'], 1)
+        self.assertEqual(planned['regions']['minItems'], 1)
+        self.assertEqual(planned['blockers']['maxItems'], 0)
+        self.assertEqual(unresolved['actions']['maxItems'], 0)
+        self.assertEqual(unresolved['regions']['maxItems'], 0)
+        self.assertEqual(unresolved['blockers']['minItems'], 1)
+
+    def test_empty_catalog_can_only_emit_empty_arrays(self):
+        from mirage.generator.state_plan import planning_schema
+        schema = planning_schema([])
+        self.assertEqual(schema['properties']['plans']['maxItems'], 0)
+        self.assertEqual(schema['properties']['examined_goal_ids']['maxItems'], 0)
+        self.assertNotIn('"enum": []', json.dumps(schema))
+        for catalog in ([{'id':'same'}, {'id':'same'}], [{'id':''}], [{'id':None}]):
+            with self.subTest(catalog=catalog), self.assertRaises(ValueError):
+                planning_schema(catalog)

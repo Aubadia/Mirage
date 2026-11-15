@@ -30,6 +30,10 @@ def parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="Generate, execute and inspect a batch of candidates", allow_abbrev=False)
     run.add_argument("--apis", nargs="+")
     run.add_argument("--strategy", choices=("training","properties","stateful"), default="training")
+    run.add_argument("--representation-traversal", action=argparse.BooleanOptionalAction, default=True,
+                     help="Traverse applicable target input representations in stateful mode (default: enabled)")
+    run.add_argument("--oracle-improvements", action=argparse.BooleanOptionalAction, default=True,
+                     help="Use scoped local gradient evidence and audit scheduling in stateful mode (default: enabled)")
     run.add_argument("--cases", type=positive_integer, default=100)
     run.add_argument("--time-limit", type=positive_integer, default=14400)
     run.add_argument("--worker-timeout", type=positive_integer, default=600)
@@ -69,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
             values = vars(args).copy()
             for key in ("command", "apis"):
                 values.pop(key)
+            if values["strategy"] != "stateful":
+                values["representation_traversal"] = values["oracle_improvements"] = False
             values["output"] = str(values["output"])
             values["contract_version"] = 4 if values["strategy"] == "stateful" else 3
             output = run(RunOptions(**values), apis)

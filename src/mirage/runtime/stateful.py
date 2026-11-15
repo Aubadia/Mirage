@@ -76,8 +76,11 @@ class Probe:
     def __init__(self, target, ctx, config, recorder):
         self._target, self._ctx, self._config, self._recorder = target, ctx, config, recorder
         self._backend = PyTorchBackend()
+        self._vjp_operand_versions = {}
         self.calls, self.checkpoints, self.backward = [], [], []
         self.backward_nodes, self.operand_gradients, self.backward_invocations = [], [], []
+        self.callable_backward_nodes = []
+        self._callable_registrations = []
         self.gradient_evidence = {'version': GRADIENT_EVIDENCE_VERSION, 'events': [],
                                   'limitations': [], 'dropped_events': 0, 'dropped_limitations': 0}
         self._backward_invocation = None
@@ -88,12 +91,56 @@ class Probe:
         self.compiled_graphs = []
         self.capture_replays = []
         self._observing = False
+        self._optimizer_evidence = None
+
+    def _register_callable(self, value, *, factory_target, factory_id, callable_id):
+        """Keep live identity locally; artifacts use deterministic factory/callable IDs."""
+        self._callable_registrations.append((value, {
+            'factory_target': factory_target, 'factory_id': factory_id, 'callable_id': callable_id}))
+
+    def _validate_callable_model(self, model):
+        import torch
+        if not callable(model):
+            raise ContractError('Callable factory requires a callable function or module')
+        if isinstance(model, torch.nn.Module):
+            registered = {id(p) for p in self._ctx['parameters'].values()}
+            if any(id(p) not in registered for p in model.parameters()):
+                raise ContractError('Callable module parameters must be registered as the same objects in parameters')
+
+    def _validate_capture_callables(self, callables, sample_args):
+        """Diagnose explicit capture-contract violations before invoking the factory."""
+        import torch
+        from torch.utils._pytree import tree_leaves
+        models = callables if isinstance(callables, tuple) else (callables,)
+        samples = sample_args if isinstance(callables, tuple) else (sample_args,)
+        if not models or not isinstance(samples, tuple) or len(models) != len(samples):
+            raise ContractError('Capture requires one sample_args tuple for each callable')
+        for model, arguments in zip(models, samples):
+            self._validate_callable_model(model)
+            if not isinstance(arguments, tuple):
+                raise ContractError('Capture sample_args for each callable must be a tuple')
+            tensors = tree_leaves(arguments)
+            if any(not isinstance(t, torch.Tensor) for t in tensors):
+                raise ContractError('Capture sample_args must contain only tensor leaves')
+            if isinstance(model, torch.nn.Module):
+                if any(b.requires_grad for b in model.buffers()):
+                    raise ContractError('Capture module buffers must not require gradients')
+                if model._backward_hooks or model._forward_hooks or model._forward_pre_hooks:
+                    raise ContractError('Capture module must not have hooks installed before capture')
+                tensors += list(model.parameters()) + list(model.buffers())
+            devices = {t.device for t in tensors}
+            if tensors and (any(d.type != 'cuda' for d in devices) or len(devices) != 1):
+                raise ContractError('Capture samples, module parameters and buffers must share one CUDA device')
+        if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
+            raise ContractError('Capture under autocast requires cache_enabled=False')
 
     @observational
-    def mark(self, name, values=None):
+    def mark(self, name, values=None, *, _optimizer_observer=None):
         import torch
         if not isinstance(name, str) or not name:
             raise ContractError("Checkpoint requires a nonempty name")
+        if name.startswith("optimizer:") and (_optimizer_observer is None or _optimizer_observer is not self._optimizer_evidence):
+            raise ContractError("Optimizer lifecycle checkpoints are reserved for runtime observation")
         data = {"name": name, "values": snapshot(values), "grad_enabled": torch.is_grad_enabled(),
                 "inference_enabled": torch.is_inference_mode_enabled(),
                 "gradients": {key: snapshot(value.grad) for key, value in self._ctx['parameters'].items()},
@@ -108,9 +155,12 @@ class Probe:
             'gradient.zero': bool(gradient_values) and all(g is not None and bool((g == 0).all()) for g in gradient_values),
             'graph_lifecycle.target_backward_count': len(self.backward),
             'graph_lifecycle.target_backward_node_count': len(self.backward_nodes),
+            'graph_lifecycle.callable_backward_node_count': len(self.callable_backward_nodes),
             'graph_lifecycle.target_call_count': len(self.calls),
             'graph_lifecycle.target_boundary_count': len(self.calls),
         }
+        if self._optimizer_evidence is not None:
+            data['state_facts']['optimizer.target_update_count'] = self._optimizer_evidence.target_update_count()
         if any(g.get('target_execution_certified') for g in self.compiled_graphs):
             data['state_facts']['execution_mode.compiled_execution'] = True
         if self.capture_replays:
@@ -118,6 +168,7 @@ class Probe:
         data['completed_backward_invocations'] = [e['index'] for e in self.backward_invocations if e['completed']]
         data['evidence_offsets'] = {'calls': len(self.calls), 'outputs': len(self.backward),
                                     'nodes': len(self.backward_nodes), 'operands': len(self.operand_gradients),
+                                    'callable_nodes': len(self.callable_backward_nodes),
                                     'invocations': len(self.backward_invocations)}
         data['observable_metadata'] = [asdict(d) for d, _ in discover(values, self._backend)]
         self.checkpoints.append(data)
@@ -143,6 +194,10 @@ class Probe:
             self._gradient_limitation(event['call'], 'gradient event budget exceeded')
             return
         item = dict(event, inputs=[], outputs=[], status='unknown', reason=reason)
+        if self._config.get('oracle_improvements'):
+            versions = self._vjp_operand_versions.get(event['call'], ())
+            item['operands_unchanged_at_backward'] = bool(versions) and all(
+                version is not None and tensor_version(tensor) == version for tensor, version in versions)
         if reason:
             events.append(item)
             return
@@ -188,6 +243,7 @@ class Probe:
             if not node_admissible:
                 node, links, reason = None, [], "target backward attribution unsupported for this graph"
             bindings.append({'output_path': path, 'status': 'verified' if node is not None else 'unknown',
+                             'scope': 'callable' if boundary else 'target',
                              'reason': reason, 'operand_paths': [list(p) for _, p in links]})
             if node is None:
                 self._gradient_limitation(index, reason)
@@ -200,23 +256,36 @@ class Probe:
         for node_index, (node, data) in enumerate(nodes.items()):
             edges, output_bindings = data['edges'], tuple(data['outputs'])
             reason = data['reason']
+            numerical_edges, numerical_binding = edges, None
+            if (self._config.get('oracle_improvements') and not boundary and reason is None
+                    and {path for _, path in edges} != {path for path, _ in input_edges}):
+                aggregate = self._backend.local_vjp_coordinate_edges(
+                    node, input_edges, self.calls[index].get('metadata', []))
+                if aggregate is not None:
+                    numerical_edges, numerical_binding = aggregate, 'exact_object_sum'
             if boundary:
                 reason = 'factory boundary has no direct operand VJP certificate'
-            elif {path for _, path in edges} != {path for path, _ in input_edges} or not edges:
+            elif {path for _, path in numerical_edges} != {path for path, _ in input_edges} or not numerical_edges:
                 reason = 'missing or ambiguous differentiable operand bindings'
             elif len({slot for slot, _ in output_bindings}) != len(output_bindings):
                 reason = 'multiple output paths share one differentiation coordinate'
             def node_executed(grad_inputs, grad_outputs, i=index, n=node_index,
-                              edges=edges, outputs=output_bindings, reason=reason):
+                              edges=edges, numerical_edges=numerical_edges, numerical_binding=numerical_binding,
+                              outputs=output_bindings, reason=reason, boundary=boundary):
                 event = {'call': i, 'node': n, 'invocation': self._backward_invocation}
-                self.backward_nodes.append(event)
-                self._recorder.emit('target_backward', **event)
+                if boundary:
+                    self.callable_backward_nodes.append(event)
+                    self._recorder.emit('callable_backward', **event)
+                else:
+                    self.backward_nodes.append(event)
+                    self._recorder.emit('target_backward', **event)
                 for slot, operand_path in edges:
                     if slot < len(grad_inputs) and grad_inputs[slot] is not None:
                         contribution = dict(event, path=list(operand_path), slot=slot)
                         self.operand_gradients.append(contribution)
                         self._recorder.emit('target_operand_gradient', **contribution)
-                self._capture_gradients(event, grad_inputs, grad_outputs, edges, outputs, reason)
+                capture_event = dict(event, coordinate_binding=numerical_binding) if numerical_binding else event
+                self._capture_gradients(capture_event, grad_inputs, grad_outputs, numerical_edges, outputs, reason)
             self._hook_handles.append(node.register_hook(node_executed))
         self.calls[index]['backward_bindings'] = bindings
 
@@ -224,6 +293,8 @@ class Probe:
         for handle in self._hook_handles:
             handle.remove()
         self._hook_handles.clear()
+        self._callable_registrations.clear()
+        self._vjp_operand_versions.clear()
 
     @observational
     def call(self, target, *args, **kwargs):
@@ -231,6 +302,14 @@ class Probe:
         # Calling a probe while tracing is not a runtime target witness.
         if torch.compiler.is_compiling():
             raise ContractError("Probe inside compiled tracing is not a certified execution boundary")
+        registered = next((entry for value, entry in self._callable_registrations if value is target), None)
+        if registered is not None and registered['factory_target'] == self._config.get('api'):
+            # The factory wrapper owns invocation evidence; do not add a second target boundary.
+            self._observing = False
+            try:
+                return target(*args, **kwargs)
+            finally:
+                self._observing = True
         receiver = getattr(target, "__self__", None)
         actual = getattr(type(receiver), getattr(target, "__name__", ""), None) if receiver is not None else target
         if target is not self._target and actual is not self._target and getattr(target, '__wrapped__', None) is not self._target:
@@ -257,11 +336,17 @@ class Probe:
                              and p.action == mutation['action']), None)
             if selected is None: raise ContractError("Requested mutation does not address an actual operand")
             tree, evidence = apply(tree, selected, self._backend, obligations)
-            self.mutations.append(evidence_record(evidence))
+            fact = evidence_record(evidence)
+            if (self._config.get('representation_candidate') is not None
+                    or self._config.get('representation_traversal')):
+                fact.update(action=selected.action, path=list(selected.path), call_index=len(self.calls))
+            self.mutations.append(fact)
         operands = discover(tree, self._backend)
         if sum(t.numel() for _, t in operands) > 2_000_000:
             raise ContractError("Operand element budget exceeded")
         index = len(self.calls)
+        if self._optimizer_evidence is not None:
+            self._optimizer_evidence.bind_target(index, operands)
         before = snapshot(tree)
         versions = [(t, tensor_version(t)) for _,t in operands]
         writable_paths = [list(d.path) for d,_ in operands if isinstance(obligations, dict) and obligations[d.path].writable]
@@ -270,7 +355,11 @@ class Probe:
         shapes = [d.shape for d, _ in operands]
         for item, shape in zip(properties, shapes):
             item['facts']['broadcast'] = any(shape != other and _broadcastable(shape, other) for other in shapes)
-        input_edges = self._backend.gradient_edges(operands)
+        # Factory construction returns a callable, not an operand-differentiable result.
+        # Creating sample-input AccumulateGrad nodes here can disturb CUDA capture's
+        # stream ownership; observe edges only when the returned callable executes.
+        factory = self._config.get('api') in ('torch.compile', 'torch.cuda.make_graphed_callables')
+        input_edges = [] if factory else self._backend.gradient_edges(operands)
         entry_context = dict(context_state(), inference_enabled=torch.is_inference_mode_enabled())
         # User-supplied MR obligations cannot certify a numerical replay as read-only.
         native_roles = self._backend.operand_obligations(target, tree)
@@ -291,6 +380,11 @@ class Probe:
                            "schema_read_only": schema_read_only,
                            "write_effects": [list(d.path) for (d,t),(_,v) in zip(operands,versions) if v is not None and tensor_version(t) != v],
                            "writable_paths": writable_paths})
+        if self._config.get('oracle_improvements'):
+            self._vjp_operand_versions[index] = versions
+            self.calls[-1]['local_vjp_snapshot'] = {
+                'version': 'local-vjp-snapshot-1', 'independent_logical_copies': True,
+                'target_read_only': schema_read_only and not self.calls[-1]['write_effects']}
         self._recorder.emit("api_exit", call=index)
         self.operations.append({'name': 'target_return'})
         import inspect
@@ -345,6 +439,9 @@ def execute(source, config, recorder, initial_reference=None):
     environment = describe(config['device'])
     rng_changed = not torch.equal(before_rng, torch.random.get_rng_state())
     probe = Probe(resolve(config['api']), ctx, config, recorder)
+    from mirage.runtime.optimizer import OptimizerEvidence
+    optimizer_evidence = OptimizerEvidence(probe, source)
+    probe._optimizer_evidence = optimizer_evidence
     initial_rng = rng_state(config['device'])
     probe.mark('initial')
     from torch.overrides import TorchFunctionMode
@@ -356,6 +453,7 @@ def execute(source, config, recorder, initial_reference=None):
                 invocation = {'index': len(probe.backward_invocations), 'kind': name, 'completed': False}
                 probe.backward_invocations.append(invocation)
                 probe._backward_invocation = invocation['index']
+                optimizer_evidence.backward_start(invocation['index'])
             try:
                 result = func(*args, **(kwargs or {}))
                 if backward:
@@ -375,7 +473,10 @@ def execute(source, config, recorder, initial_reference=None):
             with CompilerObserver(probe, namespace, config) as compiler, CaptureObserver(probe, namespace, config) as capture:
                 probe.compiled_graphs = compiler.graphs
                 probe.capture_replays = capture.replays
-                with ObserveActions() as action_observer, OptimizerObserver(ctx.get('optimizer'), lambda name: probe.operations.append({'name':name})):
+                with optimizer_evidence, ObserveActions() as action_observer, OptimizerObserver(
+                        ctx.get('optimizer'), lambda name: probe.operations.append({'name':name}),
+                        before_step=optimizer_evidence.before_step, after_step=optimizer_evidence.after_step) as updates:
+                    optimizer_evidence.bind_observer(updates)
                     probe._action_observer = action_observer
                     output = namespace['run'](ctx, probe)
             probe.mark('final', output)
@@ -388,24 +489,36 @@ def execute(source, config, recorder, initial_reference=None):
             "initial_rng": initial_rng, "final_rng": final_rng, "graph": graph, "config": config, "completed": True,
             "initial": initial, "initial_metadata": initial_metadata, "final_training_state": final_training_state,
             "program_certificate": PyTorchBackend().program_certificate(source), "observations": snapshot(output), "checkpoints": probe.checkpoints,
+            "numerical_source_certificate": PyTorchBackend().numerical_source_certificate(source),
+            "optimizer_source_certificate": optimizer_evidence.certificate,
+            "optimizer_evidence": optimizer_evidence.record,
+            "target_parameter_bindings": optimizer_evidence.bindings,
             "target_calls": probe.calls, "target_gradients": probe.backward,
             "gradient_evidence": probe.gradient_evidence,
             "target_backward_nodes": probe.backward_nodes, "target_operand_gradients": probe.operand_gradients,
+            "callable_backward_nodes": probe.callable_backward_nodes,
             "backward_invocations": probe.backward_invocations,
-            "compiled_graphs": probe.compiled_graphs, "capture_replays": capture.replays,
+            "compiled_graphs": probe.compiled_graphs, "compilation_factories": compiler.factory_records,
+            "capture_replays": capture.replays,
             "capture_factories": capture.factory_records, "reference_substitutions": capture.substitutions,
             "capture_source_certificate": capture_source_certificate(source),
             "execution_source_certificate": execution_source_certificate(source),
             "context_events": probe.context_events, "context_contract": contexts.supported,
             "mutation_candidates": probe.candidates, "mutations": probe.mutations,
-            "api_executed": bool(probe.calls) and not bool(capture.substitutions), "backward_executed": any(e["invocation"] is not None and
-                probe.backward_invocations[e["invocation"]]["completed"] for e in probe.backward_nodes),
+            "api_executed": bool(probe.calls) and not bool(capture.substitutions),
             "initialization_rng_changed": rng_changed,
             "determinism": "unresolved" if rng_changed or graph['initialization_review'] else "not_certified",
             "correctness": "unassessed", "verdict": None,
             "reason": "Stateful runtime evidence collected; relation validation required"}
 
-    from mirage.inspector.stateful import inspect_state, input_coverage
+    if config.get('oracle_improvements'):
+        result['scoped_vjp_source_certificate'] = PyTorchBackend().scoped_vjp_source_certificate(source)
+
+    from mirage.inspector.stateful import inspect_state, input_coverage, callable_execution_indices
+    callable_calls = callable_execution_indices(result)
+    result['backward_executed'] = any(e.get('invocation') is not None and
+        probe.backward_invocations[e['invocation']]['completed']
+        for e in probe.backward_nodes + [e for e in probe.callable_backward_nodes if e['call'] in callable_calls])
     result['observed_actions'] = [event['name'] for event in probe.operations]
     # Detached copies used only for observations must not manufacture diversity.
     # Raw events remain available; this conservative signature omits all detach events.

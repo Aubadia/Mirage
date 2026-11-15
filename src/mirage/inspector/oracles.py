@@ -9,16 +9,60 @@ def unavailable(reason, *, status='unknown'):
             'reason': reason, 'events': [], 'cost': {'seconds': 0.0}}
 
 
-def audit_execution(record, *, budget_seconds=10):
-    """Run an auxiliary check only after the original execution is complete."""
+def audit_admission(record):
+    """Cheap eligibility check; eligibility never establishes numerical agreement."""
     if not record.get('completed') or not record.get('inspection', {}).get('valid'):
         return unavailable('original execution/state/path is not verified')
     if not record.get('gradient_evidence'):
         return unavailable('legacy record has no numerical backward evidence')
     if record.get('run_rng_unchanged') is not True:
         return unavailable('execution RNG effects are not certified', status='unsupported')
-    if not record.get('program_certificate'):
+    if (record.get('program_certificate')
+            or record.get('numerical_source_certificate') == 'explicit_straight_line_local_vjp_v1'):
+        return {'status': 'eligible', 'route': 'legacy_source'}
+    if (not record.get('config', {}).get('oracle_improvements')
+            or record.get('scoped_vjp_source_certificate') != 'explicit_scoped_local_vjp_v1'):
         return unavailable('source effects are outside the existing execution certificate', status='unsupported')
+    calls = {call.get('index'): call for call in record.get('target_calls', [])}
+    events = record['gradient_evidence'].get('events', [])
+    if not events:
+        return unavailable('no local backward events to certify')
+    for event in events:
+        call = calls.get(event.get('call'), {})
+        snapshot = call.get('local_vjp_snapshot', {})
+        if (snapshot.get('version') != 'local-vjp-snapshot-1'
+                or snapshot.get('independent_logical_copies') is not True
+                or snapshot.get('target_read_only') is not True):
+            return unavailable('independent read-only local snapshots are not certified', status='unsupported')
+        if event.get('operands_unchanged_at_backward') is not True:
+            return unavailable('target operands changed before backward or version evidence is missing')
+    return {'status': 'eligible', 'route': 'scoped_local_effects'}
+
+
+def audit_units(record):
+    """Versioned observed state/representation keys, excluding process identities."""
+    import hashlib
+    import json
+    if audit_admission(record)['status'] != 'eligible':
+        return []
+    units = []
+    for call in record.get('target_calls', []):
+        operands = [{key: value for key, value in item.items()
+                     if key in ('path', 'shape', 'dtype', 'device', 'layout', 'strides',
+                                'offset', 'requires_grad', 'leaf', 'properties', 'storage_group', 'object_group')}
+                    for item in call.get('metadata', [])]
+        payload = {'api': record.get('config', {}).get('api'), 'operands': operands,
+                   'entry_context': call.get('entry_context'),
+                   'transitions': record.get('transition_signature')}
+        units.append(hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
+    return sorted(set(units))
+
+
+def audit_execution(record, *, budget_seconds=10):
+    """Run an auxiliary check only after the original execution is complete."""
+    admission = audit_admission(record)
+    if admission['status'] != 'eligible':
+        return admission
     started = time.monotonic()
     try:
         from mirage.inspector.numerical_gradients import audit_record
@@ -26,6 +70,7 @@ def audit_execution(record, *, budget_seconds=10):
     except (ValueError, TypeError, KeyError, RuntimeError, NotImplementedError) as error:
         result = unavailable(f'audit could not complete: {type(error).__name__}: {error}')
     result.setdefault('cost', {})['seconds'] = time.monotonic() - started
+    result['admission'] = admission
     return result
 
 

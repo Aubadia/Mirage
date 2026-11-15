@@ -4,11 +4,15 @@ from enum import StrEnum
 from typing import Any
 
 CONTRACT_VERSION = "stateful-1"
-SEMANTIC_COVERAGE_VERSION = "state-semantic-1"
+SEMANTIC_COVERAGE_VERSION = "state-semantic-2"
+JOINT_COVERAGE_MAX_OPERANDS = 4
+JOINT_COVERAGE_MAX_AXES = 2
 GRADIENT_EVIDENCE_VERSION = "gradient-evidence-1"
 GRADIENT_EVIDENCE_MAX_EVENTS = 16
 GRADIENT_EVIDENCE_MAX_ELEMENTS = 4096
-STATE_DIMENSIONS = ("gradient", "context", "graph_lifecycle", "execution_mode", "representation", "data")
+OPTIMIZER_COVERAGE_VERSION = "optimizer-chain-1"
+STATE_DIMENSIONS = ("gradient", "context", "graph_lifecycle", "execution_mode", "representation", "data", "tensor_relation",
+                    "gradient_representation", "optimizer")
 INPUT_CATEGORIES = ("ordinary", "zero", "small_finite", "large_finite", "repeated",
                     "nonuniform", "mixed_sign", "singleton", "broadcast", "supported_layout")
 
@@ -58,17 +62,72 @@ class StatePredicate:
     call_index: int | None = None
     operand_path: tuple | None = None
     relation: str | None = None
+    axis: int | None = None
+    peer_operand_path: tuple | None = None
+    peer_axis: int | None = None
+    peer_relation: str | None = None
+    parameter_key: str | None = None
 
     def __post_init__(self):
         if self.dimension not in STATE_DIMENSIONS or not self.field or not self.checkpoint:
             raise ValueError("State predicate requires a supported dimension, field and checkpoint")
-
-        if self.dimension in ("representation", "data") and (type(self.call_index) is not int or self.call_index < 0 or not self.operand_path):
+        optimizer_scoped = (self.dimension == 'gradient_representation'
+                            or self.dimension == 'optimizer' and self.field == 'completed')
+        scoped = self.dimension in ("representation", "data", "tensor_relation") or optimizer_scoped
+        def path_ok(path):
+            return isinstance(path, (tuple, list)) and bool(path) and all(type(k) in (str, int) for k in path)
+        if scoped and (type(self.call_index) is not int or self.call_index < 0 or not path_ok(self.operand_path)):
             raise ValueError("Operand predicates require a call index and operand path")
-        if self.dimension not in ("representation", "data") and any(value is not None for value in (self.call_index, self.operand_path, self.relation)):
-            raise ValueError("Scoped predicates require representation or data dimensions")
-        if self.relation not in (None, "target_backward_node", "operand_gradient_contribution", "output_gradient"):
+        selectors = (self.call_index, self.operand_path, self.relation, self.axis,
+                     self.peer_operand_path, self.peer_axis, self.peer_relation)
+        if not scoped and any(value is not None for value in selectors):
+            raise ValueError("Scoped predicates require representation, data or tensor_relation dimensions")
+        relations = (None, "target_backward_node", "operand_gradient_contribution", "output_gradient")
+        if optimizer_scoped:
+            import re
+            phase = 'pre_update' if self.dimension == 'gradient_representation' else 'post_update'
+            if (not isinstance(self.parameter_key, str) or not self.parameter_key
+                    or self.relation != 'target_gradient_update'
+                    or not re.fullmatch(r'optimizer:0/step:0/' + phase, self.checkpoint)):
+                raise ValueError('Optimizer predicates require a parameter key, target-gradient relation and exact step checkpoint')
+            if self.dimension == 'gradient_representation':
+                if self.field not in ('contiguous', 'offset_nonzero') or type(self.expected) is not bool:
+                    raise ValueError('Unsupported gradient representation predicate')
+            elif self.expected is not True:
+                raise ValueError('Optimizer completion requires True')
+            relations += ('target_gradient_update',)
+        elif self.parameter_key is not None:
+            raise ValueError('Parameter selector requires an optimizer or gradient representation predicate')
+        if self.dimension == 'optimizer' and not optimizer_scoped:
+            if (self.field != 'target_update_count' or self.checkpoint != 'final'
+                    or type(self.expected) is not int or self.expected < 0):
+                raise ValueError('Global optimizer predicate requires a nonnegative final target update count')
+        if self.relation not in relations or self.peer_relation not in relations:
             raise ValueError("Unsupported path relation")
+        for axis in (self.axis, self.peer_axis):
+            if axis is not None and (type(axis) is not int or axis < 0):
+                raise ValueError("Axes must be nonnegative integers")
+        if self.dimension == "tensor_relation":
+            if not path_ok(self.peer_operand_path) or tuple(self.peer_operand_path) == tuple(self.operand_path):
+                raise ValueError("Tensor relations require a distinct peer operand path")
+            if self.field == "extent_order":
+                if self.axis is None or self.peer_axis is None or self.expected not in ("lt", "eq", "gt"):
+                    raise ValueError("Extent order requires both axes and lt, eq or gt")
+            elif self.field == "shared_storage":
+                if self.axis is not None or self.peer_axis is not None or type(self.expected) is not bool:
+                    raise ValueError("Shared storage requires a boolean and no axes")
+            else:
+                raise ValueError("Unsupported tensor relation")
+        elif any(value is not None for value in (self.peer_operand_path, self.peer_axis, self.peer_relation)):
+            raise ValueError("Peer selectors require a tensor relation")
+        if self.axis is not None and self.dimension != "tensor_relation" and not (
+                self.dimension == "representation" and self.field in ("zero_stride", "singleton_stride")):
+            raise ValueError("Axis selector is unsupported for this field")
+        if self.dimension == "representation" and self.field == "singleton_stride":
+            if self.axis is None or self.expected not in ("zero", "unit", "other", "not_singleton"):
+                raise ValueError("Singleton stride requires an axis and a stride class")
+        if self.dimension == "representation" and self.field == "zero_stride" and type(self.expected) is not bool:
+            raise ValueError("Zero stride requires a boolean")
 
     def holds(self, observed: Evidence):
         return (observed.established and observed.checkpoint == self.checkpoint

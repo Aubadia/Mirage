@@ -2,7 +2,9 @@
 
 import hashlib
 import inspect
+from importlib import import_module
 import re
+from types import ModuleType
 
 from mirage.contracts.apis import validate_api_name
 
@@ -14,7 +16,28 @@ def resolve(api):
     parts = api.split(".")
     value = torch.Tensor if parts[0] == "Tensor" else torch
     for part in parts[1:]:
-        value = getattr(value, part)
+        try:
+            value = getattr(value, part)
+        except AttributeError as missing_attribute:
+            if not isinstance(value, ModuleType):
+                raise
+            # A public alias may point at another Torch module. Resolve against
+            # its actual name, but never import external or private namespaces.
+            requested_module = value.__name__ + "." + part
+            try:
+                validate_api_name(requested_module)
+            except ValueError:
+                raise missing_attribute from None
+            if not requested_module.startswith("torch."):
+                raise missing_attribute from None
+            try:
+                value = import_module(requested_module)
+            except ModuleNotFoundError as missing_module:
+                if missing_module.name != requested_module:
+                    raise
+                # Missing internal dependencies are installation failures, not
+                # evidence that the requested public API does not exist.
+                raise missing_attribute from None
     if not callable(value):
         raise ValueError(f"Target is not callable: {api}")
     return value

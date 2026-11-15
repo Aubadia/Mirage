@@ -25,7 +25,7 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError): InputCoverage(("issue-specific-input",))
         with self.assertRaises(ValueError): StatePredicate("unknown", "x", 0, "final")
         self.assertEqual(set(p.dimension for p in INITIAL_PREDICATES),
-                         set(STATE_DIMENSIONS) - {"representation", "data"})
+                         set(STATE_DIMENSIONS) - {"representation", "data", "tensor_relation", "gradient_representation", "optimizer"})
         for dimension in ("representation", "data"):
             with self.assertRaisesRegex(ValueError, "call index"):
                 StatePredicate(dimension, "dtype", "torch.float32", "final")
@@ -128,3 +128,67 @@ class CoverageFeedbackTests(__import__('unittest').TestCase):
         self.assertEqual(outcome['verdict'],'pass')
         self.assertIsNone(input_category_feedback(dict(outcome,verdict='suspected_failure')))
         self.assertIsNone(input_category_feedback(dict(outcome,inspection={'valid':False})))
+
+
+class TensorRelationContractTests(unittest.TestCase):
+    def predicate(self, **changes):
+        value = dict(dimension='tensor_relation', field='extent_order', expected='lt', checkpoint='final',
+                     call_index=0, operand_path=('args', 0), axis=0, peer_operand_path=('args', 1), peer_axis=1)
+        return StatePredicate(**dict(value, **changes))
+
+    def test_pair_selectors_roundtrip_without_changing_unary_semantics(self):
+        import json
+        value = self.predicate(relation='target_backward_node', peer_relation='operand_gradient_contribution')
+        restored = StatePredicate(**json.loads(json.dumps(asdict(value))))
+        self.assertEqual(asdict(restored), json.loads(json.dumps(asdict(value))))
+        self.assertTrue(restored.holds(Evidence(EvidenceStatus.VERIFIED, 'measured', 'lt', 'final')))
+        unary = StatePredicate('representation', 'zero_stride', True, 'final', 0, ('args', 0))
+        self.assertIsNone(unary.axis)
+        self.assertTrue(unary.holds(Evidence(EvidenceStatus.VERIFIED, 'measured', True, 'final')))
+        self.assertFalse(unary.holds(Evidence(EvidenceStatus.VERIFIED, 'measured', 1, 'final')))
+
+    def test_axes_peers_and_field_types_fail_closed(self):
+        for changes in ({'axis': -1}, {'axis': True}, {'peer_axis': None}, {'peer_axis': 1.5},
+                        {'peer_operand_path': None}, {'peer_operand_path': ('args', 0)},
+                        {'peer_operand_path': ('args', False)}, {'expected': True},
+                        {'field': 'overlapping_storage'}, {'peer_relation': 'callable_backward_node'}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.predicate(**changes)
+        storage = self.predicate(field='shared_storage', expected=False, axis=None, peer_axis=None)
+        self.assertIsNone(storage.axis)
+        with self.assertRaises(ValueError): self.predicate(field='shared_storage', expected=True)
+        with self.assertRaises(ValueError):
+            StatePredicate('representation', 'negative', True, 'final', 0, ('args', 0), axis=0)
+        with self.assertRaises(ValueError):
+            StatePredicate('representation', 'singleton_stride', 'other', 'final', 0, ('args', 0))
+        with self.assertRaises(ValueError):
+            StatePredicate('representation', 'zero_stride', 1, 'final', 0, ('args', 0))
+        for kind in ('zero', 'unit', 'other', 'not_singleton'):
+            StatePredicate('representation', 'singleton_stride', kind, 'final', 0, ('args', 0), axis=0)
+
+
+class OptimizerPredicateContractTests(unittest.TestCase):
+    def test_scoped_parameter_and_global_bootstrap_are_distinct(self):
+        scoped = StatePredicate('gradient_representation', 'contiguous', False,
+            'optimizer:0/step:0/pre_update', 0, ('args', 0), 'target_gradient_update', parameter_key='weight')
+        self.assertEqual(scoped.parameter_key, 'weight')
+        StatePredicate('optimizer', 'completed', True, 'optimizer:0/step:0/post_update',
+                       0, ('args', 0), 'target_gradient_update', parameter_key='weight')
+        bootstrap = StatePredicate('optimizer', 'target_update_count', 1, 'final')
+        self.assertIsNone(bootstrap.parameter_key)
+        self.assertIsNone(bootstrap.operand_path)
+
+    def test_ambiguous_stage_parameter_and_relation_fail_closed(self):
+        base = asdict(StatePredicate('gradient_representation', 'contiguous', False,
+            'optimizer:0/step:0/pre_update', 0, ('args', 0), 'target_gradient_update', parameter_key='p'))
+        for change in ({'parameter_key': None}, {'parameter_key': ''}, {'checkpoint': 'final'},
+                       {'checkpoint': 'optimizer:0/step:1/pre_update'}, {'relation': 'target_backward_node'},
+                       {'operand_path': None}, {'field': 'negative'}, {'expected': 0}, {'axis': 0}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                StatePredicate(**dict(base, **change))
+        for args in (('optimizer', 'target_update_count', True, 'final'),
+                     ('optimizer', 'target_update_count', -1, 'final'),
+                     ('optimizer', 'target_update_count', 1, 'other')):
+            with self.assertRaises(ValueError): StatePredicate(*args)
+        with self.assertRaises(ValueError):
+            StatePredicate('representation', 'contiguous', True, 'final', 0, ('args', 0), parameter_key='p')

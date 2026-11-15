@@ -54,3 +54,16 @@ class CLITests(unittest.TestCase):
         with patch('mirage.workflow.run', return_value={'stop_reason':'case_limit','records':[]}) as execute, redirect_stdout(StringIO()):
             main(['run','--provider','vllm','--strategy','stateful'])
         self.assertEqual(execute.call_args.args[0].contract_version, 4)
+
+    def test_stateful_features_default_on_and_can_be_disabled(self):
+        for switches, expected in (([], True),
+                (["--no-representation-traversal", "--no-oracle-improvements"], False)):
+            with patch('mirage.workflow.run', return_value={'stop_reason':'case_limit','records':[]}) as execute, redirect_stdout(StringIO()):
+                self.assertEqual(main(['run','--provider','vllm','--strategy','stateful', *switches]), 0)
+            options = execute.call_args.args[0]
+            self.assertIs(options.representation_traversal, expected)
+            self.assertIs(options.oracle_improvements, expected)
+        with patch('mirage.workflow.run', return_value={'stop_reason':'case_limit','records':[]}) as execute, redirect_stdout(StringIO()):
+            self.assertEqual(main(['run','--provider','vllm','--strategy','properties']), 0)
+        self.assertFalse(execute.call_args.args[0].representation_traversal)
+        self.assertFalse(execute.call_args.args[0].oracle_improvements)

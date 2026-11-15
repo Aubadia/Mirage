@@ -2,7 +2,9 @@
 import json
 
 from mirage.contracts.capabilities import (Evidence, EvidenceStatus, StatePredicate,
-                                         PathEvidence, SEMANTIC_COVERAGE_VERSION)
+                                         PathEvidence, SEMANTIC_COVERAGE_VERSION,
+                                         OPTIMIZER_COVERAGE_VERSION,
+                                         JOINT_COVERAGE_MAX_OPERANDS, JOINT_COVERAGE_MAX_AXES)
 
 FUNNEL = ("state_plan", "generation", "parse", "static_contract", "initialization", "snapshot",
           "mutation_eligibility", "mutation_application", "target_entry", "target_return",
@@ -14,6 +16,23 @@ def failure_record(first_blocking, reason, secondary=()):
         raise ValueError("Unknown execution funnel stage")
     return {"first_blocking_stage": first_blocking, "reason": reason,
             "secondary_diagnostics": list(secondary)}
+
+
+def callable_execution_indices(record):
+    """Return only observed invocations linked to this configured callable factory."""
+    target = record.get('config', {}).get('api')
+    kinds = {'torch.compile': ('compiled_callable_execution', 'compilation_factories'),
+             'torch.cuda.make_graphed_callables': ('factory_result_execution', 'capture_factories')}
+    if target not in kinds:
+        return set()
+    kind, records = kinds[target]
+    factories = {f['factory_id']: f for f in record.get(records, ())
+                 if 'factory_id' in f and f.get('factory_target') == target}
+    return {c['index'] for c in record.get('target_calls', ())
+            if c.get('kind') == kind and c.get('factory_target') == target
+            and c.get('callable_identity_verified') is True
+            and c.get('factory_id') in factories
+            and c.get('callable_id') in factories[c['factory_id']].get('callable_ids', ())}
 
 
 def inspect_state(record, predicates=()):
@@ -38,30 +57,197 @@ def inspect_state(record, predicates=()):
             if key in facts:
                 fact = Evidence(EvidenceStatus.VERIFIED, 'runtime checkpoint observation',
                                 facts[key], predicate.checkpoint)
-        if predicate.dimension in ('representation', 'data'):
+        if predicate.dimension in ('representation', 'data', 'tensor_relation'):
             fact = operand_fact(record, predicate)
+        if predicate.dimension in ('gradient_representation', 'optimizer'):
+            fact = optimizer_fact(record, predicate)
         attained.append({'call_index': predicate.call_index, 'operand_path': predicate.operand_path,
-                         'relation': predicate.relation, 'dimension': predicate.dimension, 'field': predicate.field,
+                         'relation': predicate.relation, 'axis': predicate.axis,
+                         'peer_operand_path': predicate.peer_operand_path, 'peer_axis': predicate.peer_axis,
+                         'peer_relation': predicate.peer_relation, 'dimension': predicate.dimension, 'field': predicate.field,
+                         'parameter_key': predicate.parameter_key,
                          'checkpoint': predicate.checkpoint, 'expected': predicate.expected,
-                         'observed': fact.value, 'evidence_status': fact.status.value,
+                         'observed': fact.value, 'evidence_status': fact.status.value, 'reason': fact.reason,
                          'attained': predicate.holds(fact)})
-    api = bool(record.get('api_executed'))
+    callable_calls = callable_execution_indices(record)
+    factory_target = record.get('config', {}).get('api') in ('torch.compile', 'torch.cuda.make_graphed_callables')
+    api = bool(record.get('api_executed')) and (not factory_target or bool(callable_calls))
     backward_required=record.get('config',{}).get('requires_backward',True)
     completed = {e['index'] for e in record.get('backward_invocations', ()) if e['completed']}
     nodes = [e for e in record.get('target_backward_nodes', ()) if e.get('invocation') in completed]
+    nodes += [e for e in record.get('callable_backward_nodes', ())
+              if e.get('call') in callable_calls and e.get('invocation') in completed]
     backward = not backward_required or bool(nodes)
-    required_path='target'
+    required_path='callable' if factory_target else 'target'
     for field,kind in (('compiled_execution','executed FX graph'),('captured_execution','factory_result_execution')):
         if any(p.dimension=='execution_mode' and p.field==field and p.expected is True for p in predicates):
             indices={c['index'] for c in record.get('target_calls',()) if c.get('evidence')==kind or c.get('kind')==kind}
             backward=backward and (not backward_required or any(e.get('call') in indices for e in nodes))
-            required_path=field+'_target'
+            required_path=field+('_callable' if factory_target else '_target')
     valid = bool(record.get('completed') and api and backward and all(p['attained'] for p in attained))
     return {'valid': valid,
             'api_executed': api, 'required_backward_executed': backward, 'required_backward_path':required_path,
+            'callable_execution_required': factory_target, 'required_callable_executed': not factory_target or bool(callable_calls),
             'predicates': attained, 'target_state_reached': all(p['attained'] for p in attained),
             'transition_signature': record.get('transition_signature', []),
-            'correctness': 'unassessed', 'semantic_coverage': semantic_coverage(record, valid=valid)}
+            'correctness': 'unassessed', 'semantic_coverage': semantic_coverage(record, valid=valid),
+            'optimizer_coverage': inspect_optimizer(record, valid=valid)}
+
+
+def _optimizer_path(value):
+    if (not isinstance(value, (list, tuple)) or not value
+            or any(type(part) not in (str, int) for part in value)):
+        return None
+    return tuple(value)
+
+
+def inspect_optimizer(record, *, valid=False):
+    """Verify the bounded target-gradient/update chain without tensor computation.
+
+    Runtime native-domain/effect certificates and observed event identities are
+    required together. This is consumed-gradient representation, not evidence
+    that backward wrote into the transformed representation.
+    """
+    evidence = record.get('optimizer_evidence') or {}
+    steps = evidence.get('steps', [])
+    limitations = list(evidence.get('limitations', []))[:16]
+    witnesses = []
+    supported = evidence.get('version') == 'optimizer-update-1'
+    bounded = (isinstance(steps, list) and len(steps) <= 1
+               and evidence.get('dropped_events', 0) == 0)
+    registry = evidence.get('registry') or {}
+    parameters = registry.get('parameters') or []
+    keys = [p.get('parameter_key') for p in parameters]
+    registry_ok = (registry.get('optimizer_id') == 'optimizer:0' and bool(parameters)
+                   and all(isinstance(key, str) and key for key in keys) and len(set(keys)) == len(keys)
+                   and all(p.get('parameter_id') == 'parameter:' + p['parameter_key'] for p in parameters))
+    completed = {e.get('index') for e in record.get('backward_invocations', []) if e.get('completed') is True}
+    calls = record.get('target_calls', [])
+    nodes = record.get('target_backward_nodes', [])
+    bindings = record.get('target_parameter_bindings', [])
+    source_ok = record.get('optimizer_source_certificate') == 'explicit_optimizer_gradient_update_v1'
+    if (supported and bounded and registry_ok and source_ok and not limitations
+            and record.get('completed') is True and record.get('api_executed') is True):
+        for step in steps:
+            pre_name, post_name = 'optimizer:0/step:0/pre_update', 'optimizer:0/step:0/post_update'
+            if (type(step.get('index')) is not int or step['index'] != 0
+                    or step.get('optimizer_id') != 'optimizer:0' or step.get('completed') is not True
+                    or step.get('pre_checkpoint') != pre_name or step.get('post_checkpoint') != post_name
+                    or step.get('domain', {}).get('status') != 'verified'):
+                continue
+            pre, post = step.get('pre') or {}, step.get('post') or {}
+            if any(not isinstance(state.get(field), dict) or set(state[field]) != set(keys)
+                   for state in (pre, post) for field in ('parameters', 'gradients', 'gradient_metadata', 'slots')):
+                continue
+            mutation = step.get('mutation')
+            if mutation is not None and (mutation.get('status') != 'verified'
+                    or mutation.get('logical_equal') is not True or mutation.get('parameter_key') not in keys
+                    or mutation.get('action') not in ('canonical', 'strided', 'offset')):
+                continue
+            origins = step.get('gradient_provenance', [])
+            for origin in origins:
+                key, call, path = origin.get('parameter_key'), origin.get('call_index'), origin.get('operand_path')
+                path_key = _optimizer_path(path)
+                if (key not in keys or origin.get('parameter_id') != 'parameter:' + key
+                        or origin.get('status') != 'verified' or type(call) is not int
+                        or origin.get('unchanged_to_pre_step') is not True
+                        or path_key is None
+                        or any(type(origin.get(field)) is not int or origin[field] < 0 for field in ('node', 'invocation'))
+                        or origin.get('invocation') not in completed
+                        or sum(p.get('parameter_key') == key for p in origins) != 1):
+                    continue
+                identity = {k: origin.get(k) for k in ('node', 'invocation')}
+                accumulations = [e for e in evidence.get('accumulations', [])
+                    if e.get('index') == origin.get('post_accumulate_event') and e.get('parameter_key') == key
+                    and e.get('parameter_id') == origin['parameter_id'] and e.get('invocation') == origin['invocation']
+                    and e.get('started_none') is True and e.get('gradient') is not None]
+                gradients = record.get('gradient_evidence') or {}
+                direct = [e for e in gradients.get('events', []) if e.get('call') == call
+                    and all(e.get(k) == v for k, v in identity.items()) and e.get('status') == 'complete']
+                if (len(accumulations) != 1 or gradients.get('version') != 'gradient-evidence-1'
+                        or len(direct) != 1 or sum(_optimizer_path(v.get('path')) == path_key and v.get('gradient') is not None
+                            for v in direct[0].get('inputs', [])) != 1):
+                    continue
+                matching_nodes = [i for i, event in enumerate(nodes) if event.get('call') == call
+                                  and all(event.get(k) == v for k, v in identity.items())]
+                matching_calls = [c for c in calls if c.get('index') == call]
+                matching_bindings = [b for b in bindings if b.get('parameter_key') == key
+                    and b.get('parameter_id') == origin['parameter_id'] and b.get('call_index') == call
+                    and _optimizer_path(b.get('operand_path')) == path_key]
+                operand_events = [e for e in record.get('target_operand_gradients', [])
+                    if e.get('call') == call and _optimizer_path(e.get('path')) == path_key
+                    and all(e.get(k) == v for k, v in identity.items())]
+                if (len(matching_nodes) != 1 or len(matching_calls) != 1 or len(matching_bindings) != 1
+                        or not operand_events or sum(_optimizer_path(d.get('path')) == path_key
+                            for d in matching_calls[0].get('metadata', [])) != 1):
+                    continue
+                metadata = pre['gradient_metadata'].get(key)
+                if (not isinstance(metadata, dict) or metadata.get('layout') != 'torch.strided'
+                        or metadata.get('dtype') != 'torch.float64' or metadata.get('device') != 'cpu'
+                        or _strides(metadata) is None or type(metadata.get('offset')) is not int
+                        or metadata['offset'] < 0 or pre['gradients'][key] is None):
+                    continue
+                witnesses.append({'parameter_key': key, 'parameter_id': origin['parameter_id'],
+                    'call_index': call, 'operand_path': list(path), 'step_index': 0,
+                    'pre_checkpoint': pre_name, 'post_checkpoint': post_name, 'metadata': metadata,
+                    'completed': True, 'provenance': dict(origin),
+                    'relations': {'target_gradient_update': {'status': 'verified', 'events': matching_nodes}}})
+    verified_steps = sorted({w['step_index'] for w in witnesses})
+    eligible = bool(valid and record.get('completed') is True and witnesses)
+    signatures = []
+    if eligible:
+        for witness in witnesses:
+            metadata = witness['metadata']
+            unit = {'version': OPTIMIZER_COVERAGE_VERSION, 'api': record.get('config', {}).get('api'),
+                    'operand_path': witness['operand_path'], 'optimizer': registry.get('native_type'),
+                    'phase': 'consumed_gradient_then_completed_update',
+                    'gradient_representation': {'contiguous': metadata.get('properties', {}).get('contiguous'),
+                                                'offset_nonzero': metadata['offset'] != 0,
+                                                'dtype': metadata['dtype'], 'layout': metadata['layout']},
+                    'relations': ['target_gradient_update']}
+            if unit not in signatures:
+                signatures.append(unit)
+    return {'version': OPTIMIZER_COVERAGE_VERSION, 'eligible': eligible, 'witnesses': witnesses,
+            'eligible_chains': witnesses if eligible else [], 'signatures': signatures,
+            'observed_units': len(signatures), 'verified_steps': verified_steps,
+            'target_update_count': len(verified_steps),
+            'count_verified': bool(supported and bounded and not limitations and len(verified_steps) == len(steps)),
+            'limitations': limitations, 'denominator': None, 'correctness': 'unassessed'}
+
+
+def optimizer_witness_fact(witnesses, predicate):
+    predicate = predicate if isinstance(predicate, StatePredicate) else StatePredicate(**predicate)
+    path = _optimizer_path(predicate.operand_path)
+    if path is None:
+        return Evidence(reason='optimizer witness requires a scoped operand path')
+    phase = 'pre_checkpoint' if predicate.dimension == 'gradient_representation' else 'post_checkpoint'
+    selected = [w for w in witnesses if w.get(phase) == predicate.checkpoint
+                and w.get('parameter_key') == predicate.parameter_key and w.get('call_index') == predicate.call_index
+                and _optimizer_path(w.get('operand_path')) == path
+                and w.get('completed') is True
+                and w.get('relations', {}).get('target_gradient_update', {}).get('status') == 'verified']
+    if len(selected) != 1:
+        return Evidence(reason='missing or ambiguous target-gradient update witness')
+    metadata = selected[0].get('metadata') or {}
+    value = (True if predicate.dimension == 'optimizer' else
+             metadata.get('properties', {}).get('contiguous') if predicate.field == 'contiguous' else
+             metadata['offset'] != 0 if type(metadata.get('offset')) is int and metadata['offset'] >= 0 else None)
+    if type(value) is not bool:
+        return Evidence(reason='consumed gradient representation is unobserved')
+    return Evidence(EvidenceStatus.VERIFIED, 'native optimizer boundary and linked completed backward',
+                    value, predicate.checkpoint)
+
+
+def optimizer_fact(record, predicate):
+    predicate = predicate if isinstance(predicate, StatePredicate) else StatePredicate(**predicate)
+    coverage = inspect_optimizer(record)
+    if predicate.dimension == 'optimizer' and predicate.field == 'target_update_count':
+        if (coverage['count_verified'] and record.get('completed') is True
+                and sum(c.get('name') == 'final' for c in record.get('checkpoints', [])) == 1):
+            return Evidence(EvidenceStatus.VERIFIED, 'count of complete verified target-gradient update chains',
+                            coverage['target_update_count'], 'final')
+        return Evidence(reason='complete target-linked optimizer count is unavailable')
+    return optimizer_witness_fact(coverage['witnesses'], predicate)
 
 
 def input_coverage(record):
@@ -103,20 +289,27 @@ def semantic_coverage(record, *, valid=False):
     """
     events = {'outputs': record.get('target_gradients', []),
               'nodes': record.get('target_backward_nodes', []),
-              'operands': record.get('target_operand_gradients', [])}
+              'operands': record.get('target_operand_gradients', []),
+              'callable_nodes': record.get('callable_backward_nodes', [])}
+    callable_calls = callable_execution_indices(record)
     environment = {k: record.get('environment', {}).get(k) for k in
                    ('torch', 'cuda_runtime', 'device', 'deterministic_algorithms', 'matmul_precision')}
-    witnesses, signatures = [], set()
+    witnesses, signatures, unary_units = [], set(), {}
     checkpoints = record.get('checkpoints', [])
     names = [c['name'] for c in checkpoints]
     for checkpoint in checkpoints:
-        if names.count(checkpoint['name']) != 1 or 'evidence_offsets' not in checkpoint:
+        if (checkpoint['name'].startswith('optimizer:') or names.count(checkpoint['name']) != 1
+                or 'evidence_offsets' not in checkpoint):
             continue
+        # New lifecycle instrumentation has its own coverage version. Adding it
+        # must not manufacture ordinary operand-v2 novelty for an unchanged call.
+        state_facts = {key: value for key, value in checkpoint.get('state_facts', {}).items()
+                       if not key.startswith('optimizer.')}
         offsets = checkpoint['evidence_offsets']
         completed = set(checkpoint.get('completed_backward_invocations', []))
         for call in record.get('target_calls', [])[:offsets['calls']]:
             index = call['index']
-            scoped = {kind: [(i, event) for i, event in enumerate(items[:offsets[kind]])
+            scoped = {kind: [(i, event) for i, event in enumerate(items[:offsets.get(kind, 0)])
                              if event['call'] == index and event.get('invocation') in completed]
                       for kind, items in events.items()}
             for operand in call.get('metadata', []) or [None]:
@@ -125,19 +318,22 @@ def semantic_coverage(record, *, valid=False):
                 relations = {}
                 for name, selected in (('output_gradient', scoped['outputs']),
                                        ('target_backward_node', scoped['nodes']),
-                                       ('operand_gradient_contribution', operand_events)):
+                                       ('operand_gradient_contribution', operand_events),
+                                       ('callable_backward_node', scoped['callable_nodes'] if index in callable_calls else [])):
                     evidence = PathEvidence(EvidenceStatus.VERIFIED if selected else EvidenceStatus.UNKNOWN,
                                             'completed backward runtime events' if selected else 'no attributable runtime event',
                                             tuple(i for i, _ in selected))
-                    relations[name] = dict(evidence.record(), scope='operand' if name == 'operand_gradient_contribution' else 'call')
+                    relations[name] = dict(evidence.record(), scope='operand' if name == 'operand_gradient_contribution' else ('callable' if name == 'callable_backward_node' else 'call'))
                 relations['backward_representation'] = PathEvidence(
                     EvidenceStatus.UNSUPPORTED, 'saved tensor representation is not instrumented').record()
                 witness = {'call': index, 'operand_path': path, 'checkpoint': checkpoint['name'],
                            'metadata': operand, 'execution_mode': call.get('execution_mode', 'unknown'),
                            'backend': call.get('backend'), 'relations': relations,
                            'entry_context': call.get('entry_context'),
-                           'state_facts': checkpoint.get('state_facts', {}),
-                           'backward_bindings': call.get('backward_bindings', [])}
+                           'state_facts': state_facts,
+                           'backward_bindings': call.get('backward_bindings', []),
+                           'input_properties': next((p['facts'] for p in call.get('input_properties', [])
+                               if list(p['path']) == path), {})}
                 witnesses.append(witness)
                 if not valid:
                     continue
@@ -147,57 +343,219 @@ def semantic_coverage(record, *, valid=False):
                 if operand:
                     properties = operand.get('properties', {})
                     representation = {k: properties.get(k) for k in ('negative', 'conjugate', 'contiguous', 'mkldnn')}
-                    representation.update(layout=operand['layout'], device=operand['device'],
+                    representation.update(layout=operand.get('layout'), device=operand.get('device'),
                         offset='unknown' if operand.get('offset') is None else ('zero' if operand['offset'] == 0 else 'nonzero'),
-                        zero_stride=any(n > 1 and stride == 0 for n, stride in
-                                        zip(operand['shape'], operand.get('strides') or ())),
-                        aliases=[list(other['path']) for other in call.get('metadata', [])
+                        zero_stride=_zero_stride(operand),
+                        aliases=None if operand.get('storage_group') is None else [list(other['path']) for other in call.get('metadata', [])
                                  if other['path'] != operand['path'] and operand.get('storage_group') is not None
                                  and other.get('storage_group') == operand['storage_group']],
-                        requires_grad=operand.get('requires_grad'), leaf=operand.get('leaf'))
+                        requires_grad=operand.get('requires_grad'), leaf=operand.get('leaf'),
+                        axis_classes=[dict(axis=axis, **fields) for axis in _selected_axes(operand)
+                                      if (fields := _axis_fields(operand, axis)) is not None])
                     facts = next((p['facts'] for p in call.get('input_properties', [])
                                   if list(p['path']) == path), {})
-                    data = {'dtype': operand['dtype'], 'rank': len(operand['shape']),
-                            'empty': 0 in operand['shape'], 'singleton': 1 in operand['shape'],
+                    shape = _shape(operand)
+                    data = {'dtype': operand.get('dtype'), 'rank': None if shape is None else len(shape),
+                            'empty': None if shape is None else 0 in shape,
+                            'singleton': None if shape is None else 1 in shape,
                             'categories': sorted(k for k, v in facts.items() if v is True)}
                 state = {k: ('multiple' if v > 1 else v) if type(v) is int and k.endswith('_count') else v
-                         for k, v in checkpoint.get('state_facts', {}).items()}
-                unit = {'version': SEMANTIC_COVERAGE_VERSION, 'api': record.get('config', {}).get('api'),
+                         for k, v in state_facts.items()}
+                unit = {'version': SEMANTIC_COVERAGE_VERSION, 'unit_kind': 'unary', 'api': record.get('config', {}).get('api'),
                         'operand_path': path, 'checkpoint': checkpoint['name'], 'representation': representation,
                         'data': data, 'state': state, 'execution_mode': witness['execution_mode'],
                         'backend': witness['backend'], 'environment': environment, 'entry_context': witness['entry_context'],
                         'relations': sorted(k for k, v in relations.items() if v['status'] == EvidenceStatus.VERIFIED)}
                 signatures.add(json.dumps(unit, sort_keys=True, separators=(',', ':')))
+                unary_units[(checkpoint['name'], index, tuple(path or ()))] = unit
+    joint_units, measurement_counts = _joint_coverage(witnesses, unary_units, valid)
+    signatures.update(json.dumps(unit, sort_keys=True, separators=(',', ':')) for unit in joint_units)
     return {'version': SEMANTIC_COVERAGE_VERSION, 'instrumentation': 'output-and-direct-node-hooks',
             'environment': environment, 'events': events, 'witnesses': witnesses,
             'signatures': [json.loads(s) for s in sorted(signatures)], 'eligible': valid,
-            'observed_units': len(signatures), 'denominator': None, 'correctness': 'unassessed'}
+            'observed_units': len(signatures),
+            'observed_unary_units': sum(json.loads(s)['unit_kind'] == 'unary' for s in signatures),
+            'observed_joint_units': sum(json.loads(s)['unit_kind'] == 'joint' for s in signatures),
+            'measurement_counts': measurement_counts,
+            'joint_bounds': {'operands_per_call_checkpoint': JOINT_COVERAGE_MAX_OPERANDS,
+                             'axes_per_operand': JOINT_COVERAGE_MAX_AXES,
+                             'selection': 'typed-path order; first and last axes'},
+            'denominator': None, 'correctness': 'unassessed'}
+
+
+def _shape(metadata):
+    shape = metadata.get('shape')
+    if not isinstance(shape, (tuple, list)) or any(type(n) is not int or n < 0 for n in shape):
+        return None
+    return shape
+
+
+def _strides(metadata):
+    shape, strides = _shape(metadata), metadata.get('strides')
+    if (shape is None or not isinstance(strides, (tuple, list)) or len(strides) != len(shape)
+            or any(type(stride) is not int for stride in strides)):
+        return None
+    return strides
+
+
+def _zero_stride(metadata):
+    strides = _strides(metadata)
+    return None if strides is None else any(
+        n > 1 and stride == 0 for n, stride in zip(metadata['shape'], strides))
+
+
+def _axis_fields(metadata, axis):
+    shape, strides = _shape(metadata), _strides(metadata)
+    if shape is None or type(axis) is not int or not 0 <= axis < len(shape) or strides is None:
+        return None
+    return {'zero_stride': shape[axis] > 1 and strides[axis] == 0,
+            'singleton_stride': 'not_singleton' if shape[axis] != 1 else (
+                'zero' if strides[axis] == 0 else 'unit' if strides[axis] == 1 else 'other')}
+
+
+def _selected_axes(metadata):
+    shape = _shape(metadata)
+    return tuple(dict.fromkeys((0, len(shape) - 1)))[:JOINT_COVERAGE_MAX_AXES] if shape else ()
+
+
+def _joint_groups(witnesses):
+    groups = {}
+    for witness in witnesses:
+        path = witness.get('operand_path')
+        if not isinstance(witness.get('metadata'), dict) or not path:
+            continue
+        groups.setdefault((witness['checkpoint'], witness['call']), []).append(witness)
+    for key, group in groups.items():
+        paths = [tuple(w['operand_path']) for w in group]
+        unique = [w for w in group if paths.count(tuple(w['operand_path'])) == 1]
+        unique.sort(key=lambda w: tuple((0, key) if type(key) is int else (1, key)
+                                      for key in w['operand_path']))
+        yield key, unique[:JOINT_COVERAGE_MAX_OPERANDS], max(0, len(unique) - JOINT_COVERAGE_MAX_OPERANDS), len(group) - len(unique)
+
+
+def joint_candidates(witnesses):
+    """Bounded same-call/checkpoint pairs, shared by planning and measurement.
+
+    Distinct paths may name the same object. No pair implies independent operand
+    gradients, occupied-coordinate overlap, legality or MR applicability.
+    """
+    from itertools import combinations, product
+    for _, group, _, _ in _joint_groups(witnesses):
+        for primary, peer in combinations(group, 2):
+            axes, peer_axes = _selected_axes(primary['metadata']), _selected_axes(peer['metadata'])
+            coordinates = product(axes, peer_axes) if axes and peer_axes else ((None, None),)
+            for axis, peer_axis in coordinates:
+                yield {'primary': primary, 'peer': peer, 'axis': axis, 'peer_axis': peer_axis}
+
+
+def witness_fact(witnesses, predicate):
+    """Evaluate a predicate using metadata and independently scoped path evidence."""
+    predicate = predicate if isinstance(predicate, StatePredicate) else StatePredicate(**predicate)
+    def select(path, relation):
+        matches = [w for w in witnesses if w['checkpoint'] == predicate.checkpoint
+                   and w['call'] == predicate.call_index and w['operand_path'] == list(path)]
+        if len(matches) != 1 or not isinstance(matches[0].get('metadata'), dict):
+            return None, 'missing or ambiguous operand witness'
+        witness = matches[0]
+        if relation and witness.get('relations', {}).get(relation, {}).get('status') != 'verified':
+            return None, 'required path relation not established'
+        return witness, None
+    witness, reason = select(predicate.operand_path, predicate.relation)
+    if reason:
+        return Evidence(reason=reason)
+    metadata = witness['metadata']
+    if predicate.dimension == 'tensor_relation':
+        peer, reason = select(predicate.peer_operand_path, predicate.peer_relation)
+        if reason:
+            return Evidence(reason='peer ' + reason)
+        other = peer['metadata']
+        if predicate.field == 'shared_storage':
+            # Sparse identities may name only values storage, not index buffers.
+            if any(md.get('layout') != 'torch.strided' or md.get('properties', {}).get('mkldnn') is not False
+                   for md in (metadata, other)):
+                return Evidence(reason='whole-operand storage relation requires observed dense strided tensors')
+            groups = (metadata.get('storage_group'), other.get('storage_group'))
+            if any(type(group) is not int or group < 0 for group in groups):
+                return Evidence(reason='storage identity not observed for both operands')
+            value = groups[0] == groups[1]
+        else:
+            shape, peer_shape = _shape(metadata), _shape(other)
+            if (shape is None or peer_shape is None or predicate.axis >= len(shape)
+                    or predicate.peer_axis >= len(peer_shape)):
+                return Evidence(reason='selected extent not observed')
+            left, right = shape[predicate.axis], peer_shape[predicate.peer_axis]
+            value = 'lt' if left < right else 'gt' if left > right else 'eq'
+    else:
+        properties = metadata.get('properties', {})
+        fields = dict(properties, **{k: metadata.get(k) for k in
+                      ('dtype', 'device', 'layout', 'shape', 'strides', 'requires_grad', 'leaf')})
+        fields['offset_nonzero'] = None if metadata.get('offset') is None else metadata['offset'] != 0
+        fields['zero_stride'] = _zero_stride(metadata)
+        if predicate.axis is not None:
+            selected = _axis_fields(metadata, predicate.axis)
+            if selected is None:
+                return Evidence(reason='selected stride not observed')
+            fields.update(selected)
+        if predicate.field == 'aliases' and metadata.get('storage_group') is not None:
+            fields['aliases'] = [w['operand_path'] for w in witnesses
+                if w['checkpoint'] == predicate.checkpoint and w['call'] == predicate.call_index
+                and w['operand_path'] != list(predicate.operand_path)
+                and (w.get('metadata') or {}).get('storage_group') == metadata['storage_group']]
+        if predicate.dimension == 'data':
+            fields = dict(witness.get('input_properties', {}), dtype=metadata.get('dtype'), shape=metadata.get('shape'))
+        value = fields.get(predicate.field)
+        if value is None:
+            return Evidence(reason='operand field not instrumented')
+    return Evidence(EvidenceStatus.VERIFIED, 'call-bound runtime operand observation', value, predicate.checkpoint)
 
 
 def operand_fact(record, predicate):
-    """Read one call/operand witness, with optional attributable backward evidence."""
-    witnesses = [w for w in semantic_coverage(record)['witnesses']
-                 if w['checkpoint'] == predicate.checkpoint and w['call'] == predicate.call_index
-                 and w['operand_path'] == list(predicate.operand_path)]
-    if len(witnesses) != 1:
-        return Evidence(reason='missing or ambiguous operand witness')
-    witness = witnesses[0]
-    if predicate.relation and witness['relations'][predicate.relation]['status'] != 'verified':
-        return Evidence(reason='required path relation not established')
-    metadata = witness['metadata'] or {}
-    properties = metadata.get('properties', {})
-    fields = dict(properties, **{k: metadata.get(k) for k in ('dtype', 'device', 'layout', 'shape', 'strides', 'requires_grad', 'leaf')})
-    fields['offset_nonzero'] = None if metadata.get('offset') is None else metadata['offset'] != 0
-    fields['zero_stride'] = None if metadata.get('strides') is None else any(
-        n > 1 and stride == 0 for n, stride in zip(metadata['shape'], metadata['strides']))
-    call = next((c for c in record.get('target_calls', []) if c['index'] == predicate.call_index), {})
-    if predicate.field == 'aliases' and metadata.get('storage_group') is not None:
-        fields['aliases'] = [list(o['path']) for o in call.get('metadata', [])
-                            if list(o['path']) != list(predicate.operand_path) and o.get('storage_group') == metadata['storage_group']]
-    if predicate.dimension == 'data':
-        measured = next((o['facts'] for o in call.get('input_properties', []) if list(o['path']) == list(predicate.operand_path)), {})
-        fields = dict(measured, dtype=metadata.get('dtype'), shape=metadata.get('shape'))
-    value = fields.get(predicate.field)
-    if value is None:
-        return Evidence(reason='operand field not instrumented')
-    return Evidence(EvidenceStatus.VERIFIED, 'call-bound runtime operand observation', value, predicate.checkpoint)
+    return witness_fact(semantic_coverage(record)['witnesses'], predicate)
+
+
+def _joint_coverage(witnesses, unary_units, valid):
+    from itertools import combinations
+    counts = {'joint_candidate_units': 0, 'joint_measured_units': 0, 'joint_unknown_units': 0,
+              'omitted_operands': 0, 'ambiguous_operands': 0, 'omitted_axis_pairs': 0}
+    for _, group, omitted, ambiguous in _joint_groups(witnesses):
+        counts['omitted_operands'] += omitted
+        counts['ambiguous_operands'] += ambiguous
+        for left, right in combinations(group, 2):
+            shapes = (_shape(left['metadata']), _shape(right['metadata']))
+            if all(shapes):
+                counts['omitted_axis_pairs'] += len(shapes[0]) * len(shapes[1]) - len(
+                    _selected_axes(left['metadata'])) * len(_selected_axes(right['metadata']))
+    units = []
+    for candidate in joint_candidates(witnesses):
+        counts['joint_candidate_units'] += 1
+        left, right = candidate['primary'], candidate['peer']
+        axis, peer_axis = candidate['axis'], candidate['peer_axis']
+        common = dict(dimension='tensor_relation', checkpoint=left['checkpoint'],
+                      call_index=left['call'], operand_path=left['operand_path'], peer_operand_path=right['operand_path'])
+        storage = witness_fact(witnesses, StatePredicate(field='shared_storage', expected=True, **common))
+        measured = {}
+        if storage.established:
+            measured['shared_storage'] = storage.value
+        if axis is not None and peer_axis is not None:
+            extent = witness_fact(witnesses, StatePredicate(field='extent_order', expected='eq',
+                                                           axis=axis, peer_axis=peer_axis, **common))
+            if extent.established:
+                measured['extent_order'] = extent.value
+            for key, witness, selected_axis in (('primary_axis', left, axis), ('peer_axis', right, peer_axis)):
+                fields = _axis_fields(witness['metadata'], selected_axis)
+                if fields is not None:
+                    measured[key] = dict(axis=selected_axis, **fields)
+        if not measured:
+            counts['joint_unknown_units'] += 1
+            continue
+        counts['joint_measured_units'] += 1
+        if not valid:
+            continue
+        selected = [unary_units[(w['checkpoint'], w['call'], tuple(w['operand_path']))] for w in (left, right)]
+        unit = {k: selected[0][k] for k in ('version', 'api', 'checkpoint', 'state', 'execution_mode',
+                                         'backend', 'environment', 'entry_context')}
+        unit.update(unit_kind='joint', operands=[{k: u[k] for k in
+                    ('operand_path', 'representation', 'data', 'relations')} for u in selected],
+                    axis=axis, peer_axis=peer_axis, tensor_relations=measured)
+        units.append(unit)
+    return units, counts

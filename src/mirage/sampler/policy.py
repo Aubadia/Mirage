@@ -52,7 +52,8 @@ class FeedbackSampler:
         return {'attempts':0, 'valid':0, 'gain':0., 'seconds':0.}
 
     def _estimate(self, candidate):
-        family = self.families.get((candidate['api'], candidate['kind'], candidate.get('goal')), self._empty())
+        family_goal = candidate.get('feedback_family', candidate.get('goal'))
+        family = self.families.get((candidate['api'], candidate['kind'], family_goal), self._empty())
         own = self.parents.get((candidate['api'], candidate.get('parent'), candidate['kind'], candidate.get('goal')), self._empty())
         # Family evidence transfers across freshly admitted seeds; two prior trials
         # keep an untested parent from being treated as certainly good or bad.
@@ -67,14 +68,14 @@ class FeedbackSampler:
 
     def choose(self, candidates, *, reason='adaptive'):
         if not candidates:
-            raise ValueError('No statically plannable candidates')
+            raise ValueError('No eligible candidates')
         if len({(c['api'], c.get('parent'), c['kind'], c.get('goal')) for c in candidates}) != len(candidates):
             raise ValueError('Candidates must be distinct')
         estimates = [self._estimate(c) for c in candidates]
         total = sum(e['score'] for e in estimates)
         probabilities = [self.epsilon/len(candidates) + (1-self.epsilon)*e['score']/total for e in estimates]
         index = self.random.choices(range(len(candidates)), weights=probabilities, k=1)[0]
-        return dict(candidates[index]), {'policy':'adaptive-v1', 'reason':reason,
+        return dict(candidates[index]), {'policy':'adaptive-v2', 'reason':reason,
                 'coverage_basis':self.coverage_basis, 'candidate_count':len(candidates),
                 'selected_index':index, 'selected_probability':probabilities[index],
                 'candidates':[dict(c, **estimate, probability=p) for c, estimate, p in zip(candidates, estimates, probabilities)]}
@@ -90,7 +91,8 @@ class FeedbackSampler:
         new_units, new_pairs = units - self.seen, pairs - self.relations
         self.seen.update(units); self.relations.update(pairs)
         gain = float(bool(new_units)) + float(bool(new_pairs))
-        keys = [(self.families, (candidate['api'], candidate['kind'], candidate.get('goal'))),
+        family_goal = candidate.get('feedback_family', candidate.get('goal'))
+        keys = [(self.families, (candidate['api'], candidate['kind'], family_goal)),
                 (self.parents, (candidate['api'], candidate.get('parent'), candidate['kind'], candidate.get('goal')))]
         if candidate.get('goal') is not None:
             # Seed selection uses aggregate plan cost; goal selection retains its own feedback.

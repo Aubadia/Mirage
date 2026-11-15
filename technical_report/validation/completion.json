@@ -1,0 +1,24 @@
+{
+  "job_ids": [
+    "781204",
+    "781224",
+    "781232",
+    "781237",
+    "781239",
+    "781240",
+    "781247",
+    "781249"
+  ],
+  "all_top_level_jobs_completed_zero": true,
+  "final_job": "781249",
+  "allocated_gpu_seconds": 210,
+  "allocated_gpu_hours": 0.058333333333333334,
+  "scope": "One allocated GPU per job; includes cold TeX downloads and document build iterations. Allocation is not GPU utilization. No model startup/inference/restarts.",
+  "final_pdf_sha256": "8e3c80e701a7a4e7df73c254d81bd709df040b497e5216166df2b32c260c64d5",
+  "final_page_count": 9,
+  "final_inputs_match_recorded_snapshot": true,
+  "complete_template_distribution_unchanged_files": 36,
+  "no_overfull_boxes_missing_fonts_or_unresolved_citations": true,
+  "underfull_box_warnings": 23,
+  "cache_retained": "Report-local reproducibility cache; no services or temporary compute processes remain."
+}

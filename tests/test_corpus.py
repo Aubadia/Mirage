@@ -39,6 +39,86 @@ def fixture_bundle(root, number, *, source=SOURCE, coverage='base', verdict='pas
 
 
 class CorpusTests(unittest.TestCase):
+    def test_optimizer_chain_survives_old_operand_deduplication(self):
+        from mirage.contracts.capabilities import OPTIMIZER_COVERAGE_VERSION
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = Corpus(root)
+            corpus.admit(*fixture_bundle(root, 0))
+            source, row, path = fixture_bundle(root, 1)
+            unit = {'version': OPTIMIZER_COVERAGE_VERSION, 'api': 'torch.sin',
+                    'parameter_ordinal': 0, 'gradient_contiguous': False}
+            witness = {'parameter_key': 'weight', 'step_index': 0, 'completed': True}
+            row['inspection']['optimizer_coverage'] = {
+                'version': OPTIMIZER_COVERAGE_VERSION, 'eligible': True,
+                'signatures': [unit], 'witnesses': [witness],
+                'count_verified': True, 'target_update_count': 1}
+            admitted = corpus.admit(source, row, path)
+            self.assertTrue(admitted['admitted'])
+            self.assertEqual(admitted['new_units'], 1)
+            restored = Corpus(root).entries[-1]
+            self.assertEqual(restored['optimizer_coverage'], [unit])
+            self.assertEqual(restored['evidence']['optimizer_witnesses'], [witness])
+            self.assertEqual(restored['evidence']['optimizer_target_update_count'], 1)
+            self.assertEqual(restored['evidence']['witnesses'], [])
+
+    def test_absent_or_unknown_optimizer_count_is_not_zero(self):
+        from mirage.contracts.capabilities import OPTIMIZER_COVERAGE_VERSION
+        for measured in (False, True):
+            with self.subTest(measured=measured), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                corpus = Corpus(root)
+                source, row, path = fixture_bundle(root, 0)
+                if measured:
+                    row['inspection']['optimizer_coverage'] = {
+                        'version': OPTIMIZER_COVERAGE_VERSION, 'eligible': False,
+                        'count_verified': False, 'target_update_count': 0}
+                self.assertTrue(corpus.admit(source, row, path)['admitted'])
+                self.assertIsNone(corpus.entries[0]['evidence']['optimizer_target_update_count'])
+                self.assertEqual(corpus.entries[0]['optimizer_coverage'], [])
+
+    def test_resume_rejects_legacy_and_mixed_coverage_without_rewriting(self):
+        for change in ('corpus', 'top_coverage', 'entry', 'unit', 'inactive_entry'):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                corpus = Corpus(root)
+                corpus.admit(*fixture_bundle(root, 0))
+                saved = json.loads(corpus.path.read_text())
+                if change == 'corpus': saved['version'] = 'stateful-corpus-1'
+                elif change == 'top_coverage': saved.pop('semantic_coverage_version')
+                elif change == 'unit': saved['entries'][0]['coverage'][0]['version'] = 'state-semantic-1'
+                else:
+                    saved['entries'][0]['coverage_version'] = 'state-semantic-1'
+                    if change == 'inactive_entry': saved['entries'][0]['active'] = False
+                corpus.path.write_text(json.dumps(saved))
+                before = corpus.path.read_bytes()
+                with self.assertRaisesRegex(ValueError, 'version.*fresh corpus'):
+                    Corpus(root)
+                self.assertEqual(corpus.path.read_bytes(), before)
+
+    def test_joint_units_survive_persistence_and_drive_admission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = Corpus(root)
+            first = fixture_bundle(root, 0)
+            unary = first[1]['inspection']['semantic_coverage']['signatures'][0]
+            unary.update(version=SEMANTIC_COVERAGE_VERSION, unit_kind='unary')
+            corpus.admit(*first)
+            second = fixture_bundle(root, 1)
+            pair = {'version': SEMANTIC_COVERAGE_VERSION, 'unit_kind': 'joint',
+                    'api': 'torch.sin', 'operands': [['args', 0], ['args', 1]],
+                    'extent_order': 'lt', 'shared_storage': False}
+            second[1]['inspection']['semantic_coverage']['signatures'] = [deepcopy(unary), pair]
+            added = corpus.admit(*second)
+            self.assertTrue(added['admitted'])
+            self.assertEqual(added['new_units'], 1)
+            restored = Corpus(root)
+            self.assertEqual(restored.summary()['semantic_coverage_version'], SEMANTIC_COVERAGE_VERSION)
+            self.assertIn(pair, restored.entries[1]['coverage'])
+            third = fixture_bundle(root, 2, seconds=20)
+            third[1]['inspection']['semantic_coverage']['signatures'] = [deepcopy(unary), deepcopy(pair)]
+            self.assertEqual(restored.admit(*third)['reason'], 'duplicate_coverage')
+
     def test_different_coverage_keeps_parent_and_round_robins(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); corpus = Corpus(root)

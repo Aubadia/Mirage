@@ -114,6 +114,36 @@ class OracleRoutingTests(unittest.TestCase):
         original['run_rng_unchanged'] = True
         self.assertEqual(audit_execution(original)['status'], 'unsupported')
 
+    def test_local_vjp_certificate_is_exact_and_does_not_override_execution_guards(self):
+        original = record()
+        original['run_rng_unchanged'] = True
+        original['program_certificate'] = None
+        result = {'version': AUDIT_VERSION, 'scope': 'target_vjp', 'status': 'agreement', 'events': []}
+        with patch('mirage.inspector.numerical_gradients.audit_record', return_value=result) as audit:
+            for tag in (None, True, 'explicit_straight_line_values_v1', 'explicit_straight_line_local_vjp_v2'):
+                original['numerical_source_certificate'] = tag
+                self.assertEqual(audit_execution(original)['status'], 'unsupported')
+            audit.assert_not_called()
+            original['numerical_source_certificate'] = 'explicit_straight_line_local_vjp_v1'
+            self.assertEqual(audit_execution(original)['status'], 'agreement')
+            audit.assert_called_once_with(original, budget_seconds=10)
+            audit.reset_mock()
+            for change in (lambda r: r.update(completed=False),
+                           lambda r: r['inspection'].update(valid=False),
+                           lambda r: r.pop('gradient_evidence'),
+                           lambda r: r.update(run_rng_unchanged=False)):
+                changed = deepcopy(original)
+                change(changed)
+                self.assertIn(audit_execution(changed)['status'], ('unknown', 'unsupported'))
+            audit.assert_not_called()
+
+    def test_legacy_program_certificate_still_routes_without_new_field(self):
+        original = record()
+        original.update(run_rng_unchanged=True, program_certificate='explicit_straight_line_values_v1')
+        with patch('mirage.inspector.numerical_gradients.audit_record', return_value={'status': 'unknown'}) as audit:
+            self.assertEqual(audit_execution(original)['status'], 'unknown')
+        audit.assert_called_once_with(original, budget_seconds=10)
+
 
 if __name__ == '__main__':
     unittest.main()

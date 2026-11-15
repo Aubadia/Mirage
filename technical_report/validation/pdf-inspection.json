@@ -1,0 +1,157 @@
+{
+  "job_id": "781249",
+  "pages": [
+    {
+      "page": 1,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 5020
+    },
+    {
+      "page": 2,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 5676
+    },
+    {
+      "page": 3,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 5594
+    },
+    {
+      "page": 4,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 5468
+    },
+    {
+      "page": 5,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 5909
+    },
+    {
+      "page": 6,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 5230
+    },
+    {
+      "page": 7,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 3613
+    },
+    {
+      "page": 8,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 4067
+    },
+    {
+      "page": 9,
+      "mediabox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "text_characters": 4618
+    }
+  ],
+  "fonts": {
+    "/IHAIZV+NimbusRomNo9L-Regu": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/BZIVMZ+NimbusRomNo9L-MediItal": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/IXFAWU+NimbusRomNo9L-Medi": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/TQTHRL+NimbusRomNo9L-ReguItal": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/YEUUOC+NimbusMonL-Regu": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/AKHCZK+CMSY7": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/VDVGTR+CMMI10": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/CAFSZL+CMR7": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/DDIEWW+CMR10": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/FKPJSN+CMMI7": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/PVTTLK+CMEX10": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/JAGKKY+CMSY10": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/NOMARO+NimbusMonL-Bold": {
+      "subtype": "/Type1",
+      "embedded": true
+    },
+    "/KPXLOM+CMMI8": {
+      "subtype": "/Type1",
+      "embedded": true
+    }
+  },
+  "paper_size": "US Letter",
+  "sha256": "8e3c80e701a7a4e7df73c254d81bd709df040b497e5216166df2b32c260c64d5",
+  "rendered_every_page": true,
+  "scope": "Static PDF checks; not an IEEE PDF eXpress certificate."
+}

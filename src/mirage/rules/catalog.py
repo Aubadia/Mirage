@@ -2,6 +2,14 @@
 from mirage.contracts.capabilities import Evidence, EvidenceStatus, RelationSpec
 
 RELATIONS = {
+    'optimizer_gradient_representation': RelationSpec(
+        'optimizer_gradient_representation', 1,
+        ('valid_executions', 'native_optimizer_domain', 'optimizer_source_effects',
+         'target_gradient_update', 'verified_gradient_transformation', 'complete_update_observables'),
+        ('same_program', 'same_initial_state', 'same_environment', 'same_optimizer_registry',
+         'same_pre_update_state', 'aligned_optimizer_step', 'permitted_case_difference'),
+        ('updated_parameters', 'optimizer_slots'), ('gradient_representation',),
+        'comparison', 'dtype_scaled_v1'),
     'representation': RelationSpec(
         'representation', 1,
         ('valid_executions', 'logical_value_semantics', 'deterministic', 'read_only_target',
@@ -38,6 +46,142 @@ RELATIONS = {
         ('same_logical_inputs', 'same_effect_sequence', 'aligned_checkpoints'), ('alias_propagation',),
         ('execution_mode',), 'comparison', 'exact'),
 }
+
+
+def optimizer_gradient_candidates(record):
+    """Only a source-valid, attributed native update can supply a pair candidate."""
+    from mirage.inspector.stateful import inspect_optimizer
+    valid = record.get('completed') is True and record.get('inspection', {}).get('valid') is True
+    return inspect_optimizer(record, valid=valid).get('eligible_chains', []) if valid else []
+
+
+def optimizer_followup_predicates(predicates, *, parameter_key, pre_checkpoint, post_checkpoint):
+    """Relax only the selected step's permitted representation difference."""
+    return [p for p in predicates if not (p.get('dimension') == 'gradient_representation' and
+            p.get('parameter_key') == parameter_key and
+            p.get('checkpoint') in (pre_checkpoint, post_checkpoint))]
+
+
+def optimizer_gradient_pair(left, right, backend, *, step_index, parameter_key):
+    """Compare one observed native update; arbitrary final source state is not an output."""
+    name = 'optimizer_gradient_representation'
+    facts = {}
+    def establish(key, condition, reason):
+        facts[key] = Evidence(EvidenceStatus.VERIFIED if condition else EvidenceStatus.UNKNOWN,
+                              reason, True if condition else None, 'comparison', 'adapter')
+    def exact(a, b):
+        return backend.compare(a, b, 'exact').get('equal') is True
+    def step(record):
+        matches = [s for s in record.get('optimizer_evidence', {}).get('steps', [])
+                   if s.get('index') == step_index]
+        return matches[0] if len(matches) == 1 else {}
+    def chains(record):
+        return [w for w in optimizer_gradient_candidates(record)
+                if w.get('step_index') == step_index and w.get('parameter_key') == parameter_key]
+    steps = [step(record) for record in (left, right)]
+    witnesses = [chains(record) for record in (left, right)]
+    establish('valid_executions', all(r.get('completed') is True and
+              r.get('inspection', {}).get('valid') is True for r in (left, right)),
+              'each member must satisfy its own runtime obligations')
+    establish('native_optimizer_domain', all(s.get('domain', {}).get('status') == 'verified' for s in steps),
+              'reviewed native optimizer domain at the actual update')
+    establish('optimizer_source_effects', all(r.get('optimizer_source_certificate') ==
+              'explicit_optimizer_gradient_update_v1' for r in (left, right)),
+              'separate restricted optimizer source-effect certificate')
+    identity_fields = ('parameter_key', 'parameter_id', 'call_index', 'operand_path', 'step_index')
+    provenance = bool(all(len(w) == 1 for w in witnesses))
+    if provenance:
+        provenance = all(exact(witnesses[0][0].get(k), witnesses[1][0].get(k)) for k in identity_fields)
+    establish('target_gradient_update', provenance,
+              'same registered parameter and target path through a completed backward to the consumed gradient')
+    establish('same_program', bool(left.get('graph')) and exact(left.get('graph'), right.get('graph')),
+              'identical analyzed source computation')
+    establish('same_initial_state', 'initial' in left and 'initial_metadata' in left and
+              exact(left.get('initial'), right.get('initial')) and
+              exact(left.get('initial_metadata'), right.get('initial_metadata')),
+              'concrete initial values, optimizer state and representation')
+    establish('same_environment', bool(left.get('environment')) and
+              exact(left.get('environment'), right.get('environment')),
+              'identical recorded execution environment')
+    registries = [r.get('optimizer_evidence', {}).get('registry') for r in (left, right)]
+    establish('same_optimizer_registry', bool(registries[0]) and exact(*registries),
+              'native optimizer, stable group order, parameter bindings and options')
+    pre = [s.get('pre', {}) for s in steps]
+    establish('same_pre_update_state', all(all(k in p for k in ('parameters', 'gradients', 'slots')) for p in pre)
+              and all(exact(pre[0].get(k), pre[1].get(k)) for k in ('parameters', 'gradients', 'slots')),
+              'exact logical parameters, every gradient and optimizer slot immediately before the step')
+    establish('aligned_optimizer_step', all(s.get('completed') is True for s in steps)
+              and bool(steps[0].get('pre_checkpoint')) and bool(steps[0].get('post_checkpoint'))
+              and all(steps[0].get(k) == steps[1].get(k) for k in
+                      ('index', 'optimizer_id', 'pre_checkpoint', 'post_checkpoint')),
+              'same completed native step and reserved semantic boundaries')
+    configs = [dict(r.get('config', {})) for r in (left, right)]
+    source_predicates = configs[0].pop('predicates', [])
+    followup_predicates = configs[1].pop('predicates', [])
+    actions = [c.pop('optimizer_gradient_action', None) for c in configs]
+    permitted_predicates = optimizer_followup_predicates(source_predicates, parameter_key=parameter_key,
+        pre_checkpoint=steps[0].get('pre_checkpoint'), post_checkpoint=steps[0].get('post_checkpoint'))
+    action_valid = all(a is None or (a.get('step_index') == step_index and
+                       a.get('parameter_key') == parameter_key and a.get('action') in
+                       ('canonical', 'strided', 'offset')) for a in actions)
+    establish('permitted_case_difference', exact(*configs) and action_valid and actions[1] is not None
+              and exact(followup_predicates, permitted_predicates),
+              'only the selected gradient action and representation-specific followup goals may differ')
+    metadata = [p.get('gradient_metadata', {}) for p in pre]
+    selected = [m.get(parameter_key, {}) for m in metadata]
+    # Shape, dtype, device and other gradients are invariant. Actual strides or offset must change.
+    changed = bool(selected[0]) and bool(selected[1]) and any(
+        selected[0].get(k) != selected[1].get(k) for k in ('strides', 'offset'))
+    def invariant_metadata(item):
+        value = {k: v for k, v in item.items() if k not in ('strides', 'offset', 'object_group', 'storage_group')}
+        if 'properties' in value:
+            value['properties'] = {k: v for k, v in value['properties'].items() if k != 'contiguous'}
+        return value
+    invariant = exact(invariant_metadata(selected[0]), invariant_metadata(selected[1]))
+    unchanged_others = metadata[0].keys() == metadata[1].keys() and all(
+        exact(metadata[0][k], metadata[1][k]) for k in metadata[0] if k != parameter_key)
+    mutation = steps[1].get('mutation') or {}
+    source_mutation = steps[0].get('mutation') or {}
+    mutation_valid = (mutation.get('status') == 'verified' and mutation.get('logical_equal') is True and
+                      mutation.get('parameter_key') == parameter_key and actions[1] is not None and
+                      mutation.get('action') == actions[1].get('action'))
+    if actions[0] is not None:
+        mutation_valid = (mutation_valid and source_mutation.get('status') == 'verified' and
+                          source_mutation.get('logical_equal') is True and
+                          source_mutation.get('parameter_key') == parameter_key and
+                          source_mutation.get('action') == actions[0].get('action'))
+    else:
+        mutation_valid = mutation_valid and not source_mutation
+    establish('verified_gradient_transformation', changed and invariant and unchanged_others and mutation_valid,
+              'measured, exact-value-preserving, sole gradient representation difference')
+    outputs = [{'updated_parameters': s.get('post', {}).get('parameters'),
+                'optimizer_slots': s.get('post', {}).get('slots')} for s in steps]
+    establish('complete_update_observables', all(isinstance(o['updated_parameters'], dict) and
+              bool(o['updated_parameters']) and isinstance(o['optimizer_slots'], dict) and
+              o['updated_parameters'].keys() == p.get('parameters', {}).keys() and
+              o['optimizer_slots'].keys() == p.get('slots', {}).keys() for o, p in zip(outputs, pre)),
+              'post-update parameters and slots captured for every registered optimizer parameter')
+    result = evaluate(name, facts, *outputs, backend.compare)
+    result.update(step_index=step_index, parameter_key=parameter_key,
+                  source_goal_valid=left.get('inspection', {}).get('valid') is True,
+                  followup_goal_valid=right.get('inspection', {}).get('valid') is True)
+    if not RELATIONS[name].missing(facts):
+        result['exact_output_comparison'] = backend.compare(*outputs, 'exact')
+        changes = []
+        for s in steps:
+            amounts = {}
+            for key, before in s['pre']['parameters'].items():
+                after = s.get('post', {}).get('parameters', {}).get(key)
+                try:
+                    import math
+                    amount = float((after - before).abs().max()) if before.numel() else 0.0
+                    amounts[key] = amount if math.isfinite(amount) else None
+                except (AttributeError, RuntimeError, TypeError):
+                    amounts[key] = None
+            changes.append(amounts)
+        result['max_abs_parameter_update'] = dict(zip(('source', 'followup'), changes))
+        result['update_amount_scope'] = 'secondary observation; a nonzero change is not an applicability requirement'
+    return result
 
 
 def select(evidence):

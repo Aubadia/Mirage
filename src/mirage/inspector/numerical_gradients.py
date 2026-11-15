@@ -60,8 +60,13 @@ def _output_seeds(output, event):
 def _scalar(output, event):
     selected, seeds = _output_seeds(output, event)
     # Python accumulation avoids using the target framework's reduction as the reference.
-    terms = [a * b for tensor, seed in zip(selected, seeds)
-             for a, b in zip(_values(tensor), _values(seed))]
+    terms = []
+    for tensor, seed in zip(selected, seeds):
+        for value, weight in zip(_values(tensor), _values(seed)):
+            term = value * weight
+            if value != 0 and weight != 0 and term == 0:
+                raise AuditUnknown('scalar projection underflow')
+            terms.append(term)
     result = math.fsum(terms)
     mass = math.fsum(abs(term) for term in terms)
     if not math.isfinite(result) or not math.isfinite(mass):
@@ -136,7 +141,15 @@ def _audit_event(record, call, event, target, deadline, cost, *, max_directions,
         actual_values = [v for gradient in actual for v in _values(gradient)]
         epsilon = chart.epsilon
         for a, e in zip(actual_values, expected):
-            if not math.isfinite(a) or abs(a-e) > 64 * epsilon * max(abs(a), abs(e), 1e-12):
+            if not (math.isfinite(a) and math.isfinite(e)):
+                raise AuditUnknown('reconstructed VJP differs from observed original VJP')
+            if a == e:
+                continue
+            # Normalize before subtraction: neither tiny cotangents nor enormous
+            # gradients may erase a mismatch through absolute floors or underflow.
+            scale = max(abs(a), abs(e))
+            relative_error = abs(a / scale - e / scale)
+            if not math.isfinite(relative_error) or relative_error > 64 * epsilon:
                 raise AuditUnknown('reconstructed VJP differs from observed original VJP')
         if len(actual_values) != len(expected):
             raise AuditUnknown('reconstructed VJP coordinate count differs')
@@ -171,19 +184,29 @@ def _audit_event(record, call, event, target, deadline, cost, *, max_directions,
                 fm, massm = _scalar(minus, event)
                 central = (fp-fm)/(2*step)
                 forward, backward = (fp-phi0)/step, (phi0-fm)/step
-                noise = 8*epsilon*max(massp,massm,mass0,1e-30)/step
+                mass = max(massp, massm, mass0)
+                noise = (8*epsilon/step) * mass
+                if mass > 0 and noise == 0:
+                    raise AuditUnknown('finite-difference roundoff estimate underflow')
                 if not all(math.isfinite(v) for v in (central, forward, backward, noise)):
                     raise AuditUnknown('nonfinite finite-difference estimate or roundoff bound')
                 samples.append({'step': step, 'central': central, 'right': forward, 'left': backward,
                                 'roundoff_estimate': noise, 'direction_rounding_error': relative_error})
             central = [s['central'] for s in samples]
             spread = max(central)-min(central)
-            magnitude = max(abs(predicted), *(abs(c) for c in central), 1e-12)
-            base_tolerance = 64 * epsilon ** (2/3) * magnitude
+            # The derivative being tested cannot certify its own reference.
+            # A huge VJP must not hide nonlocal steps or inconsistent one-sided slopes.
+            reference_scale = max(abs(c) for c in central)
+            reference_tolerance = 64 * epsilon ** (2/3) * reference_scale
             noise = max(s['roundoff_estimate'] for s in samples)
             gaps = [abs(s['right']-s['left']) for s in samples]
-            nonsmooth = gaps[0] > max(8*noise, base_tolerance) and gaps[0] > .8*gaps[-1]
-            stable = spread <= max(base_tolerance, 8*noise, .02*magnitude)
+            one_sided_limit = max(8*noise, reference_tolerance)
+            nonsmooth = gaps[0] > one_sided_limit and gaps[0] > .8*gaps[-1]
+            stability_limit = max(reference_tolerance, 8*noise, .02*reference_scale)
+            stable = spread <= stability_limit
+            # All scales are measured, preserving common cotangent rescaling.
+            magnitude = max(abs(predicted), reference_scale)
+            base_tolerance = 64 * epsilon ** (2/3) * magnitude
             limit = max(base_tolerance, 4*noise, 4*spread)
             errors = [abs(c-predicted) for c in central]
             if not all(math.isfinite(v) for v in (spread, magnitude, base_tolerance, limit, *gaps, *errors)):
@@ -192,6 +215,8 @@ def _audit_event(record, call, event, target, deadline, cost, *, max_directions,
                       'violation' if min(errors) > 8*limit else 'unknown')
             results.append({'direction': index, 'vector': direction, 'vjp_projection': predicted,
                 'samples': samples, 'comparison_limit': limit, 'status': status,
+                'reference_scale': reference_scale, 'stability_limit': stability_limit,
+                'one_sided_limit': one_sided_limit,
                 'stable_steps': stable, 'one_sided_consistent': not nonsmooth,
                 'reason': 'one-sided slopes do not converge' if nonsmooth else
                     'step sensitivity' if not stable else 'numerical uncertainty band' if status == 'unknown' else

@@ -1,0 +1,18 @@
+[
+  {
+    "key": "nablafuzz",
+    "doi": "10.1109/ICSE48619.2023.00105",
+    "retrieved_from": "https://doi.org/10.1109/ICSE48619.2023.00105",
+    "primary_verification": "https://arxiv.org/abs/2302.04351",
+    "status": "fetched",
+    "prior_errors": []
+  },
+  {
+    "key": "gpufuzz",
+    "doi": "10.48550/arXiv.2602.10478",
+    "retrieved_from": "https://doi.org/10.48550/arXiv.2602.10478",
+    "primary_verification": "https://arxiv.org/abs/2602.10478",
+    "status": "fetched",
+    "prior_errors": []
+  }
+]

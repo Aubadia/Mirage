@@ -27,6 +27,204 @@ def write_json(path, value):
     path.write_text(json.dumps(json_value(value), indent=2, allow_nan=False), encoding="utf-8")
 
 
+def state_repair_progress(inspection):
+    """Compare attained obligations, not incidental numerical changes between edits."""
+    checks = inspection.get('predicates', [])
+    if not checks or any(type(p.get('attained')) is not bool for p in checks):
+        return None
+    identities, attained = [], []
+    for check in checks:
+        identity = json.dumps({k: v for k, v in check.items()
+                               if k not in ('observed', 'evidence_status', 'reason', 'attained')},
+                              sort_keys=True)
+        identities.append(identity)
+        if check['attained']:
+            attained.append(identity)
+    return {'predicates': sorted(identities), 'attained': sorted(attained)}
+
+
+def state_repair_stalled(previous, current):
+    return (previous is not None and current is not None
+            and previous['predicates'] == current['predicates']
+            and not set(current['attained']) > set(previous['attained']))
+
+
+def same_repair_payload(previous, current):
+    if previous is None:
+        return False
+    if previous == current:
+        return True
+    try:
+        return json.loads(previous) == json.loads(current)
+    except (ValueError, TypeError):
+        return False
+
+
+def stateful_runtime_diagnostic(process):
+    """Legacy exception strings do not establish that generated code is illegal."""
+    status_path = Path(process.directory) / 'status.json'
+    status = json.loads(status_path.read_text()) if status_path.exists() else {}
+    diagnostic = status.get('diagnostic', {})
+    confirmed = (process.outcome == 'exception'
+                 and diagnostic.get('version') == 'runtime-diagnostic-1'
+                 and diagnostic.get('kind') == 'contract_violation'
+                 and diagnostic.get('exception_type') == 'ContractError'
+                 and diagnostic.get('origin') not in (None, 'generated_or_external')
+                 and diagnostic.get('repair_allowed') is True)
+    return {'kind': 'contract_violation' if confirmed else 'unknown_exception',
+            'repair_allowed': confirmed, 'evidence': diagnostic,
+            'reason': process.error or process.outcome, 'correctness': 'unassessed'}
+
+
+def rerun_stateful_exception(process, destination, timeout):
+    """Repeat the saved invocation, without claiming identical initial state or a bug."""
+    request_path = Path(process.directory) / 'request.json'
+    if timeout <= 0 or not request_path.exists():
+        return {'status': 'not_run', 'reason': 'budget or saved request unavailable', 'provider_calls': 0}
+    repeated = run_worker(json.loads(request_path.read_text()), destination, timeout)
+    result = {'status': 'executed', 'process': asdict(repeated), 'provider_calls': 0,
+              'same_exception': repeated.outcome == process.outcome == 'exception'
+                                and repeated.error == process.error,
+              'initial_state_equivalence': 'unassessed', 'correctness': 'unassessed',
+              'scope': 'same source/configuration rerun; exception agreement is not defect confirmation',
+              'diagnostic': stateful_runtime_diagnostic(repeated)}
+    write_json(destination / 'triage.json', result)
+    return result
+
+
+def mutation_backward_requirements(evidence):
+    """Retain callable obligations separately from internal target-node evidence."""
+    callable_calls = {w['call'] for w in evidence.get('witnesses', ())
+                      if w['checkpoint'] == 'final'
+                      and w['relations'].get('callable_backward_node', {}).get('status') == 'verified'}
+    return {'required_backward_calls': evidence.get('backward_calls', []),
+            'required_callable_backward_calls': sorted(callable_calls)}
+
+
+def mutation_paths_preserved(mutation, inspection):
+    witnesses = inspection.get('semantic_coverage', {}).get('witnesses', ())
+    for requirement, relation in (('required_backward_calls', 'target_backward_node'),
+                                  ('required_callable_backward_calls', 'callable_backward_node')):
+        observed = {w['call'] for w in witnesses if w['checkpoint'] == 'final'
+                    and w['relations'].get(relation, {}).get('status') == 'verified'}
+        if not set((mutation or {}).get(requirement, ())) <= observed:
+            return False
+    return True
+
+
+def optimizer_configuration_reusable(parent, config):
+    """Reuse a verified source only when its new obligations are observer actions."""
+    from mirage.contracts.capabilities import OPTIMIZER_COVERAGE_VERSION, StatePredicate
+    from mirage.generator.state_plan import optimizer_action_for_predicates
+    from mirage.inspector.stateful import optimizer_witness_fact
+    if (parent.get('optimizer_coverage_version') != OPTIMIZER_COVERAGE_VERSION
+            or not parent.get('optimizer_coverage')
+            or parent.get('evidence', {}).get('optimizer_target_update_count') != 1):
+        return False
+    ignored = {'attempt', 'proposal_index', 'predicates', 'optimizer_gradient_action', 'canonical_reference', 'oracle_seen_units'}
+    if ({k: v for k, v in parent['configuration'].items() if k not in ignored}
+            != {k: v for k, v in config.items() if k not in ignored}):
+        return False
+    try:
+        predicates = [StatePredicate(**p) for p in json.loads(json.dumps(config.get('predicates', [])))]
+        action = optimizer_action_for_predicates(config.get('predicates', []))
+    except (TypeError, ValueError):
+        return False
+    gradients = [p for p in predicates if p.dimension == 'gradient_representation']
+    companions = [p for p in predicates if p.dimension == 'optimizer' and p.field == 'completed'
+                  and p.expected is True]
+    if (not gradients or len(gradients) + len(companions) != len(predicates)
+            or action is None or action != config.get('optimizer_gradient_action')):
+        return False
+    if action == parent['configuration'].get('optimizer_gradient_action'):
+        return False
+    witnesses = parent.get('evidence', {}).get('optimizer_witnesses', [])
+    requirements, unmet = [], False
+    for gradient in gradients:
+        required = StatePredicate('optimizer', 'completed', True,
+            gradient.checkpoint.rsplit('/', 1)[0] + '/post_update',
+            call_index=gradient.call_index, operand_path=gradient.operand_path,
+            relation='target_gradient_update', parameter_key=gradient.parameter_key)
+        before = optimizer_witness_fact(witnesses, gradient)
+        complete = optimizer_witness_fact(witnesses, required)
+        if (required not in companions or not before.established or not complete.established
+                or complete.value is not True):
+            return False
+        requirements.append(required)
+        unmet |= before.value != gradient.expected
+    return unmet and all(p in requirements for p in companions)
+
+
+def library_configuration_pool(parent, catalog, cache):
+    """Cache accepted and rejected metadata proposals, never runtime attainment."""
+    import hashlib
+    from mirage.generator.state_plan import library_configuration_plans
+    evidence = parent.get('evidence', {})
+    key = hashlib.sha256(json.dumps({'catalog': catalog,
+        'configuration': parent['configuration'], 'source_sha256': parent.get('source_sha256'),
+        'optimizer_coverage_version': parent.get('optimizer_coverage_version'),
+        'optimizer_coverage': parent.get('optimizer_coverage'),
+        'optimizer_witnesses': evidence.get('optimizer_witnesses'),
+        'optimizer_target_update_count': evidence.get('optimizer_target_update_count')},
+        sort_keys=True).encode()).hexdigest()
+    previous = cache.get(parent['id'])
+    if previous and previous['cache_key'] == key:
+        return previous
+    started = time.monotonic()
+    plans, rejected = library_configuration_plans(catalog)
+    accepted = []
+    for plan in plans:
+        config = dict(parent['configuration'], predicates=plan['predicates'],
+                      optimizer_gradient_action=plan['optimizer_gradient_action'])
+        if optimizer_configuration_reusable(parent, config):
+            accepted.append(plan)
+        else:
+            rejected.append({'goal_ids': plan['goal_ids'], 'status': 'rejected_library_proposal',
+                             'reason': 'Parent configuration or verified update chain does not permit reuse',
+                             'reachability': 'unassessed'})
+    result = {'cache_key': key, 'parent_id': parent['id'], 'source_sha256': parent.get('source_sha256'),
+              'accepted': accepted, 'rejected': rejected, 'execution_rejections': [],
+              'metadata_planning_seconds': time.monotonic() - started,
+              'scope': 'Bounded static proposals; child execution must revalidate every obligation'}
+    cache[parent['id']] = result
+    return result
+
+
+def available_library_plans(pool, selected_goal_ids):
+    """LLM examined/unresolved IDs are not executions of a known transition."""
+    return [plan for plan in pool['accepted'] if not set(plan['goal_ids']) & selected_goal_ids]
+
+
+def configuration_dispatch_budget(parent, rows, fallback):
+    """Estimate a known action from its verified parent's completed execution."""
+    import math
+    measurements = []
+    for row in rows:
+        admission = row.get('corpus_admission', {})
+        process = row.get('process', {})
+        seconds = process.get('elapsed_seconds')
+        if (admission.get('admitted') is True and admission.get('seed_id') == parent['id']
+                and row.get('configuration') == parent['configuration']
+                and row.get('inspection', {}).get('valid') is True
+                and row.get('mutation_obligations_valid') is True
+                and process.get('outcome') == 'completed' and type(process.get('returncode')) is int
+                and process['returncode'] == 0 and type(seconds) in (int, float)
+                and math.isfinite(seconds) and seconds > 0):
+            measurements.append(seconds)
+    seconds = max(measurements) if measurements else None
+    return {'reserve_seconds': max(10., 1.5 * seconds + 5.) if seconds is not None else fallback,
+            'cost_basis': 'verified_parent_worker' if seconds is not None else 'whole_round_fallback',
+            'parent_id': parent['id'], 'source_sha256': parent.get('source_sha256'),
+            'measured_worker_seconds': seconds,
+            'scope': 'Dispatch estimate only; execution remains bounded by the remaining deadline'}
+
+
+def affordable_candidates(candidates, remaining, fallback):
+    """Apply after bootstrap/fresh quotas; unknown work retains the old reserve."""
+    return [candidate for candidate in candidates if remaining >
+            candidate.get('dispatch_budget', {}).get('reserve_seconds', fallback)]
+
+
 def base_config(api, options, seed):
     return {"api": api, "seed": seed, "device": options.device, "backend": options.backend,
             "precision": options.precision, "representation": "contiguous", "input_name": "",
@@ -46,7 +244,8 @@ def execute(source, config, initial, directory, budget, engine=None, cancel=None
 
 def run(options, apis):
     if options.strategy == "stateful":
-        return run_stateful(options, apis)
+        return run_stateful(options, apis, representation_traversal=options.representation_traversal,
+                            oracle_improvements=options.oracle_improvements)
     if options.strategy == "properties":
         return run_properties(options, apis)
     root = Path(options.output).resolve()
@@ -517,22 +716,35 @@ def replay_property(path, *, timeout, allow_environment_change=False, cancel=Non
 
 
 def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="backward", coverage_refinement=True,
-                 search_policy="adaptive", generation_mode="local", coverage_basis="semantic"):
+                 search_policy="adaptive", generation_mode="local", coverage_basis="semantic",
+                 representation_traversal=False, oracle_improvements=False):
     """Corpus-guided local generation, runtime mutation and conditional MR assessment.
 
     API/issue benchmark data never enters this path. Every candidate and repair
     retains its request, response and execution evidence under one bounded run.
     """
     from dataclasses import replace
-    from mirage.generator.program import stateful_request, analyze_stateful
+    from mirage.generator.program import (stateful_request, analyze_stateful, unmet_predicate_feedback,
+                                          source_operand_bindings)
     from mirage.contracts.exploration import stateful_input_profile, stateful_state_predicates, stateful_diversity_predicates
     from mirage.generator.provider import ProviderFailure
     from mirage.inspector.stateful import failure_record, input_category_feedback
     from mirage.generator.mutation import plan_mutation, apply_mutation, plan_regions, apply_regions
-    from mirage.generator.state_plan import goal_catalog, planning_request, validate_plans
+    from mirage.generator.state_plan import (goal_catalog, goal_family, planning_request,
+                                            validate_plans, optimizer_action_for_predicates)
     from mirage.artifacts.corpus import Corpus
     from mirage.sampler.policy import FeedbackSampler
     from mirage.artifacts.report import summarize_search
+    from mirage.backends.pytorch import PyTorchBackend
+    explain_certificate = PyTorchBackend().explain_certificate
+    from mirage.sampler.representations import RepresentationTraversal, program_goal_catalog
+    traversal = RepresentationTraversal() if representation_traversal else None
+    audit_seen_units = set()
+    def planning_catalog(entry, explicit):
+        catalog = goal_catalog(entry, explicit)
+        return program_goal_catalog(catalog) if traversal else catalog
+    if traversal and any(p.get('dimension') in ('representation', 'tensor_relation') for p in (predicates or [])):
+        raise ValueError('Explicit input representation predicates belong to framework traversal, not LLM planning')
     if search_policy not in ('adaptive', 'round_robin') or generation_mode not in ('local', 'full') or coverage_basis not in ('semantic', 'transition'):
         raise ValueError('Unsupported stateful search treatment')
     if path_policy not in ('backward','mixed'):
@@ -560,17 +772,47 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
     source_cache = {}
     pending_selection = None
     plan_cache = {}
+    library_cache = {}
     attempted_goals = {}
+    selected_goals = {}
+    planning_counts = Counter()
+    planning_failures = Counter()
     corpus.save()
     signatures, proposal_counts = {}, Counter()
     dispatch_reserve = 10.
+    dispatch_stop = None
     input_index = 0
+    exception_reruns = Counter()
     for index in range(options.cases):
         if rows:
             dispatch_reserve = max(10., 1.5*max(r['finished_seconds']-r['started_seconds'] for r in rows)+5.)
-        if deadline-time.monotonic() <= dispatch_reserve:
+        early_reserve = dispatch_reserve if pending or search_policy != 'adaptive' else 10.
+        if deadline-time.monotonic() <= early_reserve:
+            dispatch_stop = {'reason': 'pending_or_minimum_reserve', 'reserve_seconds': early_reserve,
+                             'remaining_seconds': deadline-time.monotonic()}
             stop = 'time_limit'; break
-        if pending:
+        representation_work = (traversal.choose(deadline-time.monotonic(), dispatch_reserve)
+                               if traversal and not pending and (input_index % 2 == 1
+                                   or deadline-time.monotonic() <= dispatch_reserve) else None)
+        if representation_work:
+            origin, candidate, parent_source, reserve = representation_work
+            api = origin['configuration']['api']
+            config = dict(origin['configuration'], attempt=index, proposal_index=input_index,
+                          canonical_reference=False, representation_candidate=candidate['plan'])
+            request = stateful_request(metadata[api], config, edges=edges, predicates=config['predicates'],
+                                       canonical=parent_source)
+            request.context.update(generation_reason='framework_representation_traversal',
+                configuration_source_reuse=True, proposal_origin='framework_representation',
+                representation_source_id=origin['source_id'], representation_candidate_id=candidate['id'],
+                traversal_initial_reference=origin['initial_reference'],
+                configuration_reuse_obligations={k: origin[k] for k in
+                    ('required_backward_calls', 'required_callable_backward_calls')})
+            choice = {'api': api, 'parent': origin['source_id'], 'kind': 'representation',
+                      'goal': candidate['id']}
+            selection = {'policy': 'representation-traversal-1', 'candidate_count': 1,
+                         'selected_probability': 1., 'dispatch_reserve_seconds': reserve}
+            input_index += 1
+        elif pending:
             request = pending
             choice, selection = pending_selection
             config = dict(request.context['configuration'])
@@ -585,9 +827,20 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                         continue
                     if entry['id'] not in source_cache:
                         source_cache[entry['id']] = corpus.source(entry)
-                    if predicates != [] and not any(g['id'] not in attempted_goals.get(entry['id'], set()) for g in goal_catalog(entry, predicates)):
-                        continue
-                    candidates.append({'api':entry['configuration']['api'], 'parent':entry['id'], 'kind':'planned'})
+                    catalog = planning_catalog(entry, predicates) if predicates != [] else []
+                    attempted = attempted_goals.get(entry['id'], set())
+                    if planning_failures[entry['id']] < 2 and (predicates == [] or any(g['id'] not in attempted for g in catalog)):
+                        candidates.append({'api':entry['configuration']['api'], 'parent':entry['id'], 'kind':'planned'})
+                    if predicates != []:
+                        pool = library_configuration_pool(entry, catalog, library_cache)
+                        ready = available_library_plans(pool, selected_goals.get(entry['id'], set()))
+                        if ready:
+                            # One branch per parent prevents goal-count multiplicity bias.
+                            candidates.append({'api':entry['configuration']['api'], 'parent':entry['id'],
+                                               'kind':'configuration', 'proposal_origin':'library_known_action',
+                                               'dispatch_budget': configuration_dispatch_budget(entry, rows, dispatch_reserve)})
+                if library_cache:
+                    write_json(root/'library-proposals.json', list(library_cache.values()))
                 known_count = len(candidates)
                 unseen = next((a for a in apis if not proposal_counts[a]), None)
                 if unseen:
@@ -598,15 +851,29 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                     selection_reason = 'fresh_generation_quota'
                 else:
                     selection_reason = 'adaptive'
+                remaining = deadline-time.monotonic()
+                quota_count = len(candidates)
+                candidates = affordable_candidates(candidates, remaining, dispatch_reserve)
+                if not candidates:
+                    dispatch_stop = {'reason': 'no_affordable_quota_candidate', 'quota': selection_reason,
+                                     'remaining_seconds': remaining, 'quota_candidate_count': quota_count,
+                                     'whole_round_reserve_seconds': dispatch_reserve}
+                    stop = 'time_limit'; break
                 choice, selection = feedback.choose(candidates, reason=selection_reason)
                 selection['known_candidate_count'] = known_count
+                selection['budget_filtered_candidates'] = quota_count-len(candidates)
+                selection['dispatch_budget'] = dict(choice.get('dispatch_budget', {
+                    'reserve_seconds': dispatch_reserve, 'cost_basis': 'whole_round_fallback'}),
+                    remaining_seconds=remaining)
                 api = choice['api']
                 parent = corpus.select(api, seed_id=choice['parent']) if choice['parent'] else None
             else:
                 api = apis[index % len(apis)]
                 parent = corpus.select(api) if proposal_counts[api] % 4 else None
+                if parent and planning_failures[parent['id']] >= 2:
+                    parent = None
                 if parent and predicates != [] and not any(
-                        g['id'] not in attempted_goals.get(parent['id'], set()) for g in goal_catalog(parent, predicates)):
+                        g['id'] not in attempted_goals.get(parent['id'], set()) for g in planning_catalog(parent, predicates)):
                     parent = None
                 choice = {'api':api, 'parent':parent['id'] if parent else None, 'kind':'fresh'}
                 selection = {'policy':'round_robin', 'candidate_count':1, 'selected_probability':1.}
@@ -623,6 +890,8 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                 # backward requirement to an operand-only child edit.
                 config['requires_backward'] = bool(parent['configuration'].get('requires_backward', True)
                                                    or parent['evidence'].get('backward_executed'))
+            if parent and choice['kind'] == 'configuration':
+                config = dict(parent['configuration'], attempt=index, proposal_index=input_index, predicates=[])
             if not config['requires_backward'] and predicates is None:
                 config['predicates'] = [p for p in config['predicates'] if p['dimension'] == 'context']
             # A verified canonical seeds explicit planning; no synthetic count rotation.
@@ -630,21 +899,38 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
             reason = 'periodic_fresh_generation' if proposal % 4 == 0 else 'no_verified_seed'
             if parent:
                 parent_source = corpus.source(parent)
-                reason = 'explicit_state_planning'
-                choice = dict(choice, kind='planned')
+                reason = ('library_configuration_selection' if choice['kind'] == 'configuration'
+                          else 'explicit_state_planning')
+                if choice['kind'] != 'configuration':
+                    choice = dict(choice, kind='planned')
                 if predicates == []:
                     mutation = plan_mutation(parent_source, parent['id'], proposal - 1) if generation_mode == 'local' else None
                     if mutation:
-                        mutation['required_backward_calls'] = parent['evidence'].get('backward_calls', [])
+                        mutation.update(mutation_backward_requirements(parent['evidence']))
                     reason = 'local_mutation' if mutation else 'full_regeneration'
                     choice = dict(choice, kind=mutation['kind'] if mutation else 'full')
+            if traversal:
+                config['representation_traversal'] = True
             request = stateful_request(metadata[api], config, edges=edges, predicates=config['predicates'],
                                        canonical=parent_source, mutation=mutation)
             request.context['generation_parent_id'] = parent['id'] if parent else None
+            if parent_source:
+                request.context['parent_certificate_diagnostic'] = explain_certificate(parent_source)
+                request.context['parent_optimizer_certificate_diagnostic'] = explain_certificate(
+                    parent_source, local_vjp=True, optimizer_update=True)
             request.context['generation_reason'] = reason
             request.context['prior_transition_signatures'] = signatures.get(api, [])[-8:]
+            if traversal:
+                request.context['representation_feedback'] = [
+                    {'source_id': entry['source_id'], 'candidates': [
+                        {'action': c['plan']['action'], 'status': c['status'],
+                         'reason': c['eligibility'].get('reason')}
+                        for c in entry['candidates'][:16]]}
+                    for entry in traversal.sources if entry['configuration']['api'] == api][-4:]
             input_index += 1
         config = json.loads(json.dumps(config))
+        if oracle_improvements:
+            config.update(oracle_improvements=True, oracle_seen_units=sorted(audit_seen_units))
         request.context['configuration'] = config
         mutation = request.context.get('mutation_contract')
         parent_id = request.context.get('generation_parent_id') or (mutation['parent_id'] if mutation else None)
@@ -655,60 +941,152 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                'repair_index':repair_count, 'refinement_kind':request.context.get('refinement_kind'), 'started_seconds':time.monotonic()-started,
                'configuration':config, 'verdict':None, 'generation_stage':request.stage.value,
                'generation_reason':request.context.get('generation_reason'), 'parent_seed_id':parent_id,
-               'generation_mode':'local' if mutation else 'full', 'selection':selection, 'candidate':choice}
+               'generation_mode':'local' if mutation else 'full', 'selection':selection, 'candidate':choice,
+               'proposal_origin':request.context.get('proposal_origin', 'fresh_or_legacy')}
         if request.context.get('transition_plan'):
             row['state_plan'] = request.context['transition_plan']
         phase = 'generation'; response = None; repairable = False; coverage_feedback = None; edit = None
         try:
-            if parent_id and not request.previous_content and request.context.get('generation_reason') == 'explicit_state_planning':
+            if parent_id and not request.previous_content and request.context.get('generation_reason') in (
+                    'explicit_state_planning', 'library_configuration_selection'):
                 phase = 'state_plan'
                 parent_entry = next(e for e in corpus.entries if e['id'] == parent_id)
-                catalog = [g for g in goal_catalog(parent_entry, predicates) if g['id'] not in attempted_goals.get(parent_id, set())]
+                library_plan = request.context.get('generation_reason') == 'library_configuration_selection'
+                consumed = (selected_goals if library_plan else attempted_goals).get(parent_id, set())
+                catalog = [g for g in planning_catalog(parent_entry, predicates) if g['id'] not in consumed]
                 if not catalog:
                     raise ContractError('No unattained supported goal: reselect a seed or canonical')
-                if parent_id not in plan_cache or not plan_cache[parent_id]:
-                    plan_request = planning_request(metadata[api], request.context['canonical_source'], parent_entry, catalog, config)
-                    write_json(directory/'plan-request.json', asdict(plan_request))
-                    row['planning_usage'] = None
-                    plan_response = provider.generate(plan_request, deadline=deadline)
-                    write_json(directory/'plan-response.json', asdict(plan_response))
-                    row['planning_usage'] = asdict(plan_response.usage)
-                    plans, rejected = validate_plans(plan_response.content, catalog)
-                    write_json(directory/'plans.json', {'accepted':plans, 'rejected':rejected})
-                    plan_cache[parent_id] = plans
-                plans = plan_cache[parent_id]
+                row['proposal_origin'] = 'library_known_action' if library_plan else 'llm'
+                if library_plan:
+                    pool = library_configuration_pool(parent_entry, planning_catalog(parent_entry, predicates), library_cache)
+                    plans = available_library_plans(pool, selected_goals.get(parent_id, set()))
+                    row.update(planning_dispatched=False, planning_outcome='library_planned',
+                               library_candidate_count=len(plans), library_cache_key=pool['cache_key'])
+                    write_json(directory/'plans.json', dict(pool, available=plans))
+                else:
+                    if parent_id not in plan_cache or not plan_cache[parent_id]:
+                        families = tuple(sorted({goal_family(g) for g in catalog}))
+                        family_counts = {f: planning_counts[(api, f)] for f in families}
+                        portfolio = Sampler(families, seed=options.seed + input_index, epsilon=options.epsilon)
+                        planning_family = portfolio.sample(family_counts)
+                        probabilities = portfolio.probabilities(family_counts)
+                        planning_counts[(api, planning_family)] += 1
+                        row['planning_family_selection'] = {
+                            'family': planning_family, 'counts_before': family_counts,
+                            'probabilities': dict(zip(families, probabilities)),
+                            'scope': 'known available goal families; proposal allocation, not reachability'}
+                        plan_request = planning_request(metadata[api], request.context['canonical_source'], parent_entry,
+                                                        catalog, config, planning_family=planning_family)
+                        if traversal:
+                            plan_request.context['representation_feedback'] = request.context.get('representation_feedback', [])
+                        plan_request.context['parent_certificate_diagnostic'] = explain_certificate(request.context['canonical_source'])
+                        plan_request.context['parent_optimizer_certificate_diagnostic'] = explain_certificate(
+                            request.context['canonical_source'], local_vjp=True, optimizer_update=True)
+                        write_json(directory/'plan-request.json', asdict(plan_request))
+                        row['planning_dispatched'] = True
+                        row['planning_usage'] = None
+                        plan_response = provider.generate(plan_request, deadline=deadline)
+                        write_json(directory/'plan-response.json', asdict(plan_response))
+                        row['planning_usage'] = asdict(plan_response.usage)
+                        plans, rejected = validate_plans(plan_response.content, catalog, planning_family=planning_family)
+                        write_json(directory/'plans.json', {'accepted':plans, 'rejected':rejected})
+                        unresolved = [p for p in rejected if p.get('status') == 'unresolved']
+                        row['planning_unresolved'] = unresolved
+                        row['planning_outcome'] = ('planned' if plans else
+                                                   'unresolved' if unresolved or not rejected else 'rejected')
+                        attempted_goals.setdefault(parent_id, set()).update(
+                            goal for p in unresolved for goal in p.get('examined_goal_ids', []))
+                        plan_cache[parent_id] = plans
+                    plans = plan_cache[parent_id]
                 if not plans:
-                    attempted_goals.setdefault(parent_id, set()).update(g['id'] for g in catalog)
+                    if library_plan:
+                        raise ContractError('Known configuration candidate became unavailable; runtime reachability unassessed')
+                    # Exhausting a proposal budget does not prove the whole catalog unreachable.
+                    planning_failures[parent_id] += 1
+                    row['planning_budget_failures'] = planning_failures[parent_id]
                     raise ContractError('No compatible state plan: replan without requesting a patch')
-                candidates = [{'api':api, 'parent':parent_id, 'kind':'planned', 'goal':p['family'], 'plan_index':i} for i,p in enumerate(plans)]
+                if not library_plan:
+                    planning_failures[parent_id] = 0
+                plan_kind = 'configuration' if library_plan else 'planned'
+                candidates = [{'api':api, 'parent':parent_id, 'kind':plan_kind, 'goal':p['family'],
+                               'feedback_family':p['family'], 'plan_index':i} for i,p in enumerate(plans)]
                 # Equivalent goal families are distinct only when their exact predicates differ.
                 for candidate in candidates:
                     candidate['goal'] += ':' + ','.join(sorted(plans[candidate['plan_index']]['goal_ids']))
-                selected, plan_selection = feedback.choose(candidates, reason='state_goal')
-                plan = plans.pop(selected['plan_index'])
+                selected, plan_selection = feedback.choose(candidates, reason='library_configuration' if library_plan else 'state_goal')
+                plan = plans[selected['plan_index']] if library_plan else plans.pop(selected['plan_index'])
+                selected_goals.setdefault(parent_id, set()).update(plan['goal_ids'])
                 attempted_goals.setdefault(parent_id, set()).update(plan['goal_ids'])
-                plan_cache[parent_id] = [p for p in plans if not set(p['goal_ids']) & attempted_goals[parent_id]]
+                plan_cache[parent_id] = [p for p in plan_cache.get(parent_id, [])
+                                        if not set(p['goal_ids']) & attempted_goals[parent_id]]
                 config['predicates'] = plan['predicates']
-                config['input_categories'] = parent_entry['configuration'].get('input_categories', ['ordinary'])
+                # The source must attain its own gradient-layout goal. This action
+                # is executed by the observer at the native optimizer boundary.
+                action = optimizer_action_for_predicates(config['predicates'])
+                if action is not None:
+                    config['optimizer_gradient_action'] = action
+                else:
+                    config.pop('optimizer_gradient_action', None)
+                if not library_plan:
+                    config['input_categories'] = parent_entry['configuration'].get('input_categories', ['ordinary'])
                 regions = ['full'] if generation_mode == 'full' else plan['regions']
-                mutation = plan_regions(request.context['canonical_source'], parent_id, index, regions)
+                reuse_configuration = optimizer_configuration_reusable(parent_entry, config)
+                if library_plan and not reuse_configuration:
+                    raise ContractError('Selected known action failed exact source/configuration reuse checks')
+                mutation = (None if reuse_configuration else
+                            plan_regions(request.context['canonical_source'], parent_id, index, regions))
                 if mutation:
-                    mutation['required_backward_calls'] = parent_entry['evidence'].get('backward_calls', [])
+                    mutation.update(mutation_backward_requirements(parent_entry['evidence']))
                     mutation['desired_coverage'] = {'predicates':config['predicates']}
-                choice = dict(selected, kind='planned')
+                choice = dict(selected, kind=plan_kind, proposal_origin=row['proposal_origin'])
+                representation_feedback = request.context.get('representation_feedback', [])
                 request = stateful_request(metadata[api], config, edges=edges, predicates=config['predicates'],
                     canonical=request.context['canonical_source'], mutation=mutation)
+                if traversal:
+                    request.context['representation_feedback'] = representation_feedback
                 request.context.update(transition_plan=plan, generation_parent_id=parent_id,
-                                       generation_reason='planned_local_edit' if mutation else 'planned_full_generation')
+                                       generation_reason='planned_local_edit' if mutation else 'planned_full_generation',
+                                       proposal_origin=row['proposal_origin'])
+                if reuse_configuration:
+                    request.context.update(configuration_source_reuse=True,
+                        configuration_reuse_obligations=mutation_backward_requirements(parent_entry['evidence']),
+                        generation_reason='planned_execution_configuration')
+                request.context['parent_certificate_diagnostic'] = explain_certificate(request.context['canonical_source'])
+                request.context['parent_optimizer_certificate_diagnostic'] = explain_certificate(
+                    request.context['canonical_source'], local_vjp=True, optimizer_update=True)
                 row.update(configuration=config, state_plan=plan, plan_selection=plan_selection,
                            generation_reason=request.context['generation_reason'],
-                           generation_mode='local' if mutation else 'full', candidate=choice)
+                           generation_mode='configuration' if reuse_configuration else 'local' if mutation else 'full', candidate=choice)
                 write_json(directory/'request.json', asdict(request))
             phase = 'generation'
-            row['program_generation_dispatched'] = True
-            response = provider.generate(request, deadline=deadline)
+            reuse_configuration = bool(request.context.get('configuration_source_reuse') and not request.previous_content)
+            row['program_generation_dispatched'] = not reuse_configuration
+            if reuse_configuration:
+                from mirage.generator.provider import Response, Usage
+                response = Response(json.dumps({'source': request.context['canonical_source']}), Usage(0, 0),
+                    metadata={'origin': 'verified_source_reuse', 'provider_call': False})
+                row['source_reused'] = True
+                representation_plan = config.get('representation_candidate')
+                row['realized_transition'] = {'kind': 'execution_configuration',
+                    'source_changed': False, 'action': representation_plan or config.get('optimizer_gradient_action'),
+                    'scope': 'realized harness action; free-text planning actions are proposals'}
+                edit = {'kind': 'execution_configuration', 'parent_id': parent_id,
+                        'representation_candidate' if representation_plan else 'optimizer_gradient_action':
+                            representation_plan or config.get('optimizer_gradient_action')}
+                if representation_plan:
+                    row['generation_mode'] = 'representation'
+                    row['representation_traversal'] = {
+                        'source_id': request.context['representation_source_id'],
+                        'candidate_id': request.context['representation_candidate_id'],
+                        'plan': representation_plan, 'status': 'dispatched'}
+                write_json(directory/'edit.json', edit)
+            else:
+                response = provider.generate(request, deadline=deadline)
             write_json(directory/'response.json', asdict(response))
             row['generation_usage'] = asdict(response.usage)
+            if same_repair_payload(request.previous_content, response.content):
+                row['duplicate_repair_kind'] = 'response'
+                raise ContractError('Repair repeated a previously rejected response; prior evidence is retained')
             phase = 'parse'
             value = json.loads(response.content)
             multi_region = mutation and mutation.get('version') == 'local-regions-2'
@@ -741,11 +1119,20 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
             (directory/'program.py').write_text(source)
             phase = 'static_contract'; graph = analyze_stateful(source)
             row.update(contract_valid=True, fingerprint=graph['fingerprint'])
+            if graph['fingerprint'] == request.context.get('repair_rejected_fingerprint'):
+                row['duplicate_repair_kind'] = 'ast'
+                raise ContractError('Repair did not change the previously rejected program AST; prior evidence is retained')
+            row['program_certificate_diagnostic'] = explain_certificate(source)
+            row['optimizer_certificate_diagnostic'] = explain_certificate(source, local_vjp=True, optimizer_update=True)
+            row['source_operand_bindings'] = source_operand_bindings(source, api, config['predicates'])
             phase = 'initialization'
             remaining = deadline-time.monotonic()
             if remaining <= 0: raise TimeoutError('Budget exhausted before execution')
             process = run_worker({'mode':'execute_stateful_pair', 'source':source, 'config':config,
                                   'engine':str(root/'engine'),
+                                  **({'initial_reference': request.context['traversal_initial_reference'],
+                                      'reference_scope': 'initialization'}
+                                     if request.context.get('traversal_initial_reference') else {}),
                                   'audit_budget_seconds':min(10, max(0.1, min(options.worker_timeout, remaining) / 8))}, directory/'execution',
                                  min(options.worker_timeout, remaining))
             row['process'] = asdict(process)
@@ -753,34 +1140,59 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
             outcome_path = directory/'execution/summary.json'
             if process.outcome == 'completed' and outcome_path.exists():
                 outcome = json.loads(outcome_path.read_text()); row.update(outcome, status='executed', executable=True)
-                required_calls = set(mutation.get('required_backward_calls', [])) if mutation else set()
                 backward_calls = {w['call'] for w in outcome.get('inspection', {}).get('semantic_coverage', {}).get('witnesses', [])
                                   if w['checkpoint'] == 'final' and w['relations']['target_backward_node']['status'] == 'verified'}
-                row['mutation_obligations_valid'] = required_calls <= backward_calls
+                row['mutation_obligations_valid'] = mutation_paths_preserved(
+                    mutation or request.context.get('configuration_reuse_obligations'), outcome.get('inspection', {}))
+                if row.get('proposal_origin') == 'framework_representation':
+                    row['mutation_obligations_valid'] &= mutation_paths_preserved(
+                        request.context.get('configuration_reuse_obligations'), outcome.get('followup_inspection', {}))
+                    if row['mutation_obligations_valid'] is not True:
+                        row['representation_candidate_attained'] = False
                 if not outcome.get('inspection', {}).get('valid'):
                     check = outcome.get('inspection', {})
                     blocking = ('target_return' if not check.get('api_executed') else
                                 'backward' if not check.get('required_backward_executed') else 'state')
-                    row.update(failure_record(blocking, 'Required runtime evidence missing: '+json.dumps(check)))
+                    diagnostic = unmet_predicate_feedback(check, bindings=row['source_operand_bindings'])
+                    if any(p.get('dimension') in ('gradient_representation', 'optimizer')
+                           for p in config['predicates']):
+                        diagnostic['optimizer_source_effects'] = row['optimizer_certificate_diagnostic']
+                        diagnostic['optimizer_limitations'] = check.get('optimizer_coverage', {}).get('limitations', [])[:8]
+                    row['repair_evidence'] = diagnostic
+                    row.update(failure_record(blocking, 'Required runtime evidence missing: '+json.dumps(diagnostic)))
                     repairable = True
                 else:
                     signature = outcome.get('transition_signature', [])
                     if signature not in signatures.setdefault(api, []): signatures[api].append(signature)
                     if not row['mutation_obligations_valid']:
-                        row.update(failure_record('backward', 'Mutation lost a protected target backward path'))
+                        row.update(failure_record('backward', 'Mutation lost a protected target or callable backward path'))
                         repairable = True
                     else:
                         coverage_feedback = input_category_feedback(outcome) if coverage_refinement else None
                         if coverage_feedback: row['coverage_refinement_requested'] = coverage_feedback
             else:
-                # Exception location is not inferred from worker exit alone.
+                # Only a typed harness rejection permits semantic repair. Unknown
+                # exceptions retain their original source and are independently rerun.
+                diagnosis = stateful_runtime_diagnostic(process)
                 row.update(status='execution_failed', reason=process.error,
-                           first_blocking_stage='unresolved_runtime', secondary_diagnostics=[])
-                if process.outcome == 'exception' and process.error and process.error.startswith(
-                        ('ContractError:', 'NameError:', 'TypeError:', 'ValueError:', 'IndexError:', 'AttributeError:', 'RuntimeError:')):
-                    repairable = True
+                           first_blocking_stage='runtime_contract' if diagnosis['repair_allowed'] else 'unresolved_runtime',
+                           secondary_diagnostics=[], runtime_diagnostic=diagnosis)
+                repairable = diagnosis['repair_allowed']
+                if not repairable:
+                    row['repair_stopped'] = 'unresolved_runtime; retained for independent triage'
+                    row['quarantined'] = True
+                    if process.outcome == 'exception' and exception_reruns[api] < options.replay_failures:
+                        remaining = deadline-time.monotonic()-5
+                        if remaining > 5:
+                            exception_reruns[api] += 1
+                            row['exception_rerun'] = rerun_stateful_exception(process, directory/'exception-rerun',
+                                min(options.worker_timeout, max(5, 2*process.elapsed_seconds+2), remaining))
         except (ContractError, SyntaxError, json.JSONDecodeError) as error:
-            row.update(status='invalid_program', **failure_record(phase, str(error)))
+            status = 'invalid_program'
+            if phase == 'state_plan':
+                row.setdefault('planning_outcome', 'rejected')
+                status = 'planning_unresolved' if row['planning_outcome'] == 'unresolved' else 'planning_rejected'
+            row.update(status=status, **failure_record(phase, str(error)))
             repairable = phase != 'state_plan'
         except ProviderFailure as error:
             row.update(status='provider_failed', reason=str(error), cancellation_uncertain=error.cancellation_uncertain)
@@ -790,14 +1202,39 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                 if session: (Path(session)/'cancellation-unconfirmed').write_text(str(error))
         except Exception as error:
             row.update(status='unresolved', reason=f'{type(error).__name__}: {error}')
+        if (phase == 'state_plan' and 'planning_usage' in row
+                and row.get('status') in ('planning_rejected', 'planning_unresolved', 'provider_failed', 'unresolved')
+                and 'planning_budget_failures' not in row):
+            planning_failures[parent_id] += 1
+            row['planning_budget_failures'] = planning_failures[parent_id]
+        if row.get('proposal_origin') == 'library_known_action':
+            # A rejected known configuration retains its evidence; changing Python
+            # would turn this into a different proposal and incur unreported model cost.
+            repairable = False
+            attained = (row.get('inspection', {}).get('valid') is True
+                        and row.get('mutation_obligations_valid') is True)
+            row['library_configuration_outcome'] = 'verified' if attained else 'not_verified'
+            if not attained:
+                row['repair_stopped'] = 'library_configuration_evidence_retained'
+                pool = library_cache[parent_id]
+                pool['execution_rejections'].append({'goal_ids': row.get('state_plan', {}).get('goal_ids', []),
+                    'directory': str(directory), 'reason': row.get('reason', 'Runtime obligations not established'),
+                    'reachability': 'unassessed'})
+                write_json(root/'library-proposals.json', list(library_cache.values()))
+        if row.get('proposal_origin') == 'framework_representation':
+            repairable = False
+            coverage_feedback = None
+            if row.get('representation_candidate_attained') is not True:
+                row['repair_stopped'] = 'representation_evidence_retained_without_source_edit'
         noop = 'no semantic AST edit' in row.get('reason', '')
-        if repairable and response is not None and request.previous_content:
-            try:
-                if json.loads(response.content) == json.loads(request.previous_content):
-                    repairable = False
-                    row['repair_stopped'] = 'identical_rejected_response'
-            except (ValueError, TypeError):
-                pass
+        if row.get('duplicate_repair_kind'):
+            repairable = False
+            row.update(status='repair_unchanged', repair_stopped='unchanged_before_execution',
+                       repair_evidence_reference=request.context.get('repair_rejected_directory'))
+        progress = state_repair_progress(row.get('inspection', {})) if row.get('first_blocking_stage') == 'state' else None
+        if repairable and state_repair_stalled(request.context.get('repair_state_progress'), progress):
+            repairable = False
+            row['repair_stopped'] = 'no_monotonic_state_progress'
         if repairable and row.get('verdict') != 'suspected_failure' and response is not None and repair_count < (1 if noop else 2):
             repair_count += 1
             diagnostic=row.get('reason','contract violation')
@@ -807,14 +1244,27 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                 diagnostic += (' For operand_setup, emit ONLY operand assignments inserted before the existing target. '
                                'Do not copy probe.call, backward or return: those statements are already preserved. '
                                'The desired state predicate must follow from the inserted assignments.')
-            context=dict(request.context,refinement_kind='contract_or_state')
+            context=dict(request.context, refinement_kind='contract_or_state', repair_state_progress=progress,
+                         repair_rejected_fingerprint=row.get('fingerprint'), repair_rejected_directory=str(directory))
             pending = replace(request, context=context,previous_content=response.content, diagnostic=diagnostic)
             pending_selection = (choice, {'policy':'contract_repair', 'candidate_count':1, 'selected_probability':1.})
         else:
             repair_count = 0
         row['finished_seconds'] = time.monotonic()-started
+        if oracle_improvements:
+            audit_seen_units.update(row.get('audit_candidate_units', []))
+        if row.get('representation_traversal'):
+            item = row['representation_traversal']
+            item['status'] = traversal.complete(item['source_id'], item['candidate_id'], row)
+        if traversal and row.get('executable'):
+            row['representation_source_id'] = traversal.register(source, row)
+        if traversal:
+            write_json(root/'representation-traversal.json', traversal.summary())
         # MR novelty must retain its own applicability when numerical evidence raises suspicion.
-        row['search_feedback'] = feedback.observe(choice, dict(row, verdict=row.get('mr_verdict', row.get('verdict'))))
+        feedback_row = dict(row, verdict=row.get('mr_verdict', row.get('verdict')))
+        if row.get('proposal_origin') == 'framework_representation' and row.get('representation_candidate_attained') is True:
+            feedback_row['inspection'] = row.get('followup_inspection', {})
+        row['search_feedback'] = feedback.observe(choice, feedback_row)
         write_json(directory/'outcome.json', row);rows.append(row)
         if (directory/'execution/source.pt').exists():
             write_json(directory/'stateful-manifest.json', {
@@ -822,13 +1272,35 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                 'engine':str(root/'engine'), 'engine_inventory':inventory(root/'engine'),
                 'files':inventory(directory), 'initial_reference':'execution/source.pt',
                 'expected_verdict':row.get('verdict')})
-            row['corpus_admission'] = corpus.admit(source, row, directory/'stateful-manifest.json',
-                                                   parent_id=parent_id, edit=edit)
+            row['corpus_admission'] = ({'admitted': False, 'reason': 'representation_child_retained_in_traversal'}
+                if row.get('proposal_origin') == 'framework_representation' else
+                corpus.admit(source, row, directory/'stateful-manifest.json', parent_id=parent_id, edit=edit))
+            if row.get('verdict') == 'suspected_failure':
+                row['automatic_replays'] = []
+                replay_started = time.monotonic()
+                for _ in range(options.replay_failures):
+                    remaining = deadline-time.monotonic()-5
+                    if remaining <= 5:
+                        row['automatic_replay_stop'] = 'search_budget_exhausted'
+                        break
+                    try:
+                        repeated = replay_stateful(directory/'stateful-manifest.json',
+                                                   timeout=min(options.worker_timeout, remaining))
+                    except (OSError, ValueError, RuntimeError) as error:
+                        repeated = {'replay_valid': False, 'provider_calls': 0,
+                                    'reason': f'{type(error).__name__}: {error}'}
+                    row['automatic_replays'].append(repeated)
+                # Detection time and immutable outcome precede verification. The
+                # overall search deadline includes this separately reported cost.
+                row['automatic_replay_seconds'] = time.monotonic()-replay_started
+                write_json(directory/'automatic-replays.json', row['automatic_replays'])
             if (predicates == [] and generation_mode == 'local' and coverage_feedback and row['corpus_admission'].get('admitted') and not repairable
                     and row.get('verdict') != 'suspected_failure' and request.context.get('refinement_kind') != 'input_coverage'):
                 refinement = plan_mutation(source, row['corpus_admission']['seed_id'], input_index, kind='initialization')
                 if refinement is not None:
-                    refinement['required_backward_calls'] = sorted(backward_calls)
+                    refinement.update(mutation_backward_requirements({
+                        'backward_calls': sorted(backward_calls),
+                        'witnesses': outcome.get('inspection', {}).get('semantic_coverage', {}).get('witnesses', [])}))
                     refinement['desired_coverage'] = {'input_categories':config['input_categories'], 'predicates':config['predicates']}
                     pending = stateful_request(metadata[api], config, edges=edges, canonical=source,
                                                predicates=config['predicates'], mutation=refinement)
@@ -838,17 +1310,35 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                                          {'policy':'input_refinement', 'candidate_count':1, 'selected_probability':1.})
         result = {'strategy':'stateful', 'records':rows, 'stop_reason':stop, 'provider_calls':provider.calls,
                   'elapsed_seconds':time.monotonic()-started, 'metadata_seconds':metadata_seconds,
-                  'dispatch_reserve_seconds':dispatch_reserve, 'prompt_treatment':'base_plus_edges' if edges else 'base',
+                  'dispatch_reserve_seconds':dispatch_reserve,
+                  'dispatch_admission': {'policy':'known-configuration-worker-cost-1', 'stop':dispatch_stop},
+                  'prompt_treatment':'base_plus_edges' if edges else 'base',
                   'corpus':corpus.summary(), 'search_policy':search_policy,
-                  'generation_mode':generation_mode, 'coverage_basis':coverage_basis}
+                  'generation_mode':generation_mode, 'coverage_basis':coverage_basis,
+                  'library_planning': {'parent_pools': len(library_cache),
+                      'accepted_proposals': sum(len(p['accepted']) for p in library_cache.values()),
+                      'rejected_proposals': sum(len(p['rejected']) for p in library_cache.values()),
+                      'metadata_seconds': sum(p['metadata_planning_seconds'] for p in library_cache.values()),
+                      'scope': 'Cached bounded proposals, not proven reachable states'}}
+        result['representation_traversal'] = traversal.summary() if traversal else {'enabled': False}
+        result['oracle_improvements'] = oracle_improvements
         result['search_metrics'] = summarize_search(result)
         write_json(root/'summary.json', result)
         if stop == 'provider_cancellation_unconfirmed': break
     result = {'strategy':'stateful', 'records':rows, 'stop_reason':stop, 'provider_calls':provider.calls,
               'elapsed_seconds':time.monotonic()-started, 'metadata_seconds':metadata_seconds,
-              'dispatch_reserve_seconds':dispatch_reserve, 'prompt_treatment':'base_plus_edges' if edges else 'base',
+              'dispatch_reserve_seconds':dispatch_reserve,
+                  'dispatch_admission': {'policy':'known-configuration-worker-cost-1', 'stop':dispatch_stop},
+                  'prompt_treatment':'base_plus_edges' if edges else 'base',
                   'corpus':corpus.summary(), 'search_policy':search_policy,
-                  'generation_mode':generation_mode, 'coverage_basis':coverage_basis}
+                  'generation_mode':generation_mode, 'coverage_basis':coverage_basis,
+                  'library_planning': {'parent_pools': len(library_cache),
+                      'accepted_proposals': sum(len(p['accepted']) for p in library_cache.values()),
+                      'rejected_proposals': sum(len(p['rejected']) for p in library_cache.values()),
+                      'metadata_seconds': sum(p['metadata_planning_seconds'] for p in library_cache.values()),
+                      'scope': 'Cached bounded proposals, not proven reachable states'}}
+    result['representation_traversal'] = traversal.summary() if traversal else {'enabled': False}
+    result['oracle_improvements'] = oracle_improvements
     result['search_metrics'] = summarize_search(result)
     write_json(root/'summary.json', result)
     return result
@@ -860,10 +1350,14 @@ def replay_stateful(path, *, timeout=600, allow_environment_change=False, cancel
     manifest=json.loads(path.read_text());directory=path.parent
     verify(directory,manifest['files'])
     engine=Path(manifest['engine']);verify(engine,manifest['engine_inventory'])
+    original_request = directory/'execution/request.json'
+    audit_budget = (json.loads(original_request.read_text()).get('audit_budget_seconds', 10)
+                    if original_request.exists() else 10)
     destination=directory/f'replay-{uuid.uuid4().hex[:12]}'
     process=run_worker({'mode':'execute_stateful_pair','source':(directory/manifest['source']).read_text(),
                         'config':manifest['configuration'],'engine':str(engine),
                         'initial_reference':str(directory/manifest['initial_reference']),
+                        'audit_budget_seconds':audit_budget,
                         'allow_environment_change':allow_environment_change},destination,timeout,cancel=cancel)
     summary=json.loads((destination/'summary.json').read_text()) if (destination/'summary.json').exists() else {}
     result={'process':asdict(process),'summary':summary,'provider_calls':0,

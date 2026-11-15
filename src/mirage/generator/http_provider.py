@@ -76,8 +76,8 @@ class HTTPProvider:
             "required": [field], "additionalProperties": False,
         }
         if contract == "state-goal-plan":
-            from mirage.generator.state_plan import PLAN_SCHEMA
-            schema = PLAN_SCHEMA
+            from mirage.generator.state_plan import planning_schema
+            schema = planning_schema(request.context.get("goal_catalog", []))
         elif contract == "region-patches":
             from mirage.generator.mutation import PATCH_SCHEMA
             schema = PATCH_SCHEMA

@@ -1,0 +1,281 @@
+{
+  "cache_key": "155af338c6c2e13a3c16cce68e46a1fa3b87b0ea03a0f20a1f6e6076f136f12c",
+  "parent_id": "da43dc2ae49a2dfc5e4a80ac",
+  "source_sha256": "0b1e97be4a493952b941fa1048ec44f79a77aaed16c02dc44073083d7109350f",
+  "accepted": [
+    {
+      "status": "planned_not_verified",
+      "goal_ids": [
+        "5c54292aeb3800ae"
+      ],
+      "actions": [
+        "Reuse the existing source-owned target backward and optimizer step; apply the configured equal-value gradient representation at pre_update"
+      ],
+      "preconditions": [
+        "A verified parent chain with the same parameter, target path and completed update"
+      ],
+      "regions": [
+        "run_tail"
+      ],
+      "blockers": [],
+      "rationale": "The transition library supplies the execution configuration; no source edit is needed",
+      "predicates": [
+        {
+          "dimension": "gradient_representation",
+          "field": "contiguous",
+          "expected": false,
+          "checkpoint": "optimizer:0/step:0/pre_update",
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "parameter_key": "x"
+        },
+        {
+          "dimension": "optimizer",
+          "field": "completed",
+          "expected": true,
+          "checkpoint": "optimizer:0/step:0/post_update",
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "parameter_key": "x"
+        }
+      ],
+      "family": "gradient_representation.contiguous+optimizer.completed",
+      "optimizer_gradient_action": {
+        "step_index": 0,
+        "parameter_key": "x",
+        "action": "strided"
+      },
+      "proposal_status": "planned",
+      "planning_family": null,
+      "examined_goal_ids": [
+        "5c54292aeb3800ae"
+      ],
+      "expected_gain": "unattained_predicates",
+      "proposal_origin": "library_known_action",
+      "configuration_only": true
+    },
+    {
+      "status": "planned_not_verified",
+      "goal_ids": [
+        "a7fedaea7e6c22a5"
+      ],
+      "actions": [
+        "Reuse the existing source-owned target backward and optimizer step; apply the configured equal-value gradient representation at pre_update"
+      ],
+      "preconditions": [
+        "A verified parent chain with the same parameter, target path and completed update"
+      ],
+      "regions": [
+        "run_tail"
+      ],
+      "blockers": [],
+      "rationale": "The transition library supplies the execution configuration; no source edit is needed",
+      "predicates": [
+        {
+          "dimension": "gradient_representation",
+          "field": "offset_nonzero",
+          "expected": true,
+          "checkpoint": "optimizer:0/step:0/pre_update",
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "parameter_key": "x"
+        },
+        {
+          "dimension": "optimizer",
+          "field": "completed",
+          "expected": true,
+          "checkpoint": "optimizer:0/step:0/post_update",
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "parameter_key": "x"
+        }
+      ],
+      "family": "gradient_representation.offset_nonzero+optimizer.completed",
+      "optimizer_gradient_action": {
+        "step_index": 0,
+        "parameter_key": "x",
+        "action": "offset"
+      },
+      "proposal_status": "planned",
+      "planning_family": null,
+      "examined_goal_ids": [
+        "a7fedaea7e6c22a5"
+      ],
+      "expected_gain": "unattained_predicates",
+      "proposal_origin": "library_known_action",
+      "configuration_only": true
+    }
+  ],
+  "rejected": [],
+  "execution_rejections": [],
+  "metadata_planning_seconds": 0.0060922568663954735,
+  "scope": "Bounded static proposals; child execution must revalidate every obligation",
+  "available": [
+    {
+      "status": "planned_not_verified",
+      "goal_ids": [
+        "5c54292aeb3800ae"
+      ],
+      "actions": [
+        "Reuse the existing source-owned target backward and optimizer step; apply the configured equal-value gradient representation at pre_update"
+      ],
+      "preconditions": [
+        "A verified parent chain with the same parameter, target path and completed update"
+      ],
+      "regions": [
+        "run_tail"
+      ],
+      "blockers": [],
+      "rationale": "The transition library supplies the execution configuration; no source edit is needed",
+      "predicates": [
+        {
+          "dimension": "gradient_representation",
+          "field": "contiguous",
+          "expected": false,
+          "checkpoint": "optimizer:0/step:0/pre_update",
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "parameter_key": "x"
+        },
+        {
+          "dimension": "optimizer",
+          "field": "completed",
+          "expected": true,
+          "checkpoint": "optimizer:0/step:0/post_update",
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "parameter_key": "x"
+        }
+      ],
+      "family": "gradient_representation.contiguous+optimizer.completed",
+      "optimizer_gradient_action": {
+        "step_index": 0,
+        "parameter_key": "x",
+        "action": "strided"
+      },
+      "proposal_status": "planned",
+      "planning_family": null,
+      "examined_goal_ids": [
+        "5c54292aeb3800ae"
+      ],
+      "expected_gain": "unattained_predicates",
+      "proposal_origin": "library_known_action",
+      "configuration_only": true
+    },
+    {
+      "status": "planned_not_verified",
+      "goal_ids": [
+        "a7fedaea7e6c22a5"
+      ],
+      "actions": [
+        "Reuse the existing source-owned target backward and optimizer step; apply the configured equal-value gradient representation at pre_update"
+      ],
+      "preconditions": [
+        "A verified parent chain with the same parameter, target path and completed update"
+      ],
+      "regions": [
+        "run_tail"
+      ],
+      "blockers": [],
+      "rationale": "The transition library supplies the execution configuration; no source edit is needed",
+      "predicates": [
+        {
+          "dimension": "gradient_representation",
+          "field": "offset_nonzero",
+          "expected": true,
+          "checkpoint": "optimizer:0/step:0/pre_update",
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "parameter_key": "x"
+        },
+        {
+          "dimension": "optimizer",
+          "field": "completed",
+          "expected": true,
+          "checkpoint": "optimizer:0/step:0/post_update",
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "parameter_key": "x"
+        }
+      ],
+      "family": "gradient_representation.offset_nonzero+optimizer.completed",
+      "optimizer_gradient_action": {
+        "step_index": 0,
+        "parameter_key": "x",
+        "action": "offset"
+      },
+      "proposal_status": "planned",
+      "planning_family": null,
+      "examined_goal_ids": [
+        "a7fedaea7e6c22a5"
+      ],
+      "expected_gain": "unattained_predicates",
+      "proposal_origin": "library_known_action",
+      "configuration_only": true
+    }
+  ]
+}

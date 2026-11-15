@@ -1,0 +1,137 @@
+{
+  "project": {
+    "title": "Optimizer gradient representation chain",
+    "status": "complete"
+  },
+  "phase": "complete",
+  "owned_jobs": [],
+  "final_seed": 0,
+  "final_seeds_per_treatment": 1,
+  "baseline": "result/optimizer-gradient-chain/baseline-v9",
+  "report": "docs/research-010/report.md",
+  "next_action": "Approved roadmap010 slice complete. Final comparison and limits documented; future call-local numerical/composite-attribution/portfolio work is not implemented. No active jobs, service, PTY or heartbeat.",
+  "failed_jobs": [
+    779931
+  ],
+  "service": {
+    "job": 779954,
+    "status": "stopped",
+    "session_ready_seconds": 1985,
+    "session_ready_scope": "includes environment/GPU-isolation wait while first testing step occupied GPU",
+    "task_restart_count": 1
+  },
+  "validation": {
+    "unique_regression_tests": 365,
+    "passed_latest_by_module": 360,
+    "unresolved": 0,
+    "runtime_latest": 21,
+    "native_controls_per_arm": 13,
+    "fixed_gate_first_reference": "9/10 detected; compile/std timeout180.68s; original retained",
+    "fixed_gate_retry_seconds": 600,
+    "fixed_gate_retry_reference": "10/10 detected and independently corroborated, exit0",
+    "adaptive_diagnosis": "Original firstrow72.35s left107.64s < reserve113.52s; expected bounded stop. Test-only totaldeadline600 applied, no production scheduling change.",
+    "fixed_gate_retry": "Both arms detected10/10, independent audits passed, fixture driver exit0",
+    "adaptive_targeted_fix": "iteration-oNRVvt:1test passed133.87s; totaliteration137s",
+    "regression05": {
+      "tests": 172,
+      "all_passed": true,
+      "modules": 6
+    },
+    "controls02": "both arms13/13 passed",
+    "fixtures03": "both arms10/10 detected+independently corroborated; driver complete/pass",
+    "skipped_cuda_only": 5,
+    "count_correction": "365 distinct observed:360 have ok evidence,5 CUDA-only skipped. Current affected regression05 has172 actual ok."
+  },
+  "protocol_revision": 3,
+  "protocol_commit": "ecd3ff7",
+  "development01": {
+    "complete": true,
+    "reference_valid": 2,
+    "candidate_valid": 2,
+    "reference_source_chains": 0,
+    "candidate_source_chains": 1,
+    "planning_calls": 0,
+    "candidate_numerical_audits": {
+      "unsupported": 4
+    },
+    "reference_numerical_audits": {
+      "agreement": 4
+    }
+  },
+  "active_execution": {
+    "job": 779954,
+    "step": 4,
+    "pty_session_id": 51379,
+    "end_local": "2026-11-15 15:26:26 Asia/Taipei",
+    "heartbeat_pid": 3466854,
+    "heartbeat_exec_session": 5453,
+    "driver": "result/optimizer-gradient-chain/driver-v5.py",
+    "protocol_revision": 3,
+    "final_gates": {
+      "native": "result/optimizer-gradient-chain/779954/controls-02",
+      "fixtures": "result/optimizer-gradient-chain/779954/fixtures-03"
+    },
+    "source_protocol_commit": "ecd3ff7",
+    "reader_commit": "a64df40",
+    "status": "closed",
+    "cleanup_audit": "result/optimizer-gradient-chain/779954/final-freeze-cleanup-audit.json"
+  },
+  "development02": {
+    "complete": true,
+    "reference_valid": 3,
+    "candidate_valid": 4,
+    "reference_chains": 0,
+    "candidate_chains": 4,
+    "candidate_planned_gradient_update_attained": 2,
+    "candidate_planned_gradient_update_attempts": 2,
+    "configuration_reuse": 2,
+    "optimizer_mr_pass": 4,
+    "suspects": 0,
+    "known_library_cases_blocked_by_old_reserve_at_actual_history": 2
+  },
+  "final_launch_commit": "cc513b5",
+  "final_run": "result/optimizer-gradient-chain/779954/final-seed0",
+  "completed_jobs": [
+    779954
+  ],
+  "final": {
+    "complete": true,
+    "seed": 0,
+    "seeds_per_arm": 1,
+    "apis": 6,
+    "apis_valid_each_arm": 5,
+    "reference": {
+      "attempts": 13,
+      "valid": 10,
+      "chains": 0,
+      "old_semantic_units": 40,
+      "old_transitions": 10
+    },
+    "candidate": {
+      "attempts": 18,
+      "valid": 15,
+      "chains": 15,
+      "chain_units": 17,
+      "planned_gradient_update_attained": 10,
+      "planned_gradient_update_attempts": 10,
+      "configuration_reuse": 10,
+      "optimizer_mr_pass": 15,
+      "old_semantic_units": 17,
+      "old_transitions": 5
+    },
+    "all_oracle_suspects": 0,
+    "confirmed_new_defects": 0,
+    "driver_seconds": 1360.23912560381,
+    "comparison": "result/optimizer-gradient-chain/779954/final-seed0-report/comparison.json",
+    "mechanisms": "result/optimizer-gradient-chain/779954/final-seed0-mechanisms/mechanisms.json",
+    "saved_record_audit": "result/optimizer-gradient-chain/779954/final-observations.json"
+  },
+  "resource": {
+    "owned_jobs_terminal": true,
+    "owned_steps_terminal": true,
+    "allocated_gpu_seconds": 26158,
+    "gpu_hours": 7.266111111111111,
+    "meaning": "allocated resource time, not GPU utilization; top-level allocations only",
+    "report": "result/optimizer-gradient-chain/779954/validation-resource-01/validation.md"
+  }
+}

@@ -1,0 +1,1037 @@
+[
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/workflow.py",
+    "entry_points": [
+      {
+        "line": 26,
+        "definition": "def write_json(path, value):"
+      },
+      {
+        "line": 30,
+        "definition": "def state_repair_progress(inspection):"
+      },
+      {
+        "line": 46,
+        "definition": "def state_repair_stalled(previous, current):"
+      },
+      {
+        "line": 52,
+        "definition": "def same_repair_payload(previous, current):"
+      },
+      {
+        "line": 63,
+        "definition": "def stateful_runtime_diagnostic(process):"
+      },
+      {
+        "line": 79,
+        "definition": "def rerun_stateful_exception(process, destination, timeout):"
+      },
+      {
+        "line": 95,
+        "definition": "def mutation_backward_requirements(evidence):"
+      },
+      {
+        "line": 104,
+        "definition": "def mutation_paths_preserved(mutation, inspection):"
+      },
+      {
+        "line": 115,
+        "definition": "def optimizer_configuration_reusable(parent, config):"
+      },
+      {
+        "line": 158,
+        "definition": "def library_configuration_pool(parent, catalog, cache):"
+      },
+      {
+        "line": 193,
+        "definition": "def available_library_plans(pool, selected_goal_ids):"
+      },
+      {
+        "line": 198,
+        "definition": "def configuration_dispatch_budget(parent, rows, fallback):"
+      },
+      {
+        "line": 222,
+        "definition": "def affordable_candidates(candidates, remaining, fallback):"
+      },
+      {
+        "line": 228,
+        "definition": "def base_config(api, options, seed):"
+      },
+      {
+        "line": 236,
+        "definition": "def execute(source, config, initial, directory, budget, engine=None, cancel=None):"
+      },
+      {
+        "line": 245,
+        "definition": "def run(options, apis):"
+      },
+      {
+        "line": 272,
+        "definition": "def budget():"
+      },
+      {
+        "line": 301,
+        "definition": "def canonical(api, index):"
+      },
+      {
+        "line": 546,
+        "definition": "def replay(manifest_path, *, timeout=600, allow_environment_change=False, deadline=None, cancel=None):"
+      },
+      {
+        "line": 604,
+        "definition": "def run_properties(options, apis):"
+      },
+      {
+        "line": 694,
+        "definition": "def replay_property(path, *, timeout, allow_environment_change=False, cancel=None):"
+      },
+      {
+        "line": 717,
+        "definition": "def run_stateful(options, apis, *, edges=True, predicates=None, path_policy=\"backward\", coverage_refinement=True,"
+      },
+      {
+        "line": 1263,
+        "definition": "def replay_stateful(path, *, timeout=600, allow_environment_change=False, cancel=None):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/generator/state_plan.py",
+    "entry_points": [
+      {
+        "line": 11,
+        "definition": "def _proposal_schema(status):"
+      },
+      {
+        "line": 37,
+        "definition": "def planning_schema(catalog):"
+      },
+      {
+        "line": 61,
+        "definition": "def goal_family(goal):"
+      },
+      {
+        "line": 67,
+        "definition": "def optimizer_action_for_predicates(predicates):"
+      },
+      {
+        "line": 86,
+        "definition": "def _optimizer_companion(predicate):"
+      },
+      {
+        "line": 94,
+        "definition": "def library_configuration_plans(catalog):"
+      },
+      {
+        "line": 131,
+        "definition": "def _coverage_context(coverage):"
+      },
+      {
+        "line": 146,
+        "definition": "def _rotate(values, limit, offset):"
+      },
+      {
+        "line": 153,
+        "definition": "def _rotation(entry):"
+      },
+      {
+        "line": 161,
+        "definition": "def _gradient_relation(witness):"
+      },
+      {
+        "line": 166,
+        "definition": "def goal_catalog(entry, explicit=None):"
+      },
+      {
+        "line": 172,
+        "definition": "def add(predicate, regions, observed=None):"
+      },
+      {
+        "line": 256,
+        "definition": "def add_axis(witness, axis):"
+      },
+      {
+        "line": 323,
+        "definition": "def planning_request(metadata, source, entry, catalog, configuration, *, planning_family=None):"
+      },
+      {
+        "line": 426,
+        "definition": "def validate_plans(content, catalog, *, planning_family=None):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/generator/program.py",
+    "entry_points": [
+      {
+        "line": 9,
+        "definition": "class ContractError(ValueError):"
+      },
+      {
+        "line": 13,
+        "definition": "def analyze(source):"
+      },
+      {
+        "line": 65,
+        "definition": "def load(source):"
+      },
+      {
+        "line": 75,
+        "definition": "def request(metadata, seed, device, size, requires_backward=True):"
+      },
+      {
+        "line": 111,
+        "definition": "def analyze_property(source):"
+      },
+      {
+        "line": 147,
+        "definition": "def property_request(metadata, configuration):"
+      },
+      {
+        "line": 167,
+        "definition": "def analyze_stateful(source):"
+      },
+      {
+        "line": 212,
+        "definition": "def resolve_name(node):"
+      },
+      {
+        "line": 245,
+        "definition": "def source_operand_bindings(source, api, selectors=()):"
+      },
+      {
+        "line": 263,
+        "definition": "def unresolved(reason):"
+      },
+      {
+        "line": 280,
+        "definition": "def qualified(node):"
+      },
+      {
+        "line": 284,
+        "definition": "def is_probe(node):"
+      },
+      {
+        "line": 314,
+        "definition": "def factory_references(node):"
+      },
+      {
+        "line": 410,
+        "definition": "def unmet_predicate_feedback(inspection, *, bindings=None, limit=3):"
+      },
+      {
+        "line": 414,
+        "definition": "def bounded(value, depth=0):"
+      },
+      {
+        "line": 438,
+        "definition": "def stateful_request(metadata, configuration, *, edges=True, canonical=None, predicates=(), relation=None, mutation=None):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/sampler/policy.py",
+    "entry_points": [
+      {
+        "line": 12,
+        "definition": "class Sampler:"
+      },
+      {
+        "line": 13,
+        "definition": "def __init__(self, candidates: tuple[Candidate, ...], *, seed: int, epsilon: float = 0.1) -> None:"
+      },
+      {
+        "line": 23,
+        "definition": "def probabilities(self, counts: Mapping[Candidate, int]) -> tuple[float, ...]:"
+      },
+      {
+        "line": 34,
+        "definition": "def sample(self, counts: Mapping[Candidate, int]) -> Candidate:"
+      },
+      {
+        "line": 38,
+        "definition": "class FeedbackSampler:"
+      },
+      {
+        "line": 40,
+        "definition": "def __init__(self, *, seed=0, epsilon=0.1, coverage_basis='semantic'):"
+      },
+      {
+        "line": 51,
+        "definition": "def _empty():"
+      },
+      {
+        "line": 54,
+        "definition": "def _estimate(self, candidate):"
+      },
+      {
+        "line": 69,
+        "definition": "def choose(self, candidates, *, reason='adaptive'):"
+      },
+      {
+        "line": 83,
+        "definition": "def observe(self, candidate, row):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/runtime/stateful.py",
+    "entry_points": [
+      {
+        "line": 16,
+        "definition": "def snapshot(value):"
+      },
+      {
+        "line": 31,
+        "definition": "def training_snapshot(ctx):"
+      },
+      {
+        "line": 46,
+        "definition": "def tensor_version(tensor):"
+      },
+      {
+        "line": 51,
+        "definition": "def _broadcastable(left, right):"
+      },
+      {
+        "line": 56,
+        "definition": "def evidence_record(value):"
+      },
+      {
+        "line": 61,
+        "definition": "def observational(method):"
+      },
+      {
+        "line": 65,
+        "definition": "def wrapped(self, *args, **kwargs):"
+      },
+      {
+        "line": 75,
+        "definition": "class Probe:"
+      },
+      {
+        "line": 76,
+        "definition": "def __init__(self, target, ctx, config, recorder):"
+      },
+      {
+        "line": 95,
+        "definition": "def _register_callable(self, value, *, factory_target, factory_id, callable_id):"
+      },
+      {
+        "line": 100,
+        "definition": "def _validate_callable_model(self, model):"
+      },
+      {
+        "line": 109,
+        "definition": "def _validate_capture_callables(self, callables, sample_args):"
+      },
+      {
+        "line": 137,
+        "definition": "def mark(self, name, values=None, *, _optimizer_observer=None):"
+      },
+      {
+        "line": 176,
+        "definition": "def _gradient_limitation(self, call, reason):"
+      },
+      {
+        "line": 187,
+        "definition": "def _capture_gradients(self, event, grad_inputs, grad_outputs, edges, outputs, reason):"
+      },
+      {
+        "line": 225,
+        "definition": "def observe_outputs(self, index, outputs, input_edges, *, node_admissible=True, boundary=False):"
+      },
+      {
+        "line": 278,
+        "definition": "def close(self):"
+      },
+      {
+        "line": 285,
+        "definition": "def call(self, target, *args, **kwargs):"
+      },
+      {
+        "line": 372,
+        "definition": "def execute(source, config, recorder, initial_reference=None):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/runtime/optimizer.py",
+    "entry_points": [
+      {
+        "line": 19,
+        "definition": "def observed(method):"
+      },
+      {
+        "line": 21,
+        "definition": "def wrapped(self, *args, **kwargs):"
+      },
+      {
+        "line": 31,
+        "definition": "def nonoverlapping(tensor):"
+      },
+      {
+        "line": 44,
+        "definition": "class OptimizerEvidence:"
+      },
+      {
+        "line": 45,
+        "definition": "def __init__(self, probe, source):"
+      },
+      {
+        "line": 82,
+        "definition": "def limit(self, reason):"
+      },
+      {
+        "line": 89,
+        "definition": "def _groups(self):"
+      },
+      {
+        "line": 96,
+        "definition": "def _registration_domain(self):"
+      },
+      {
+        "line": 171,
+        "definition": "def __enter__(self):"
+      },
+      {
+        "line": 178,
+        "definition": "def bind_observer(self, observer):"
+      },
+      {
+        "line": 182,
+        "definition": "def __exit__(self, *args):"
+      },
+      {
+        "line": 189,
+        "definition": "def bind_target(self, index, operands):"
+      },
+      {
+        "line": 198,
+        "definition": "def backward_start(self, invocation):"
+      },
+      {
+        "line": 203,
+        "definition": "def _accumulated(self, key, parameter):"
+      },
+      {
+        "line": 217,
+        "definition": "def _snapshot(self):"
+      },
+      {
+        "line": 227,
+        "definition": "def _pre_domain(self, args, kwargs):"
+      },
+      {
+        "line": 266,
+        "definition": "def _provenance(self, key):"
+      },
+      {
+        "line": 304,
+        "definition": "def _mutate(self, step):"
+      },
+      {
+        "line": 340,
+        "definition": "def before_step(self, optimizer, args, kwargs):"
+      },
+      {
+        "line": 362,
+        "definition": "def after_step(self, optimizer, args, kwargs):"
+      },
+      {
+        "line": 373,
+        "definition": "def target_update_count(self):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/runtime/worker.py",
+    "entry_points": [
+      {
+        "line": 11,
+        "definition": "def runtime_diagnostic(error):"
+      },
+      {
+        "line": 26,
+        "definition": "def stateful_replay_evidence(record):"
+      },
+      {
+        "line": 43,
+        "definition": "def optimizer_followup_config(record, candidate):"
+      },
+      {
+        "line": 63,
+        "definition": "def dispatch(request: dict, directory: Path) -> None:"
+      },
+      {
+        "line": 224,
+        "definition": "def main() -> int:"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/inspector/stateful.py",
+    "entry_points": [
+      {
+        "line": 14,
+        "definition": "def failure_record(first_blocking, reason, secondary=()):"
+      },
+      {
+        "line": 21,
+        "definition": "def callable_execution_indices(record):"
+      },
+      {
+        "line": 38,
+        "definition": "def inspect_state(record, predicates=()):"
+      },
+      {
+        "line": 97,
+        "definition": "def _optimizer_path(value):"
+      },
+      {
+        "line": 104,
+        "definition": "def inspect_optimizer(record, *, valid=False):"
+      },
+      {
+        "line": 218,
+        "definition": "def optimizer_witness_fact(witnesses, predicate):"
+      },
+      {
+        "line": 241,
+        "definition": "def optimizer_fact(record, predicate):"
+      },
+      {
+        "line": 253,
+        "definition": "def input_coverage(record):"
+      },
+      {
+        "line": 266,
+        "definition": "def input_category_feedback(outcome):"
+      },
+      {
+        "line": 283,
+        "definition": "def semantic_coverage(record, *, valid=False):"
+      },
+      {
+        "line": 386,
+        "definition": "def _shape(metadata):"
+      },
+      {
+        "line": 393,
+        "definition": "def _strides(metadata):"
+      },
+      {
+        "line": 401,
+        "definition": "def _zero_stride(metadata):"
+      },
+      {
+        "line": 407,
+        "definition": "def _axis_fields(metadata, axis):"
+      },
+      {
+        "line": 416,
+        "definition": "def _selected_axes(metadata):"
+      },
+      {
+        "line": 421,
+        "definition": "def _joint_groups(witnesses):"
+      },
+      {
+        "line": 436,
+        "definition": "def joint_candidates(witnesses):"
+      },
+      {
+        "line": 451,
+        "definition": "def witness_fact(witnesses, predicate):"
+      },
+      {
+        "line": 454,
+        "definition": "def select(path, relation):"
+      },
+      {
+        "line": 512,
+        "definition": "def operand_fact(record, predicate):"
+      },
+      {
+        "line": 516,
+        "definition": "def _joint_coverage(witnesses, unary_units, valid):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/inspector/oracles.py",
+    "entry_points": [
+      {
+        "line": 7,
+        "definition": "def unavailable(reason, *, status='unknown'):"
+      },
+      {
+        "line": 12,
+        "definition": "def audit_execution(record, *, budget_seconds=10):"
+      },
+      {
+        "line": 33,
+        "definition": "def verified_violation_calls(record):"
+      },
+      {
+        "line": 57,
+        "definition": "def audit_pair(left, right, summary, *, budget_seconds=10, enabled=True):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/inspector/numerical_gradients.py",
+    "entry_points": [
+      {
+        "line": 16,
+        "definition": "class AuditUnknown(ValueError):"
+      },
+      {
+        "line": 20,
+        "definition": "def _values(tensor):"
+      },
+      {
+        "line": 24,
+        "definition": "def _same_outputs(actual, saved):"
+      },
+      {
+        "line": 36,
+        "definition": "def _output_seeds(output, event):"
+      },
+      {
+        "line": 60,
+        "definition": "def _scalar(output, event):"
+      },
+      {
+        "line": 77,
+        "definition": "def _directions(size, maximum, seed):"
+      },
+      {
+        "line": 89,
+        "definition": "def _audit_event(record, call, event, target, deadline, cost, *, max_directions, max_coordinates, max_elements):"
+      },
+      {
+        "line": 99,
+        "definition": "def evaluate(values, *, verify=False):"
+      },
+      {
+        "line": 236,
+        "definition": "def audit_record(record, *, budget_seconds=30, max_directions=4, max_coordinates=512, max_elements=4096):"
+      },
+      {
+        "line": 248,
+        "definition": "def finish(status, reason):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/rules/catalog.py",
+    "entry_points": [
+      {
+        "line": 51,
+        "definition": "def optimizer_gradient_candidates(record):"
+      },
+      {
+        "line": 58,
+        "definition": "def optimizer_followup_predicates(predicates, *, parameter_key, pre_checkpoint, post_checkpoint):"
+      },
+      {
+        "line": 65,
+        "definition": "def optimizer_gradient_pair(left, right, backend, *, step_index, parameter_key):"
+      },
+      {
+        "line": 69,
+        "definition": "def establish(key, condition, reason):"
+      },
+      {
+        "line": 72,
+        "definition": "def exact(a, b):"
+      },
+      {
+        "line": 74,
+        "definition": "def step(record):"
+      },
+      {
+        "line": 78,
+        "definition": "def chains(record):"
+      },
+      {
+        "line": 135,
+        "definition": "def invariant_metadata(item):"
+      },
+      {
+        "line": 187,
+        "definition": "def select(evidence):"
+      },
+      {
+        "line": 192,
+        "definition": "def evaluate(name, evidence, left, right, compare):"
+      },
+      {
+        "line": 212,
+        "definition": "def representation_pair(left, right, backend):"
+      },
+      {
+        "line": 233,
+        "definition": "def context_restoration(record, backend):"
+      },
+      {
+        "line": 251,
+        "definition": "def execution_mode_pair(left, right, backend):"
+      },
+      {
+        "line": 272,
+        "definition": "def observations(record):"
+      },
+      {
+        "line": 281,
+        "definition": "def captured_execution_pair(actual, reference, backend):"
+      },
+      {
+        "line": 302,
+        "definition": "def observable(r): return {'outputs':r['observations'],'gradients':r['checkpoints'][-1]['gradients']}"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/backends/pytorch.py",
+    "entry_points": [
+      {
+        "line": 17,
+        "definition": "class PyTorchBackend:"
+      },
+      {
+        "line": 20,
+        "definition": "def is_tensor(self, value):"
+      },
+      {
+        "line": 24,
+        "definition": "def storage_identity(self, value):"
+      },
+      {
+        "line": 34,
+        "definition": "def describe_tensor(self, value, path, object_group, storage_group):"
+      },
+      {
+        "line": 48,
+        "definition": "def gradient_edges(self, operands):"
+      },
+      {
+        "line": 54,
+        "definition": "def backward_binding(self, tensor, input_edges, *, boundary=False):"
+      },
+      {
+        "line": 78,
+        "definition": "def capability(self, name):"
+      },
+      {
+        "line": 84,
+        "definition": "def mutation_actions(self, descriptor):"
+      },
+      {
+        "line": 93,
+        "definition": "def mutation_eligibility(self, tensor, action, obligations):"
+      },
+      {
+        "line": 126,
+        "definition": "def mutate(self, tensor, action, obligations):"
+      },
+      {
+        "line": 133,
+        "definition": "def verify_mutation(self, source, result, action, obligations):"
+      },
+      {
+        "line": 158,
+        "definition": "def input_properties(self, tensor):"
+      },
+      {
+        "line": 185,
+        "definition": "def compare(self, left, right, policy):"
+      },
+      {
+        "line": 226,
+        "definition": "def reduction_numerical_domain(self, operation, call):"
+      },
+      {
+        "line": 285,
+        "definition": "def multiplication_numerical_domain(self, call):"
+      },
+      {
+        "line": 316,
+        "definition": "def representation_evidence(self, left, right):"
+      },
+      {
+        "line": 379,
+        "definition": "def program_certificate(self, source):"
+      },
+      {
+        "line": 383,
+        "definition": "def numerical_source_certificate(self, source):"
+      },
+      {
+        "line": 387,
+        "definition": "def optimizer_source_certificate(self, source):"
+      },
+      {
+        "line": 391,
+        "definition": "def explain_certificate(self, source, *, local_vjp=False, optimizer_update=False):"
+      },
+      {
+        "line": 749,
+        "definition": "def operand_obligations(self, target, tree):"
+      },
+      {
+        "line": 790,
+        "definition": "def bind_native(self, target, args, kwargs):"
+      },
+      {
+        "line": 809,
+        "definition": "def context_state():"
+      },
+      {
+        "line": 819,
+        "definition": "class ContextObserver:"
+      },
+      {
+        "line": 821,
+        "definition": "def __init__(self, target, records, on_action=None):"
+      },
+      {
+        "line": 830,
+        "definition": "def __enter__(self):"
+      },
+      {
+        "line": 840,
+        "definition": "def profile(self, frame, event, arg):"
+      },
+      {
+        "line": 865,
+        "definition": "def __exit__(self, kind, value, traceback):"
+      },
+      {
+        "line": 880,
+        "definition": "class CompilerObserver:"
+      },
+      {
+        "line": 882,
+        "definition": "def __init__(self, probe, namespace, config):"
+      },
+      {
+        "line": 887,
+        "definition": "def __enter__(self):"
+      },
+      {
+        "line": 901,
+        "definition": "def __exit__(self, kind, value, traceback):"
+      },
+      {
+        "line": 906,
+        "definition": "def compile(self, model, kwargs):"
+      },
+      {
+        "line": 1029,
+        "definition": "class CaptureObserver:"
+      },
+      {
+        "line": 1031,
+        "definition": "def __init__(self, probe, namespace, config):"
+      },
+      {
+        "line": 1037,
+        "definition": "def __enter__(self):"
+      },
+      {
+        "line": 1057,
+        "definition": "def __exit__(self, kind, value, traceback):"
+      },
+      {
+        "line": 1063,
+        "definition": "def factory(self, callables, sample_args, kwargs):"
+      },
+      {
+        "line": 1151,
+        "definition": "def capture_source_certificate(source):"
+      },
+      {
+        "line": 1167,
+        "definition": "class OptimizerObserver:"
+      },
+      {
+        "line": 1169,
+        "definition": "def __init__(self,optimizer,on_action, *, before_step=None, after_step=None):"
+      },
+      {
+        "line": 1173,
+        "definition": "def __enter__(self):"
+      },
+      {
+        "line": 1194,
+        "definition": "def profile(self,frame,event,arg):"
+      },
+      {
+        "line": 1199,
+        "definition": "def __exit__(self,kind,value,traceback):"
+      },
+      {
+        "line": 1206,
+        "definition": "def execution_source_certificate(source):"
+      },
+      {
+        "line": 1215,
+        "definition": "def qualified(node):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/artifacts/report.py",
+    "entry_points": [
+      {
+        "line": 6,
+        "definition": "def summarize(manifests: list[dict]) -> dict:"
+      },
+      {
+        "line": 24,
+        "definition": "def summarize_properties(report):"
+      },
+      {
+        "line": 40,
+        "definition": "def verified_optimizer_units(row, *, member='source'):"
+      },
+      {
+        "line": 63,
+        "definition": "def verified_search_units(row, basis='semantic', *, include_optimizer=True):"
+      },
+      {
+        "line": 87,
+        "definition": "def summarize_optimizer_search(rows, elapsed):"
+      },
+      {
+        "line": 103,
+        "definition": "def attained(row):"
+      },
+      {
+        "line": 137,
+        "definition": "def summarize_search(report):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/artifacts/corpus.py",
+    "entry_points": [
+      {
+        "line": 14,
+        "definition": "def _key(value):"
+      },
+      {
+        "line": 18,
+        "definition": "class Corpus:"
+      },
+      {
+        "line": 20,
+        "definition": "def __init__(self, root, *, coverage_basis=None):"
+      },
+      {
+        "line": 50,
+        "definition": "def save(self):"
+      },
+      {
+        "line": 55,
+        "definition": "def summary(self):"
+      },
+      {
+        "line": 64,
+        "definition": "def source(self, entry):"
+      },
+      {
+        "line": 77,
+        "definition": "def select(self, api, *, seed_id=None):"
+      },
+      {
+        "line": 95,
+        "definition": "def admit(self, source, row, manifest_path, *, parent_id=None, edit=None):"
+      }
+    ]
+  },
+  {
+    "path": "result/optimizer-gradient-chain/779954/final-seed0/frozen-new/src/mirage/contracts/capabilities.py",
+    "entry_points": [
+      {
+        "line": 20,
+        "definition": "class EvidenceStatus(StrEnum):"
+      },
+      {
+        "line": 27,
+        "definition": "class Verdict(StrEnum):"
+      },
+      {
+        "line": 36,
+        "definition": "class Evidence:"
+      },
+      {
+        "line": 43,
+        "definition": "def __post_init__(self):"
+      },
+      {
+        "line": 52,
+        "definition": "def established(self):"
+      },
+      {
+        "line": 57,
+        "definition": "class StatePredicate:"
+      },
+      {
+        "line": 71,
+        "definition": "def __post_init__(self):"
+      },
+      {
+        "line": 132,
+        "definition": "def holds(self, observed: Evidence):"
+      },
+      {
+        "line": 138,
+        "definition": "class OperandDescriptor:"
+      },
+      {
+        "line": 155,
+        "definition": "class MutationObligations:"
+      },
+      {
+        "line": 164,
+        "definition": "class MutationCandidate:"
+      },
+      {
+        "line": 171,
+        "definition": "class InputCoverage:"
+      },
+      {
+        "line": 176,
+        "definition": "def __post_init__(self):"
+      },
+      {
+        "line": 182,
+        "definition": "class RelationSpec:"
+      },
+      {
+        "line": 192,
+        "definition": "def __post_init__(self):"
+      },
+      {
+        "line": 197,
+        "definition": "def missing(self, evidence):"
+      },
+      {
+        "line": 214,
+        "definition": "class PathEvidence:"
+      },
+      {
+        "line": 220,
+        "definition": "def __post_init__(self):"
+      },
+      {
+        "line": 226,
+        "definition": "def record(self):"
+      }
+    ]
+  }
+]

@@ -1,0 +1,145 @@
+# Mirage 泛用測試能力研究：第009輪
+
+**本輪完成泛用修正與單seed正式比較，結果是局部改善，尚未證明核心計畫式交互探索提升。** 正式搜尋有效案例110→105，適用MR70→78，具證書／backward／至少一端operand-gradient證據的joint17→54；但planned有效29→17、memory目標有效19→2，兩組皆無顯式memory×training合取目標，也都沒有自主標記疑似失敗。
+
+另外，事後檢查已找到新版生成的`slogdet`負視圖漏報線索：實際backward梯度出現錯位，卻因run內`requires_grad_`使整份source certificate缺失，連局部數值audit也被阻擋。此項已由Fraction解析參考及精簡實驗獨立佐證；**不回填正式搜尋的0 suspects，也不算框架自主發現**。
+
+## 為何第008輪與預期不一致
+
+擴大可描述的狀態空間，不會自動增加能合法執行、達成目標且能判定正確性的案例。第008輪 V7→V8 的有效 source 為132→94，MR適用69→57，共同joint units327→167。這些是單seed、每API180秒的既有結果，不能直接與本輪120秒預算比較。
+
+| 環節 | 已核對的機制與證據 | 實作處理 |
+|---|---|---|
+| 提案供給 | 成功規劃請求中，明明提供training-state目標卻沒有提出該類計畫：0/53→37/48；新147個accepted plans中119個偏向relation/axis | 在模型提案前分配training-state、tensor-state、tensor-relation三類機會；不要求新目標霸佔提案 |
+| 目標與程式綁定 | 相同operand路徑在bound method含receiver；錯改其他tensor、較晚賦值覆蓋修改、編譯呼叫順序都可能造成誤解 | 提供有界AST表達式與最後賦值提示；動態/helper/factory/probe重綁定維持unresolved；執行期驗證權限不變 |
+| 合法計畫與未解決目標 | 原本接受自稱blocked的文字動作；沒有計畫時把整份catalog當成已嘗試 | planned/unresolved結構化回覆與examined IDs；未檢查的目標不隨同丟棄；父seed規劃失敗預算不代表不可達 |
+| 修補成本 | 新版planned repairs只有1/23成功，耗129.88秒；全量inspection/coverage進入修補提示 | 提供選中predicate的expected/observed/evidence與實際生成碼提示；首次修補後若相同義務沒有單調進展就重選，原始證據保留 |
+| certificate | 純build數值操作可被拒絕；原leaf-name白名單也可能誤放隱藏方法、metadata或副作用 | 依namespace、receiver與value kind保守追蹤；拒絕不明副作用並提供原因；已審查純操作可用於build |
+| 回饋粒度 | 同族目標因完整goal IDs形成大量一次性keys；成本難跨seed/selector轉移 | family共享先驗，exact goal保留局部紀錄；仍按attempt回饋成本，不能把相依修補當成獨立樣本 |
+| 提示截斷 | 18個被截斷的known coverage提示只留下joint prefix，源自排序而非價值 | unary/joint各最多4個代表，明列總數及省略數，完整coverage不變 |
+
+外層sampler的fresh平均概率反而39.1%→49.7%，fresh初次提案107→106；因此「sampler更偏新目標」不是現有資料支持的主要原因。這輪採多項機制修正，後續配對比較不能識別每項改動的獨立因果效果。
+
+slogdet的舊基準候選來自第8次fresh生成，沒有state plan；同一API兩組各26次嘗試，source有效20→14。因此新版沒有再次找到它，不能單獨歸因於關係目標規劃，也不代表數值oracle必然漏掉同一觸發器。
+
+[完整舊結果機制審查](../../result/general-state-research/analysis/phase008-mechanisms.md)
+
+## 更根本的架構瓶頸
+
+現有stateful自動訓練目標主要是backward／target-backward／forward boundary／context restoration次數，以及compiled execution。它尚未把optimizer slots、scheduler、AMP scaler、RNG、資料游標或distributed狀態納入完整的可選predicate與MR流程。因此，再好的family sampler也只能分配已存在的目標，無法探索尚未可測量的訓練狀態。
+
+repository並非完全缺少這些能力：舊training路徑已有受限optimizer history、GradScaler、activation checkpoint、saved-tensor clone與microbatch比較。問題是這些能力尚未完整連接到新stateful的目標、合法動作、執行證據、checkpoint與oracle。保存state_dict或宣告MR名稱，不代表相應轉移與MR路徑已接通。
+
+建議下一個最小完整實作是：**具有特定記憶體表示的梯度 → 可歸因target backward → 完成的真實optimizer更新 → 對齊checkpoint的parameter／slot比較**。這比只擴充layout名稱更直接支持Mirage的研究核心；需要穩定parameter/group/slot身分、已完成更新證據與明確MR前提，不能靠計數器替代。
+
+[逐項架構差距、既有可重用能力與驗收標準](architecture-gap.md)
+
+## 改動的泛用性與正確性邊界
+
+所有處理依目標族、實際operand selector、原始碼綁定、執行期predicate及可審查副作用工作；沒有依issue ID或特定API寫輸入配方。本輪泛用性指既有PyTorch後端內跨API與狀態的機制，沒有宣稱已完成跨DL框架驗證；backend的語意類別與純操作認證仍有明確支援範圍。來源提示不證明state attainment；unresolved不證明不可達；source certificate不替代目標語意、write effects、數值域、MR Preconditions/Input Relation及語意checkpoint驗證。
+
+新增的停止策略可能放棄需要多次中間改動才達成單一predicate的修補，這是固定預算下的取捨，並非不可能性證明。AST映射對編譯、helper及動態控制採保守unknown；這仍需未來以執行期call-site ID改進。首次選中的計畫仍承擔整次規劃成本，cache後續計畫沒有相同開銷；family效率估計是搜尋啟發式，不是無偏估計。
+
+## 比較設計
+
+- Reference為凍結V8加上**與candidate完全相同**的certificate及公開API resolver修正；原始V8僅供靜態反事實審查。
+- 開發：4個既有API，兩組各90秒/API、seed0。
+- 正式：10個既有搜尋API與6個事先鎖定的search-campaign-heldout API，兩組各120秒/API、seed0；每個API交替組別順序，獨立corpus。
+- 這6個API可能出現在單元測試或程式中，不能稱為unseen implementation；正式結果不拿來調參或替換API。
+- 同一模型服務、測試GPU、oracle、observer與預算。保留cache暖機等未控制因素，只作單seed描述比較。
+- joint主要附加指標需原始valid、source certificate、required backward實際執行，且至少一端具有operand-gradient證據；不表示兩端都有，也不等同memory×training-state顯式合取。
+- 固定known-trigger案例與controls分開計分，不計為自主發現。Suspected Failure要經重現、最小化、假設重審與獨立佐證才能確認；既有evaluator重用數值證據的confirmed欄位不算第二oracle。
+
+## 研究主張
+
+不能聲稱首次探索tensor記憶體布局：[GPU-Fuzz](https://arxiv.org/abs/2602.10478)已明確討論shape、dtype、stride及layout。合法生成、梯度測試、API關係與LLM回饋也各有先行研究。
+
+本輪保留的研究方向是：**tensor記憶體表示與訓練狀態轉移的組合探索，透過執行期path/state證據及條件式MR在對齊checkpoint比較**。這是有待實證與更完整文獻檢視支持的狹義定位，不是已證明的全球firstness。
+
+[文獻定位](literature/synthesis.md) · [獨立程式審查](independent-review.md) · [證書與oracle範圍](certificate-boundaries.md)
+
+## 正式單seed結果
+
+每組16個API、seed0、120秒/API；共32次搜尋、35個步驟，全數成功，15項資料完整性gate通過，無缺失JSON。Reference是V8加與candidate相同的證書與公開API resolver修正。下表是原始有效source的共同觀測器結果。
+
+| 指標 | Reference | Candidate | 解讀 |
+| --- | --- | --- | --- |
+| 搜尋嘗試 | 245 | 251 | 含規劃拒絕與修補，非獨立樣本 |
+| 有效source | 110 | 105 | 略退步；約每秒0.070→0.067 |
+| 適用MR | 70 | 78 | 約每秒0.0445→0.0498 |
+| 共同joint | 188 | 201 | 不是正確性或訓練生命週期證明 |
+| 有證書／backward／operand-gradient的joint | 17 | 54 | 全部來自fresh；candidate18單端、36雙端gradient |
+| Planned有效source | 29 | 17 | 核心計畫執行能力未改善 |
+| Memory目標有效 | 19 | 2 | 不應被總joint增長掩蓋 |
+| Training-family目標有效／嘗試 | 7/16 | 15/38 | 真正backward lifecycle成功仍2→2，其餘是forward-only狀態 |
+| 顯式memory×training目標 | 0/0 | 0/0 | 缺少交互探索實證 |
+| 自主疑似失敗 | 0 | 0 | 沒有新自主bug發現，亦不代表框架正確 |
+| 實際search時間 | 1572.46秒 | 1564.98秒 | 名義預算之外另列metadata／驗證成本 |
+
+既有10API：有效68→65、MR40→47、qualified joint3→34；保留6API：有效42→40、MR30→31、qualified joint14→20。提升集中於scatter/add/mm等fresh案例，不能歸功於複合訓練計畫。各API有增有減，例如layer_norm有效5→1，不能以合計掩蓋。
+
+正式數值audit為reference246次（agreement9、unknown222、unsupported15），candidate219次（agreement12、unknown189、unsupported18）。沒有violation；原evaluator review完成只表示流程完成，不是已獨立排除全部問題。
+
+已執行的提前判重攔下candidate20次完全相同或AST等價修補，全都沒有新worker process。另一方面，三次transfer規劃撞到16384-token context上限：prompt15543／15603時，只剩841／781 completion tokens；名義4096輸出額度並未實際可用。這是後續需要「依context預算縮減提示、保留輸出空間」的通用機制缺口，不應靠增加單次失敗修補掩蓋。
+
+兩組各有token紀錄不完整的面板，原生報表的每token效率維持null，不把缺失當0成本。原始HTTP可追補token總量reference1,619,981、candidate1,751,654，另存機制審查；不改寫預先定義的主報表。單seed與全套機制配對不能識別單一元件因果，也不能宣稱統計優越。
+
+[正式結果HTML](../../result/general-state-research/778971/final-comparison-01/comparison.html) · [正式結果Markdown](../../result/general-state-research/778971/final-comparison-01/comparison.md) · [逐項機制與來源](../../result/general-state-research/778971/final-comparison-01/mechanisms.md)
+
+## 開發與驗證紀錄
+
+
+[逐輪驗證與失敗紀錄](validation.md)保存每次測試的版本、範圍、數量與耗時；重跑的測試不合計成獨立測試數。
+
+- 首輪263項測試：262通過，1項舊HTTP schema斷言失敗；更新精確欄位斷言後，相關74項重跑通過。
+- 首次固定案例兩組4/10，暴露已知容器展開與原生複數常數的certificate誤拒絕；通用修正後134項相關測試通過，固定案例兩組恢復10/10。
+- 結構控制兩組各4/4通過，維持缺少storage證據為unknown與invalid不回收為coverage。一次driver目錄建立錯誤在案例執行前失敗，已修正且保留紀錄。
+- dtype別名與公開延遲子模組修正後，190項相關測試通過。最終協定、編碼與提前修補判重的114項相關測試也通過。最新共同修正版本的固定案例再次兩組10/10。
+- 開發01（各4API×90秒、seed0）：reference22有效/17MR，新版18/12；共同joint23→27，但具證書與backward/至少一端gradient的joint維持2→2。尚未顯示吞吐提升。
+- 精確機制審查找到3次完全相同修補仍執行worker，總成本23.15秒，其中worker19.86秒；提前判重可避免這部分重複執行，尚不能當成已量得整體加速。
+- 固定請求編碼實驗：14次配對生成加1次schema smoke，21.03秒。4個舊語法失敗中3個差分恢復，3個controls零退步，達到預先設定門檻；採用通用引號提示。僅驗證語法/靜態契約，未執行這些生成程式。
+- 新schema已用真實模型驗證精確goal IDs及planned/unresolved形式；返回計畫仍需執行期狀態驗證。
+
+[開發01配對結果](../../result/general-state-research/778971/development-comparison-01/comparison.md) · [開發01機制審查](../../result/general-state-research/778971/development-comparison-01/mechanisms.md)
+
+- 開發02沿用最後凍結版本，9/9步驟成功：reference有效19、MR12、qualified joint3；candidate25、18、26。訓練目標1/4→4/7，但兩組memory×training顯式合取均0/0。Reference token紀錄不完整，不能做完整token效率比較。這是另一個單seed開發結果，不能用跨開發輪次差異辨識單一改動效果。
+- 開發02深入審查：新增qualified joint全部來自fresh案例；26個單位中14個只有一端operand-gradient、12個兩端都有。四個達成的training-family目標皆是forward-only的boundary／context restoration計數，不是新增target-backward生命週期。這輪因此不能將總數提升歸功於複合訓練計畫。
+- 開發02有7次規劃階段拒絕：3次空提案、3次合法ID但examined／proposals集合不一致、1次三個plans全選錯required region。共13.61秒；精確ID schema沒有解決所有語意一致性。std的一次重複修補已在worker前攔截（1.13秒，沒有新execution）；仍有2次帶編碼提示的生成碼不完整。
+- 最終certificate靜態審查涵蓋445份歷史生成原始碼：原始有效案例中19份新獲得certificate，0份失去；先前10份因torch.long被誤拒的案例已恢復。這不重跑程式、不改MR判定，也不代表恢復19個bug。一次錯誤輸入根目錄造成0份審查，保留為無效證據並以正確目錄重做。
+
+[開發02配對結果](../../result/general-state-research/778971/development-comparison-02/comparison.md) · [開發02機制審查](../../result/general-state-research/778971/development-comparison-02/mechanisms02.md) · [靜態證書審查](../../result/general-state-research/778971/certificate-audit-03/audit.json)
+
+正式比較已完成且原始結果凍結保留；後續事後診斷不回填自主搜尋結果。
+
+## 正式實驗後：修正「到達觸發狀態但oracle無法判定」
+
+Candidate的`slogdet`第8個案例已進入非對稱矩陣負視圖並完成backward，且恰好被數值audit排程選中。正確梯度為`[-2, 1.5, 1, -0.5]`，負視圖保存值卻是`[-2, 1, 1.5, -0.5]`；forward相同。整段程式因run內合法`requires_grad_(True)`未獲source certificate，使MR與局部數值oracle一起被阻擋。這個案例的瓶頸不是沒有生成觸發器，而是不同oracle共用過強的來源限制。
+
+保存證據的Fraction參考，以及不import Mirage的精簡實驗，均佐證本地已知負視圖`slogdet` backward機制：ordinary、resolve_neg、contiguous控制通過，negative控制重現錯誤。這是人工選案的事後確認，沒有宣稱新upstream缺陷。
+
+通用修正是加入**獨立的局部VJP來源效果證書**：共用原本嚴格的namespace／receiver／效果檢查，只額外承認run內已證明為原生Tensor的明確`requires_grad_(True)`。新tag只用於局部數值audit；舊MR證書仍為None，MR仍不適用。目標read-only schema、原始backward證據、重建表示、兩次原點forward、重建VJP、差分收斂與單側穩定性都保留。
+
+不能直接刪除整體效果限制：namespace改寫、自訂hooks、未知receiver或動態flag仍拒絕。單獨的局部數值證書只支援已審查子集，尚未允許任意訓練效果。這個修正依動作與證據判定，沒有slogdet專屬公式或issue ID分支，也沒有調寬tolerance。新的sin/add正控制與負向效果控制用來驗證跨API適用範圍。
+
+此補丁在正式實驗完成後才實作。正式比較仍對應原凍結版本；補丁的測試與同一案例重播獨立保存，沒有追加搜尋seed或回填原始指標。最新Slurm驗證130項測試全過，10個固定案例仍10/10。同一份原始source、config與原數值排程下，新engine重播會自動標記`Suspected Failure`，僅followup有經baseline與穩定性驗證的數值違反；MR仍`Inapplicable`。原始程式、結果與執行快照hash皆未改。此結果證明該漏報修正有效，不是新的自主搜尋命中。
+
+[補丁驗證](../../result/general-state-research/778971/postformal-validation-02/summary.json) · [同案重播檢查](../../result/general-state-research/778971/postformal-validation-02/replay-checks.json)
+
+[漏報原因與獨立佐證](final-slogdet-analysis.md) · [效果證書邊界](certificate-boundaries.md)
+
+## 尚需擴充的能力
+
+優先順序是執行期call-site與operand對應、可驗證的複合狀態動作計畫、私有初始化寫入的ownership證明、依證據與成本排程oracle，以及分開proposal／repair episode成本的回饋。每項都需維持unknown與coverage-only通道，不能靠刪除困難狀態提高MR率。
+
+[具體設計與驗收條件](next-steps.md) · [僅本輪程式差異](../../result/general-state-research/phase009-only.patch)
+
+
+## 交付與資源收尾
+
+完整新規劃策略尚不能視為已驗證優於基準；本輪保留其正負結果與可審查程式差異。事後oracle修正有獨立六檔patch，可分開檢視其適用邊界與測試，不必把整套搜尋策略改善當成前提。
+
+共17個source/test檔案相對本輪開始狀態有修改；使用者既有index與staged patch、97個基準檔案及正式凍結版本皆未變。現有程式與測試完全對應最後執行通過的快照。
+
+本輪Slurm778971已完成並關閉測試終端；推論請求已排空、vLLM已停止、專屬scratch與heartbeat已清理。服務啟動191秒、重啟0次；分配9922秒×2GPU＝5.512 GPU-hours，這是資源占用而非利用率。正式driver3233.52秒；逐輪時間分開保存，不將重疊的服務／測試時間累加成總wall time。
+
+[僅oracle補丁](../../result/general-state-research/postformal-local-vjp.patch) · [版本與範圍核對](../../result/general-state-research/778971/scope-check.json) · [完整資源／清理紀錄](../../result/general-state-research/778971/cleanup-and-costs.json)

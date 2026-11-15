@@ -1,0 +1,81 @@
+{
+  "phase": "complete",
+  "approved_final_seeds": [
+    0
+  ],
+  "final_started": true,
+  "final_expected_searches": 32,
+  "next": "No running work; documented next-design options require a new approved experiment.",
+  "findings": "docs/research-011/findings.md",
+  "driver": "benchmarks/exploration_oracle.py",
+  "status": "All authorized implementation, control and32search final comparison complete; zero autonomous suspects; resources cleaned.",
+  "latest_frozen_engine": "result/exploration-oracle/final",
+  "validated": {
+    "stateful": {
+      "passed": 96,
+      "total": 96
+    },
+    "numerical": {
+      "passed": 39,
+      "total": 39
+    },
+    "same_saved_records": {
+      "baseline_unsupported": 8,
+      "candidate_agreement": 8
+    },
+    "fixed_baseline": {
+      "detected": 10,
+      "total": 10,
+      "independently_corroborated": 10
+    },
+    "fixed_candidate": {
+      "detected": 10,
+      "total": 10,
+      "independently_corroborated": 10
+    },
+    "development_searches": {
+      "successful": 8,
+      "total": 8
+    },
+    "final_traversal": {
+      "passed": 10,
+      "total": 10
+    },
+    "final_artifacts": {
+      "passed": 13,
+      "total": 13
+    },
+    "development": {
+      "searches": 8,
+      "exit0": 8,
+      "suspects": 0
+    },
+    "prefinal_dedup": {
+      "traversal_passed": 10,
+      "artifacts_passed": 13
+    },
+    "cross_api_development_controls": {
+      "agreement": 8,
+      "total": 8,
+      "historical_path": "development-06/heldout",
+      "untouched_holdout": false
+    }
+  },
+  "final_protocol_sha256": "fd97dd3c774227cacbda5d15737865c882fbcd64658be6495fdab71728dd6080",
+  "final_ledger_commit": "1b80bb9",
+  "final_protocol": "result/exploration-oracle/final/protocol.json",
+  "final_preregistration_commit": "1b80bb9",
+  "final_completed": true,
+  "final_completed_searches": 32,
+  "final_integrity_checks": 233,
+  "owned_jobs": [],
+  "report": "docs/research-011/report.md",
+  "final_slogdet_autonomous_suspect": false,
+  "limitations": [
+    "Single seed0 perAPI/arm",
+    "linear composite-backward attribution unverified",
+    "B/D applicable representations mostly pending",
+    "Training-state coverage declined",
+    "No autonomous suspect in any arm"
+  ]
+}

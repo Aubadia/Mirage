@@ -196,3 +196,76 @@ def run(ctx, probe):
         self.assertIsNotNone(self.backend.program_certificate(source))
         changed = SOURCE.replace('    y = probe.call', '    ctx["external"] = x\n    y = probe.call')
         self.assertIsNone(self.backend.program_certificate(changed))
+
+
+    def test_reduction_admission_has_runtime_positive_and_negative_controls(self):
+        for api in ('torch.sum', 'torch.mean', 'torch.std'):
+            with self.subTest(api=api):
+                source = SOURCE.replace('torch.sin', api)
+                config = dict(CONFIG, api=api)
+                left = execute(source, config, Recorder())
+                right = execute(source, dict(config, mutation={'path':['args',0], 'action':'strided'}), Recorder())
+                result = representation_pair(left, right, self.backend)
+                self.assertEqual(result['verdict'], 'pass', result)
+                right['target_calls'][0]['output'] *= -1
+                self.assertEqual(representation_pair(left, right, self.backend)['verdict'], 'suspected_failure')
+        for operation, values in (('sum', [1., -1.]), ('mean', [1., -1.]), ('std', [1., 1.])):
+            call = {'inputs':{'args':(torch.tensor(values, dtype=torch.float64),), 'kwargs':{}}}
+            self.assertFalse(self.backend.reduction_numerical_domain(operation, call))
+
+    def test_reduction_guards_keep_width_dtype_dimension_and_effect_limits(self):
+        def call(value, **kwargs):
+            return {'inputs':{'args':(value,), 'kwargs':kwargs}}
+        self.assertTrue(self.backend.reduction_numerical_domain('sum', call(torch.ones(2, 3), dim=1)))
+        self.assertFalse(self.backend.reduction_numerical_domain('sum', call(torch.ones(32))))
+        self.assertFalse(self.backend.reduction_numerical_domain('sum', call(torch.ones(2), dim=4)))
+        self.assertFalse(self.backend.reduction_numerical_domain('sum', call(torch.ones(2), dtype=torch.float64)))
+        self.assertFalse(self.backend.reduction_numerical_domain('mean', call(torch.tensor([float('inf')]))))
+        self.assertFalse(self.backend.reduction_numerical_domain('sum', call(torch.tensor([1e-44, 1e-44]))))
+        self.assertFalse(self.backend.reduction_numerical_domain('sum', call(torch.full((2,), torch.finfo(torch.float32).max))))
+        self.assertFalse(self.backend.reduction_numerical_domain('std', call(torch.tensor([1., 2.]), correction=2)))
+        effectful = SOURCE.replace('torch.sin', 'torch.sum').replace('    y.sum().backward()', '    y.sum().backward()\n    x.zero_()')
+        self.assertIsNone(self.backend.program_certificate(effectful))
+
+    def test_rectangular_multiplication_does_not_require_square_operands(self):
+        source = """
+import torch
+
+def build(device, seed):
+    x = torch.tensor([[1., 2., 3.], [4., 5., 6.]], dtype=torch.float64, device=device, requires_grad=True)
+    b = torch.tensor([[1., 2., 3., 4.], [2., 3., 4., 5.], [3., 4., 5., 6.]], dtype=torch.float64, device=device)
+    return {'inputs':{'x':x, 'b':b}, 'parameters':{'x':x}}
+
+def run(ctx, probe):
+    x = ctx['inputs']['x']
+    y = probe.call(torch.matmul, x, ctx['inputs']['b'])
+    y.sum().backward()
+    return {'output':y, 'gradient':x.grad}
+"""
+        config = dict(CONFIG, api='torch.matmul')
+        left = execute(source, config, Recorder())
+        right = execute(source, dict(config, mutation={'path':['args',0], 'action':'offset'}), Recorder())
+        result = representation_pair(left, right, self.backend)
+        self.assertEqual(result['verdict'], 'pass', result)
+        right['target_calls'][0]['output'] *= -1
+        self.assertEqual(representation_pair(left, right, self.backend)['verdict'], 'suspected_failure')
+        cancelled = {'inputs':{'args':(torch.ones(1, 2), torch.tensor([[1., 2.], [-1., -2.]])), 'kwargs':{}}}
+        self.assertFalse(self.backend.multiplication_numerical_domain(cancelled))
+        wide = {'inputs':{'args':(torch.ones(2, 32), torch.ones(32, 3)), 'kwargs':{}}}
+        self.assertFalse(self.backend.multiplication_numerical_domain(wide))
+
+    def test_solve_conditioning_applies_to_coefficient_matrix_not_rhs(self):
+        left = execute(SOURCE, CONFIG, Recorder())
+        right = execute(SOURCE, dict(CONFIG, mutation={'path':['args',0], 'action':'strided'}), Recorder())
+        matrix = torch.tensor([[2., 1.], [1., 3.]], dtype=torch.float64)
+        lu, pivots = torch.linalg.lu_factor(matrix)
+        # Singular RHS columns are legal; the coefficient matrix is invertible.
+        rhs = torch.ones(2, 2, dtype=torch.float64)
+        for record in (left, right):
+            record['config']['api'] = 'torch.linalg.lu_solve'
+            record['target_calls'][0]['inputs'] = {'args':(lu, pivots, rhs), 'kwargs':{}}
+        self.assertTrue(self.backend.representation_evidence(left, right)['numerical_domain'].established)
+        bad_lu, bad_pivots = torch.linalg.lu_factor(torch.diag(torch.tensor([1., 1e-12], dtype=torch.float64)))
+        for record in (left, right):
+            record['target_calls'][0]['inputs'] = {'args':(bad_lu, bad_pivots, rhs), 'kwargs':{}}
+        self.assertFalse(self.backend.representation_evidence(left, right)['numerical_domain'].established)

@@ -1,0 +1,371 @@
+{
+  "source": "result/optimizer-gradient-chain/779954/final-seed0/candidate/add/summary.json",
+  "summary_sha256": "b1b791cfbb808bb2d14be88a788d88634bc2d903deb8a50deaee2ee271318c9d",
+  "records": [
+    {
+      "attempt": 0,
+      "configuration": {
+        "api": "torch.add",
+        "device": "cpu",
+        "seed": 0,
+        "attempt": 0,
+        "proposal_index": 0,
+        "requires_backward": true,
+        "input_categories": [
+          "ordinary"
+        ],
+        "predicates": [],
+        "canonical_reference": false
+      },
+      "verdict": "pass",
+      "mr_verdict": "pass",
+      "relation": "optimizer_gradient_representation",
+      "source_reused": null,
+      "optimizer_gradient_action": {
+        "step_index": 0,
+        "parameter_key": "x",
+        "action": "strided"
+      },
+      "max_abs_parameter_update": {
+        "source": {
+          "x": 0.10000000000000009
+        },
+        "followup": {
+          "x": 0.10000000000000009
+        }
+      },
+      "exact_output_comparison": {
+        "equal": true,
+        "differences": [],
+        "reason": "comparison completed",
+        "policy": "exact",
+        "screening_only": true
+      },
+      "gradient_audits": {
+        "source": {
+          "version": "numerical-gradient-1",
+          "status": "unsupported",
+          "scope": "target_vjp",
+          "reason": "source effects are outside the existing execution certificate",
+          "events": [],
+          "cost": {
+            "seconds": 0.0
+          }
+        },
+        "followup": {
+          "version": "numerical-gradient-1",
+          "status": "unsupported",
+          "scope": "target_vjp",
+          "reason": "source effects are outside the existing execution certificate",
+          "events": [],
+          "cost": {
+            "seconds": 0.0
+          }
+        }
+      },
+      "source_goal_valid": true,
+      "followup_goal_valid": true,
+      "predicates": [],
+      "chain_cases": 1
+    },
+    {
+      "attempt": 1,
+      "configuration": {
+        "api": "torch.add",
+        "device": "cpu",
+        "seed": 0,
+        "attempt": 1,
+        "proposal_index": 1,
+        "requires_backward": true,
+        "input_categories": [
+          "ordinary"
+        ],
+        "predicates": [
+          {
+            "dimension": "gradient_representation",
+            "field": "contiguous",
+            "expected": false,
+            "checkpoint": "optimizer:0/step:0/pre_update",
+            "call_index": 0,
+            "operand_path": [
+              "args",
+              0
+            ],
+            "relation": "target_gradient_update",
+            "axis": null,
+            "peer_operand_path": null,
+            "peer_axis": null,
+            "peer_relation": null,
+            "parameter_key": "x"
+          },
+          {
+            "dimension": "optimizer",
+            "field": "completed",
+            "expected": true,
+            "checkpoint": "optimizer:0/step:0/post_update",
+            "call_index": 0,
+            "operand_path": [
+              "args",
+              0
+            ],
+            "relation": "target_gradient_update",
+            "axis": null,
+            "peer_operand_path": null,
+            "peer_axis": null,
+            "peer_relation": null,
+            "parameter_key": "x"
+          }
+        ],
+        "canonical_reference": false,
+        "optimizer_gradient_action": {
+          "step_index": 0,
+          "parameter_key": "x",
+          "action": "strided"
+        }
+      },
+      "verdict": "pass",
+      "mr_verdict": "pass",
+      "relation": "optimizer_gradient_representation",
+      "source_reused": true,
+      "optimizer_gradient_action": {
+        "step_index": 0,
+        "parameter_key": "x",
+        "action": "canonical"
+      },
+      "max_abs_parameter_update": {
+        "source": {
+          "x": 0.10000000000000009
+        },
+        "followup": {
+          "x": 0.10000000000000009
+        }
+      },
+      "exact_output_comparison": {
+        "equal": true,
+        "differences": [],
+        "reason": "comparison completed",
+        "policy": "exact",
+        "screening_only": true
+      },
+      "gradient_audits": {
+        "source": {
+          "version": "numerical-gradient-1",
+          "status": "unknown",
+          "scope": "target_vjp",
+          "reason": "not selected by bounded audit schedule",
+          "events": [],
+          "cost": {
+            "seconds": 0.0
+          }
+        },
+        "followup": {
+          "version": "numerical-gradient-1",
+          "status": "unknown",
+          "scope": "target_vjp",
+          "reason": "not selected by bounded audit schedule",
+          "events": [],
+          "cost": {
+            "seconds": 0.0
+          }
+        }
+      },
+      "source_goal_valid": true,
+      "followup_goal_valid": true,
+      "predicates": [
+        {
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "dimension": "gradient_representation",
+          "field": "contiguous",
+          "parameter_key": "x",
+          "checkpoint": "optimizer:0/step:0/pre_update",
+          "expected": false,
+          "observed": false,
+          "evidence_status": "verified",
+          "reason": "native optimizer boundary and linked completed backward",
+          "attained": true
+        },
+        {
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "dimension": "optimizer",
+          "field": "completed",
+          "parameter_key": "x",
+          "checkpoint": "optimizer:0/step:0/post_update",
+          "expected": true,
+          "observed": true,
+          "evidence_status": "verified",
+          "reason": "native optimizer boundary and linked completed backward",
+          "attained": true
+        }
+      ],
+      "chain_cases": 1
+    },
+    {
+      "attempt": 2,
+      "configuration": {
+        "api": "torch.add",
+        "device": "cpu",
+        "seed": 0,
+        "attempt": 2,
+        "proposal_index": 2,
+        "requires_backward": true,
+        "input_categories": [
+          "ordinary"
+        ],
+        "predicates": [
+          {
+            "dimension": "gradient_representation",
+            "field": "offset_nonzero",
+            "expected": true,
+            "checkpoint": "optimizer:0/step:0/pre_update",
+            "call_index": 0,
+            "operand_path": [
+              "args",
+              0
+            ],
+            "relation": "target_gradient_update",
+            "axis": null,
+            "peer_operand_path": null,
+            "peer_axis": null,
+            "peer_relation": null,
+            "parameter_key": "x"
+          },
+          {
+            "dimension": "optimizer",
+            "field": "completed",
+            "expected": true,
+            "checkpoint": "optimizer:0/step:0/post_update",
+            "call_index": 0,
+            "operand_path": [
+              "args",
+              0
+            ],
+            "relation": "target_gradient_update",
+            "axis": null,
+            "peer_operand_path": null,
+            "peer_axis": null,
+            "peer_relation": null,
+            "parameter_key": "x"
+          }
+        ],
+        "canonical_reference": false,
+        "optimizer_gradient_action": {
+          "step_index": 0,
+          "parameter_key": "x",
+          "action": "offset"
+        }
+      },
+      "verdict": "pass",
+      "mr_verdict": "pass",
+      "relation": "optimizer_gradient_representation",
+      "source_reused": true,
+      "optimizer_gradient_action": {
+        "step_index": 0,
+        "parameter_key": "x",
+        "action": "canonical"
+      },
+      "max_abs_parameter_update": {
+        "source": {
+          "x": 0.10000000000000009
+        },
+        "followup": {
+          "x": 0.10000000000000009
+        }
+      },
+      "exact_output_comparison": {
+        "equal": true,
+        "differences": [],
+        "reason": "comparison completed",
+        "policy": "exact",
+        "screening_only": true
+      },
+      "gradient_audits": {
+        "source": {
+          "version": "numerical-gradient-1",
+          "status": "unknown",
+          "scope": "target_vjp",
+          "reason": "not selected by bounded audit schedule",
+          "events": [],
+          "cost": {
+            "seconds": 0.0
+          }
+        },
+        "followup": {
+          "version": "numerical-gradient-1",
+          "status": "unknown",
+          "scope": "target_vjp",
+          "reason": "not selected by bounded audit schedule",
+          "events": [],
+          "cost": {
+            "seconds": 0.0
+          }
+        }
+      },
+      "source_goal_valid": true,
+      "followup_goal_valid": true,
+      "predicates": [
+        {
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "dimension": "gradient_representation",
+          "field": "offset_nonzero",
+          "parameter_key": "x",
+          "checkpoint": "optimizer:0/step:0/pre_update",
+          "expected": true,
+          "observed": true,
+          "evidence_status": "verified",
+          "reason": "native optimizer boundary and linked completed backward",
+          "attained": true
+        },
+        {
+          "call_index": 0,
+          "operand_path": [
+            "args",
+            0
+          ],
+          "relation": "target_gradient_update",
+          "axis": null,
+          "peer_operand_path": null,
+          "peer_axis": null,
+          "peer_relation": null,
+          "dimension": "optimizer",
+          "field": "completed",
+          "parameter_key": "x",
+          "checkpoint": "optimizer:0/step:0/post_update",
+          "expected": true,
+          "observed": true,
+          "evidence_status": "verified",
+          "reason": "native optimizer boundary and linked completed backward",
+          "attained": true
+        }
+      ],
+      "chain_cases": 1
+    }
+  ],
+  "scope": "Historical JSON evidence only; programs not re-executed for this report."
+}

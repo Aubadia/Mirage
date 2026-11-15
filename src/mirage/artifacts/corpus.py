@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 
 from mirage.artifacts.bundle import digest, verify
-from mirage.contracts.capabilities import SEMANTIC_COVERAGE_VERSION
+from mirage.contracts.capabilities import SEMANTIC_COVERAGE_VERSION, OPTIMIZER_COVERAGE_VERSION
 from mirage.generator.program import analyze_stateful
 
-VERSION = 'stateful-corpus-1'
+VERSION = 'stateful-corpus-2'
 
 
 def _key(value):
@@ -27,7 +27,18 @@ class Corpus:
         if self.path.exists():
             saved = json.loads(self.path.read_text())
             if saved.get('version') != VERSION:
-                raise ValueError('Unsupported corpus version')
+                raise ValueError('Unsupported corpus version; revalidate into a fresh corpus')
+            if (saved.get('semantic_coverage_version') != SEMANTIC_COVERAGE_VERSION
+                    or any(entry.get('coverage_version') != SEMANTIC_COVERAGE_VERSION
+                           or any(unit.get('version', SEMANTIC_COVERAGE_VERSION) != SEMANTIC_COVERAGE_VERSION
+                                  for unit in entry.get('coverage', ()))
+                           for entry in saved.get('entries', ()))):
+                raise ValueError('Incompatible semantic coverage version; revalidate into a fresh corpus')
+            if any(entry.get('optimizer_coverage_version') not in (None, OPTIMIZER_COVERAGE_VERSION)
+                   or any(unit.get('version') != OPTIMIZER_COVERAGE_VERSION
+                          for unit in entry.get('optimizer_coverage', ()))
+                   for entry in saved.get('entries', ())):
+                raise ValueError('Incompatible optimizer coverage version; revalidate into a fresh corpus')
             stored_basis = saved.get('coverage_basis', 'semantic')
             if coverage_basis is not None and stored_basis != coverage_basis:
                 raise ValueError('Cannot change a persisted corpus coverage basis')
@@ -44,6 +55,8 @@ class Corpus:
     def summary(self):
         return deepcopy({'version': VERSION, 'selection_policy': 'round-robin unless an explicit seed is requested',
                          'coverage_basis':self.coverage_basis,
+                         'semantic_coverage_version': SEMANTIC_COVERAGE_VERSION,
+                         'optimizer_coverage_version': OPTIMIZER_COVERAGE_VERSION,
                          'entries': self.entries, 'quarantine': self.quarantine,
                          'selections': self.selections,
                          'active_seeds': sum(e['active'] for e in self.entries)})
@@ -81,6 +94,12 @@ class Corpus:
 
     def admit(self, source, row, manifest_path, *, parent_id=None, edit=None):
         coverage = row.get('inspection', {}).get('semantic_coverage', {})
+        optimizer = row.get('inspection', {}).get('optimizer_coverage', {})
+        optimizer_measured = optimizer.get('version') == OPTIMIZER_COVERAGE_VERSION
+        optimizer_units = (deepcopy(optimizer.get('signatures', []))
+                           if optimizer_measured and optimizer.get('eligible') else [])
+        if any(unit.get('version') != OPTIMIZER_COVERAGE_VERSION for unit in optimizer_units):
+            optimizer_units = []
         relative = str(Path(manifest_path).resolve().relative_to(self.root))
         if row.get('verdict') == 'suspected_failure':
             self.quarantine.append({'manifest': relative, 'parent_id': parent_id,
@@ -89,6 +108,8 @@ class Corpus:
             return {'admitted': False, 'reason': 'quarantined_suspected_failure'}
         if (row.get('mutation_obligations_valid') is False or not row.get('inspection', {}).get('valid') or not coverage.get('eligible')
                 or coverage.get('version') != SEMANTIC_COVERAGE_VERSION or not coverage.get('signatures')
+                or any(unit.get('version', SEMANTIC_COVERAGE_VERSION) != SEMANTIC_COVERAGE_VERSION
+                       for unit in coverage.get('signatures', ()))
                 or row.get('verdict') == 'invalid'):
             return {'admitted': False, 'reason': 'unverified_execution_or_coverage'}
         if parent_id is not None and not any(e['id'] == parent_id for e in self.entries):
@@ -105,6 +126,8 @@ class Corpus:
                  'initial_reference': str((manifest_path.parent / manifest['initial_reference']).relative_to(self.root)),
                  'parent_id': parent_id, 'edit': deepcopy(edit), 'active': True,
                  'coverage': deepcopy(coverage['signatures']), 'coverage_version': coverage['version'],
+                 'optimizer_coverage': optimizer_units,
+                 'optimizer_coverage_version': OPTIMIZER_COVERAGE_VERSION if optimizer_measured else None,
                  'evidence': {k: deepcopy(row.get(k)) for k in ('backward_executed', 'transition_signature')},
                  'relation': row.get('relation'), 'verdict': row.get('verdict'),
                  'correctness': row.get('correctness', 'unassessed'),
@@ -114,10 +137,14 @@ class Corpus:
         entry['evidence']['backward_calls'] = sorted({w['call'] for w in coverage.get('witnesses', [])
             if w['checkpoint'] == 'final' and w['relations']['target_backward_node']['status'] == 'verified'})
         entry['evidence']['witnesses'] = deepcopy(coverage.get('witnesses', []))
+        entry['evidence']['optimizer_witnesses'] = deepcopy(optimizer.get('witnesses', [])) if optimizer_measured else []
+        entry['evidence']['optimizer_target_update_count'] = (
+            optimizer.get('target_update_count') if optimizer_measured and optimizer.get('count_verified') else None)
+        entry['evidence']['target_parameter_bindings'] = deepcopy(row.get('target_parameter_bindings', []))
         self.source(entry)
         def units_for(seed):
             if self.coverage_basis == 'semantic':
-                return {_key(s) for s in seed['coverage']}
+                return {_key(s) for s in seed['coverage'] + seed.get('optimizer_coverage', [])}
             return {_key({'api':seed['configuration']['api'], 'transition':seed['evidence']['transition_signature']})}
         units = units_for(entry)
         active = [e for e in self.entries if e['active'] and e['configuration']['api'] == row['api']]

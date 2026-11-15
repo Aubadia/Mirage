@@ -1,0 +1,1793 @@
+{
+  "008": {
+    "version": "joint-state-exploration-1",
+    "mode": "paired",
+    "engines": {
+      "new": {
+        "root": "/home/asciibase64/Aubadia/Mirage/result/joint-state-exploration/778244/paired-01/frozen-new",
+        "input_snapshot": "/home/asciibase64/Aubadia/Mirage/result/joint-state-exploration/778244/iteration-urBccI/code",
+        "engine": {
+          "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+          "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+          "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+          "mirage/artifacts/corpus.py": "2b40c45ee1eaec665e0927edb2821d4da2a2322cc589f3c292acf08d44f2ae93",
+          "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+          "mirage/artifacts/report.py": "d28df12b172b83ba449a195ed982e9742446d0adb8ba05bb40441f4b3301e0de",
+          "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+          "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+          "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+          "mirage/backends/pytorch.py": "c9e98111377d58e92d3f6f1d68dd7a80e9cb0aca794626d4b9e654e523abd188",
+          "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+          "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+          "mirage/contracts/capabilities.py": "98e1283f9522dd1e9a46999d5460d1acaf55eb39b413c1ab5865bdd57cd3b703",
+          "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+          "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+          "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/generator/http_provider.py": "0ad4bb9b4e254fbc23af5dd2e8117d0420432a85a33230a0664e579732c8b80d",
+          "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+          "mirage/generator/program.py": "d989d18b29461388379d94630a5adf893ca8db60a752acbdd1f6c95dbd9682a9",
+          "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+          "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+          "mirage/generator/state_plan.py": "95268b448eef093bcbfd16e5eed938b14fcc10daa774a2be5883c2008ca9503c",
+          "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+          "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+          "mirage/inspector/oracles.py": "cdfbf71b4dc835b65311a7b688fd3bce96a318774ff5b5cb03116c4b3c113c4e",
+          "mirage/inspector/stateful.py": "753cd636d69cb8552d6351d027f6dff2bd6475aae6fa4bc947ef9617ab92b5c9",
+          "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/rules/catalog.py": "dccdd89d3f3cf41252a3205fe0b1425d8b4d2c6480ffa50b6a191a0c9d7dff34",
+          "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+          "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+          "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/runtime/api_metadata.py": "db2e403963d972bb1c25db31fd7d57aa0eb86f4684e5fb082d4df780272cc895",
+          "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+          "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+          "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+          "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+          "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+          "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+          "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+          "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+          "mirage/runtime/stateful.py": "35728b2f5f3ab4d159e912c21d470ed4fb836197d3dbe30f4508e77c31612422",
+          "mirage/runtime/worker.py": "6715e072151dc7af34f7958ce2654123150d743a1a51b7c12fdcb8b9a4691b17",
+          "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/sampler/policy.py": "4e82ee85d114f174e1ea1da150a584509b67a043e200c9f088d27b65e06c2621",
+          "mirage/workflow.py": "887ce87bacf292208db6c48e4fffff0d296496d556408f68f4f6fba0b008e53b"
+        },
+        "benchmark": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "tests": null
+      },
+      "baseline": {
+        "root": "/home/asciibase64/Aubadia/Mirage/result/joint-state-exploration/baseline/code",
+        "inventory_path": "/home/asciibase64/Aubadia/Mirage/result/joint-state-exploration/baseline/inventory.json",
+        "inventory_sha256": "1d4cfd0f67826baebb44bf957872e9e5cdd3a84da06d3121d897dfa8bc2b4a0f",
+        "engine": {
+          "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+          "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+          "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+          "mirage/artifacts/corpus.py": "4c8ca5ec98fa86e82cc771d6dbfff75c907c4182f05322c5afa0020f8eefc784",
+          "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+          "mirage/artifacts/report.py": "45704fed6b4db64aae81b79d8b3cc1c921ca3470e39964cafb8b832981d3456e",
+          "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+          "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+          "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+          "mirage/backends/pytorch.py": "c9e98111377d58e92d3f6f1d68dd7a80e9cb0aca794626d4b9e654e523abd188",
+          "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+          "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+          "mirage/contracts/capabilities.py": "5fe71b07af3f820ca4210277599f4e203bfe5d41ed54c0d4ebc23162e2499fa6",
+          "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+          "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+          "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/generator/http_provider.py": "0ad4bb9b4e254fbc23af5dd2e8117d0420432a85a33230a0664e579732c8b80d",
+          "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+          "mirage/generator/program.py": "07ad1bc670c21d7c05ebc68dc98a313c464156ae6ca212dcd92141a9e69c6bbc",
+          "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+          "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+          "mirage/generator/state_plan.py": "f49dda20fb94955877f69e257d1cf896552269761ffb954635aa51f51531db4c",
+          "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+          "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+          "mirage/inspector/oracles.py": "cdfbf71b4dc835b65311a7b688fd3bce96a318774ff5b5cb03116c4b3c113c4e",
+          "mirage/inspector/stateful.py": "ca2b243f28949a46e68c0f83aac6721bef60d5f5e4817c84c6f16bf601496e58",
+          "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/rules/catalog.py": "dccdd89d3f3cf41252a3205fe0b1425d8b4d2c6480ffa50b6a191a0c9d7dff34",
+          "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+          "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+          "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/runtime/api_metadata.py": "db2e403963d972bb1c25db31fd7d57aa0eb86f4684e5fb082d4df780272cc895",
+          "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+          "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+          "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+          "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+          "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+          "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+          "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+          "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+          "mirage/runtime/stateful.py": "35728b2f5f3ab4d159e912c21d470ed4fb836197d3dbe30f4508e77c31612422",
+          "mirage/runtime/worker.py": "6715e072151dc7af34f7958ce2654123150d743a1a51b7c12fdcb8b9a4691b17",
+          "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/sampler/policy.py": "4e82ee85d114f174e1ea1da150a584509b67a043e200c9f088d27b65e06c2621",
+          "mirage/workflow.py": "887ce87bacf292208db6c48e4fffff0d296496d556408f68f4f6fba0b008e53b"
+        },
+        "benchmark": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "scope": "Verified pre-change immutable baseline referenced directly; no redundant whole-snapshot copy"
+      }
+    },
+    "driver_sha256": "62aac1689fb054cfd5b6af90c139d3ac641189773174aecb713361f0671f90db",
+    "started_utc": "2026-11-14T17:18:54.095587+00:00",
+    "environment": {
+      "python": "3.14.10 (main, Oct 26 2026, 14:09:22) [Clang 23.1.3 ]",
+      "executable": "/home/asciibase64/Aubadia/Mirage/.venv/bin/python",
+      "torch": "2.15.0+cu132",
+      "cuda_runtime": "13.2",
+      "host": "25a-hgpn031",
+      "job": "778244",
+      "step": "3",
+      "cuda_visible_devices": "0",
+      "gpu": "NVIDIA H200",
+      "serving": {
+        "job_id": "778244",
+        "host": "25a-hgpn031",
+        "step_id": "0",
+        "python": "/work/asciibase64/Mirage/environments/vllm/qwen3-coder-next/bin/python",
+        "vllm": "0.33.0",
+        "torch": "2.14.0+cu132",
+        "transformers": "5.20.2",
+        "gpu_uuid": "3a890b2c-677a-6b2a-da98-f6c5ad75e0ee",
+        "cuda_visible_devices": "0",
+        "model": "Qwen/Qwen3.8-27B",
+        "model_path": "/work/asciibase64/Mirage/models/Qwen3.8-27B/37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "declared_revision": "37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "config_sha256": "191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab",
+        "endpoint": "http://127.0.0.1:8000/v1",
+        "mtp_tokens": 3,
+        "prefix_caching": true,
+        "cuda_graph_policy": "vLLM automatic; verify startup logs",
+        "attention_backend": "vLLM automatic; verify startup logs",
+        "max_model_len": 16384,
+        "max_num_seqs": 2
+      },
+      "serving_evidence_sha256": "87822af8d17658cbfd1d041a2721e42ffc9a415c440610087a803bababed030c",
+      "provider_settings": {
+        "MIRAGE_VLLM_MODEL": "Qwen/Qwen3.8-27B",
+        "MIRAGE_MAX_TOKENS": "4096",
+        "MIRAGE_TEMPERATURE": null,
+        "MIRAGE_TOP_P": null
+      },
+      "cache_paths": {
+        "TORCHINDUCTOR_CACHE_DIR": "/tmp/mirage-test-778244.WNXGRV/inductor",
+        "TRITON_CACHE_DIR": "/tmp/mirage-test-778244.WNXGRV/triton"
+      }
+    },
+    "targets": [
+      {
+        "name": "203078",
+        "api": "torch.Tensor.scatter_add",
+        "device": "cpu"
+      },
+      {
+        "name": "204407",
+        "api": "torch.linalg.slogdet",
+        "device": "cpu"
+      },
+      {
+        "name": "200599",
+        "api": "torch.linalg.lu_solve",
+        "device": "cpu"
+      },
+      {
+        "name": "202706",
+        "api": "torch.autocast",
+        "device": "cpu"
+      },
+      {
+        "name": "181723",
+        "api": "torch.cuda.make_graphed_callables",
+        "device": "cuda"
+      },
+      {
+        "name": "204033",
+        "api": "torch.compile",
+        "device": "cpu"
+      },
+      {
+        "name": "204365",
+        "api": "torch.nn.functional.batch_norm",
+        "device": "cpu"
+      },
+      {
+        "name": "201268",
+        "api": "torch.add",
+        "device": "cpu"
+      },
+      {
+        "name": "197089",
+        "api": "torch.std",
+        "device": "cpu"
+      },
+      {
+        "name": "200613",
+        "api": "torch.Tensor.copy_",
+        "device": "cuda"
+      }
+    ],
+    "seed": 0,
+    "final_per_api_seconds": 180,
+    "worker_timeout_seconds": 120,
+    "case_cap": 100000,
+    "active_smoke_limits": null,
+    "search_policy": "adaptive",
+    "generation_mode": "local",
+    "coverage_basis": "semantic",
+    "path_policy": "mixed",
+    "coverage_refinement": true,
+    "corpora": "Fresh isolated output per arm/API; no reused seeds/corpus",
+    "paired_schedule": [
+      {
+        "index": 0,
+        "target": {
+          "name": "203078",
+          "api": "torch.Tensor.scatter_add",
+          "device": "cpu"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 1,
+        "target": {
+          "name": "203078",
+          "api": "torch.Tensor.scatter_add",
+          "device": "cpu"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 2,
+        "target": {
+          "name": "204407",
+          "api": "torch.linalg.slogdet",
+          "device": "cpu"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 3,
+        "target": {
+          "name": "204407",
+          "api": "torch.linalg.slogdet",
+          "device": "cpu"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 4,
+        "target": {
+          "name": "200599",
+          "api": "torch.linalg.lu_solve",
+          "device": "cpu"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 5,
+        "target": {
+          "name": "200599",
+          "api": "torch.linalg.lu_solve",
+          "device": "cpu"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 6,
+        "target": {
+          "name": "202706",
+          "api": "torch.autocast",
+          "device": "cpu"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 7,
+        "target": {
+          "name": "202706",
+          "api": "torch.autocast",
+          "device": "cpu"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 8,
+        "target": {
+          "name": "181723",
+          "api": "torch.cuda.make_graphed_callables",
+          "device": "cuda"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 9,
+        "target": {
+          "name": "181723",
+          "api": "torch.cuda.make_graphed_callables",
+          "device": "cuda"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 10,
+        "target": {
+          "name": "204033",
+          "api": "torch.compile",
+          "device": "cpu"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 11,
+        "target": {
+          "name": "204033",
+          "api": "torch.compile",
+          "device": "cpu"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 12,
+        "target": {
+          "name": "204365",
+          "api": "torch.nn.functional.batch_norm",
+          "device": "cpu"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 13,
+        "target": {
+          "name": "204365",
+          "api": "torch.nn.functional.batch_norm",
+          "device": "cpu"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 14,
+        "target": {
+          "name": "201268",
+          "api": "torch.add",
+          "device": "cpu"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 15,
+        "target": {
+          "name": "201268",
+          "api": "torch.add",
+          "device": "cpu"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 16,
+        "target": {
+          "name": "197089",
+          "api": "torch.std",
+          "device": "cpu"
+        },
+        "arm": "baseline"
+      },
+      {
+        "index": 17,
+        "target": {
+          "name": "197089",
+          "api": "torch.std",
+          "device": "cpu"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 18,
+        "target": {
+          "name": "200613",
+          "api": "torch.Tensor.copy_",
+          "device": "cuda"
+        },
+        "arm": "new"
+      },
+      {
+        "index": 19,
+        "target": {
+          "name": "200613",
+          "api": "torch.Tensor.copy_",
+          "device": "cuda"
+        },
+        "arm": "baseline"
+      }
+    ],
+    "arm_order": "API-index parity alternation, five baseline-first and five new-first",
+    "cache_policy": "Existing allocation cache policy unchanged; arm order balanced, shared model/kernel cache effects remain a limitation",
+    "common_scorer": "Frozen new inspector.semantic_coverage(raw, valid=original_member_gate); no inspect_state or generated execution",
+    "oracle_policy": "Unchanged engine numerical/MR scheduling; native verdicts and unknowns retained",
+    "timing": "Initial detection/feedback ends before automatic replay; reruns/replays still consume search wall budget. Independent review/replay and common scoring are separate costs.",
+    "posthoc_replay_cap_per_issue_per_arm": 2,
+    "posthoc_replay_timeout_seconds": 120,
+    "generator_visible_target_fields": [
+      "api",
+      "device"
+    ],
+    "issue_inputs_supplied_to_generation": false,
+    "interpretation": "Single-seed descriptive paired comparison. No causal/statistical superiority, exhaustive coverage, zero-FPR, or absence-of-bugs claim.",
+    "changed_engine_files": [
+      "mirage/artifacts/corpus.py",
+      "mirage/artifacts/report.py",
+      "mirage/contracts/capabilities.py",
+      "mirage/generator/program.py",
+      "mirage/generator/state_plan.py",
+      "mirage/inspector/stateful.py"
+    ],
+    "fixed_gates": {
+      "baseline": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/joint-state-exploration/778244/fixtures-01/baseline/fixed",
+        "summary_sha256": "0fc06b202aba7db28c21e90d83de6f8bebf07c951ac12c532b7e08e42b19cc2b",
+        "detected": 10,
+        "scope": "Supplied known triggers and controls, not autonomous discoveries"
+      },
+      "new": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/joint-state-exploration/778244/fixtures-02/new/fixed",
+        "summary_sha256": "08b375613a9332b3bc19b34971afa3ebc0447842f8fd090b917bc90dc3ce9b16",
+        "detected": 10,
+        "scope": "Supplied known triggers and controls, not autonomous discoveries"
+      }
+    },
+    "heldout_cases_sha256": "c5fac0d47a5d6e2d0e2842b1abccf9b72e37d2cd3d6eb32a31033a1ee499d120"
+  },
+  "009": {
+    "version": "general-state-research-1",
+    "mode": "final",
+    "arms": [
+      "reference",
+      "candidate"
+    ],
+    "engines": {
+      "reference": {
+        "root": "/home/asciibase64/Aubadia/Mirage/result/general-state-research/778971/final-01/frozen-reference",
+        "engine": {
+          "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+          "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+          "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+          "mirage/artifacts/corpus.py": "2b40c45ee1eaec665e0927edb2821d4da2a2322cc589f3c292acf08d44f2ae93",
+          "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+          "mirage/artifacts/report.py": "d28df12b172b83ba449a195ed982e9742446d0adb8ba05bb40441f4b3301e0de",
+          "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+          "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+          "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+          "mirage/backends/pytorch.py": "f0a09c2781c482a07085f92b1d682d239a03924a6ee553e88d048735daeb4163",
+          "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+          "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+          "mirage/contracts/capabilities.py": "98e1283f9522dd1e9a46999d5460d1acaf55eb39b413c1ab5865bdd57cd3b703",
+          "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+          "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+          "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/generator/http_provider.py": "0ad4bb9b4e254fbc23af5dd2e8117d0420432a85a33230a0664e579732c8b80d",
+          "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+          "mirage/generator/program.py": "d989d18b29461388379d94630a5adf893ca8db60a752acbdd1f6c95dbd9682a9",
+          "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+          "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+          "mirage/generator/state_plan.py": "95268b448eef093bcbfd16e5eed938b14fcc10daa774a2be5883c2008ca9503c",
+          "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+          "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+          "mirage/inspector/oracles.py": "cdfbf71b4dc835b65311a7b688fd3bce96a318774ff5b5cb03116c4b3c113c4e",
+          "mirage/inspector/stateful.py": "753cd636d69cb8552d6351d027f6dff2bd6475aae6fa4bc947ef9617ab92b5c9",
+          "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/rules/catalog.py": "dccdd89d3f3cf41252a3205fe0b1425d8b4d2c6480ffa50b6a191a0c9d7dff34",
+          "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+          "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+          "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+          "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+          "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+          "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+          "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+          "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+          "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+          "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+          "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+          "mirage/runtime/stateful.py": "35728b2f5f3ab4d159e912c21d470ed4fb836197d3dbe30f4508e77c31612422",
+          "mirage/runtime/worker.py": "6715e072151dc7af34f7958ce2654123150d743a1a51b7c12fdcb8b9a4691b17",
+          "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/sampler/policy.py": "4e82ee85d114f174e1ea1da150a584509b67a043e200c9f088d27b65e06c2621",
+          "mirage/workflow.py": "887ce87bacf292208db6c48e4fffff0d296496d556408f68f4f6fba0b008e53b"
+        },
+        "benchmark": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "raw_baseline": {
+          "root": "/home/asciibase64/Aubadia/Mirage/result/general-state-research/baseline-v8/code",
+          "inventory_path": "/home/asciibase64/Aubadia/Mirage/result/general-state-research/baseline-v8/inventory.json",
+          "inventory_sha256": "afb15ba6d9e9570fce6d081bbd1529d7d65dc734da6d1315b5fe1407635a4064",
+          "engine": {
+            "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+            "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+            "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+            "mirage/artifacts/corpus.py": "2b40c45ee1eaec665e0927edb2821d4da2a2322cc589f3c292acf08d44f2ae93",
+            "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+            "mirage/artifacts/report.py": "d28df12b172b83ba449a195ed982e9742446d0adb8ba05bb40441f4b3301e0de",
+            "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+            "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+            "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+            "mirage/backends/pytorch.py": "c9e98111377d58e92d3f6f1d68dd7a80e9cb0aca794626d4b9e654e523abd188",
+            "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+            "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+            "mirage/contracts/capabilities.py": "98e1283f9522dd1e9a46999d5460d1acaf55eb39b413c1ab5865bdd57cd3b703",
+            "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+            "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+            "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/generator/http_provider.py": "0ad4bb9b4e254fbc23af5dd2e8117d0420432a85a33230a0664e579732c8b80d",
+            "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+            "mirage/generator/program.py": "d989d18b29461388379d94630a5adf893ca8db60a752acbdd1f6c95dbd9682a9",
+            "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+            "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+            "mirage/generator/state_plan.py": "95268b448eef093bcbfd16e5eed938b14fcc10daa774a2be5883c2008ca9503c",
+            "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+            "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+            "mirage/inspector/oracles.py": "cdfbf71b4dc835b65311a7b688fd3bce96a318774ff5b5cb03116c4b3c113c4e",
+            "mirage/inspector/stateful.py": "753cd636d69cb8552d6351d027f6dff2bd6475aae6fa4bc947ef9617ab92b5c9",
+            "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/rules/catalog.py": "dccdd89d3f3cf41252a3205fe0b1425d8b4d2c6480ffa50b6a191a0c9d7dff34",
+            "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+            "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+            "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/runtime/api_metadata.py": "db2e403963d972bb1c25db31fd7d57aa0eb86f4684e5fb082d4df780272cc895",
+            "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+            "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+            "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+            "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+            "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+            "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+            "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+            "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+            "mirage/runtime/stateful.py": "35728b2f5f3ab4d159e912c21d470ed4fb836197d3dbe30f4508e77c31612422",
+            "mirage/runtime/worker.py": "6715e072151dc7af34f7958ce2654123150d743a1a51b7c12fdcb8b9a4691b17",
+            "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/sampler/policy.py": "4e82ee85d114f174e1ea1da150a584509b67a043e200c9f088d27b65e06c2621",
+            "mirage/workflow.py": "887ce87bacf292208db6c48e4fffff0d296496d556408f68f4f6fba0b008e53b"
+          },
+          "benchmark": {
+            "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+            "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+            "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+            "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+            "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+          },
+          "scope": "Verified pre-change immutable baseline referenced directly; no redundant whole-snapshot copy"
+        },
+        "soundness_overlay": {
+          "src/mirage/backends/pytorch.py": "f0a09c2781c482a07085f92b1d682d239a03924a6ee553e88d048735daeb4163",
+          "src/mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d"
+        },
+        "scope": "V8+shared certificate and public API resolution fixes; original unsafe V8 is not a runtime comparator"
+      },
+      "candidate": {
+        "root": "/home/asciibase64/Aubadia/Mirage/result/general-state-research/778971/final-01/frozen-new",
+        "input_snapshot": "/home/asciibase64/Aubadia/Mirage/result/general-state-research/778971/fixtures-03/frozen-new",
+        "engine": {
+          "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+          "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+          "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+          "mirage/artifacts/corpus.py": "2b40c45ee1eaec665e0927edb2821d4da2a2322cc589f3c292acf08d44f2ae93",
+          "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+          "mirage/artifacts/report.py": "cc3775456405104e305511462eddcc7cf8cc630f9a3c318d52ad3842de103f18",
+          "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+          "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+          "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+          "mirage/backends/pytorch.py": "f0a09c2781c482a07085f92b1d682d239a03924a6ee553e88d048735daeb4163",
+          "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+          "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+          "mirage/contracts/capabilities.py": "98e1283f9522dd1e9a46999d5460d1acaf55eb39b413c1ab5865bdd57cd3b703",
+          "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+          "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+          "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/generator/http_provider.py": "9d8e3e7f2274d53bb6dbbbfff70c91cc54c634f807a4e7e69fdfe8369492eab6",
+          "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+          "mirage/generator/program.py": "a7769daacb4664b5d1a7d5218afc383314cc41b130cdba4dd2d8d4f21d1379bf",
+          "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+          "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+          "mirage/generator/state_plan.py": "fb8b190880ed2f5705a31351ec1e6aeccbd64fd0491a473920dd4beb2aada3e8",
+          "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+          "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+          "mirage/inspector/oracles.py": "cdfbf71b4dc835b65311a7b688fd3bce96a318774ff5b5cb03116c4b3c113c4e",
+          "mirage/inspector/stateful.py": "753cd636d69cb8552d6351d027f6dff2bd6475aae6fa4bc947ef9617ab92b5c9",
+          "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/rules/catalog.py": "dccdd89d3f3cf41252a3205fe0b1425d8b4d2c6480ffa50b6a191a0c9d7dff34",
+          "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+          "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+          "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+          "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+          "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+          "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+          "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+          "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+          "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+          "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+          "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+          "mirage/runtime/stateful.py": "35728b2f5f3ab4d159e912c21d470ed4fb836197d3dbe30f4508e77c31612422",
+          "mirage/runtime/worker.py": "6715e072151dc7af34f7958ce2654123150d743a1a51b7c12fdcb8b9a4691b17",
+          "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/sampler/policy.py": "b337b7e72ae0e63d9b68fc739d193282dde2172324f91561a5959ac89a9a04fd",
+          "mirage/workflow.py": "c1a01daf4948541f8155806a658255e899f8eb9a3656d59fad23371fbd9f1771"
+        },
+        "benchmark": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "tests": null
+      }
+    },
+    "driver_sha256": "83bac60f50e11a00b8ddcf77f4f67a73eb8445d2c9bf086244b134f37620e902",
+    "proposal_sha256": "c2a2dffb0212b6b370289e2e92a42e52f00bfa94d3d670003ef1afabb597e15a",
+    "started_utc": "2026-11-14T20:02:01.516855+00:00",
+    "environment": {
+      "python": "3.14.10 (main, Oct 26 2026, 14:09:22) [Clang 23.1.3 ]",
+      "executable": "/home/asciibase64/Aubadia/Mirage/.venv/bin/python",
+      "torch": "2.15.0+cu132",
+      "cuda_runtime": "13.2",
+      "host": "25a-hgpn037",
+      "job": "778971",
+      "step": "3",
+      "cuda_visible_devices": "0",
+      "gpu": "NVIDIA H200",
+      "serving": {
+        "job_id": "778971",
+        "host": "25a-hgpn037",
+        "step_id": "0",
+        "python": "/work/asciibase64/Mirage/environments/vllm/qwen3-coder-next/bin/python",
+        "vllm": "0.33.0",
+        "torch": "2.14.0+cu132",
+        "transformers": "5.20.2",
+        "gpu_uuid": "1976222e-5090-7a31-b9de-7cabf7bc6419",
+        "cuda_visible_devices": "0",
+        "model": "Qwen/Qwen3.8-27B",
+        "model_path": "/work/asciibase64/Mirage/models/Qwen3.8-27B/37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "declared_revision": "37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "config_sha256": "191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab",
+        "endpoint": "http://127.0.0.1:8000/v1",
+        "mtp_tokens": 3,
+        "prefix_caching": true,
+        "cuda_graph_policy": "vLLM automatic; verify startup logs",
+        "attention_backend": "vLLM automatic; verify startup logs",
+        "max_model_len": 16384,
+        "max_num_seqs": 2
+      },
+      "serving_evidence_sha256": "cb1a7be34fdefffa5dfdb3f2a809c9b26096fd00f79e1c3ef2c196ed8d166545",
+      "provider_settings": {
+        "MIRAGE_VLLM_MODEL": "Qwen/Qwen3.8-27B",
+        "MIRAGE_MAX_TOKENS": "4096",
+        "MIRAGE_TEMPERATURE": null,
+        "MIRAGE_TOP_P": null
+      },
+      "cache_paths": {
+        "TORCHINDUCTOR_CACHE_DIR": "/tmp/mirage-test-778971.6D28KJ/inductor",
+        "TRITON_CACHE_DIR": "/tmp/mirage-test-778971.6D28KJ/triton"
+      }
+    },
+    "targets": [
+      {
+        "name": "203078",
+        "api": "torch.Tensor.scatter_add",
+        "device": "cpu",
+        "panel": "seen"
+      },
+      {
+        "name": "204407",
+        "api": "torch.linalg.slogdet",
+        "device": "cpu",
+        "panel": "seen"
+      },
+      {
+        "name": "200599",
+        "api": "torch.linalg.lu_solve",
+        "device": "cpu",
+        "panel": "seen"
+      },
+      {
+        "name": "202706",
+        "api": "torch.autocast",
+        "device": "cpu",
+        "panel": "seen"
+      },
+      {
+        "name": "181723",
+        "api": "torch.cuda.make_graphed_callables",
+        "device": "cuda",
+        "panel": "seen"
+      },
+      {
+        "name": "204033",
+        "api": "torch.compile",
+        "device": "cpu",
+        "panel": "seen"
+      },
+      {
+        "name": "204365",
+        "api": "torch.nn.functional.batch_norm",
+        "device": "cpu",
+        "panel": "seen"
+      },
+      {
+        "name": "201268",
+        "api": "torch.add",
+        "device": "cpu",
+        "panel": "seen"
+      },
+      {
+        "name": "197089",
+        "api": "torch.std",
+        "device": "cpu",
+        "panel": "seen"
+      },
+      {
+        "name": "200613",
+        "api": "torch.Tensor.copy_",
+        "device": "cuda",
+        "panel": "seen"
+      },
+      {
+        "name": "transfer-sin",
+        "api": "torch.sin",
+        "device": "cpu",
+        "panel": "transfer"
+      },
+      {
+        "name": "transfer-mm",
+        "api": "torch.mm",
+        "device": "cpu",
+        "panel": "transfer"
+      },
+      {
+        "name": "transfer-linear",
+        "api": "torch.nn.functional.linear",
+        "device": "cpu",
+        "panel": "transfer"
+      },
+      {
+        "name": "transfer-layer-norm",
+        "api": "torch.nn.functional.layer_norm",
+        "device": "cpu",
+        "panel": "transfer"
+      },
+      {
+        "name": "transfer-checkpoint",
+        "api": "torch.utils.checkpoint.checkpoint",
+        "device": "cpu",
+        "panel": "transfer"
+      },
+      {
+        "name": "transfer-no-grad",
+        "api": "torch.no_grad",
+        "device": "cpu",
+        "panel": "transfer"
+      }
+    ],
+    "seed": 0,
+    "seconds_per_api": 120,
+    "search_settings": {
+      "worker_timeout_seconds": 120,
+      "case_cap": 100000,
+      "path_policy": "mixed",
+      "search_policy": "adaptive",
+      "generation_mode": "local",
+      "coverage_basis": "semantic",
+      "coverage_refinement": true
+    },
+    "reference_description": "Frozen phase008 V8 plus identical candidate certificate (including public dtype aliases) and public API resolution fixes; raw V8 remains static certificate counterfactual only",
+    "reference_label_zh": "V8\uff0b\u5171\u540c\u8b49\u66f8\u53ca\u516c\u958b API \u89e3\u6790\u4fee\u6b63",
+    "shared_overlay_files": [
+      "src/mirage/backends/pytorch.py",
+      "src/mirage/runtime/api_metadata.py"
+    ],
+    "paired_schedule": [
+      {
+        "index": 0,
+        "target": {
+          "name": "203078",
+          "api": "torch.Tensor.scatter_add",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 1,
+        "target": {
+          "name": "203078",
+          "api": "torch.Tensor.scatter_add",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 2,
+        "target": {
+          "name": "204407",
+          "api": "torch.linalg.slogdet",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 3,
+        "target": {
+          "name": "204407",
+          "api": "torch.linalg.slogdet",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 4,
+        "target": {
+          "name": "200599",
+          "api": "torch.linalg.lu_solve",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 5,
+        "target": {
+          "name": "200599",
+          "api": "torch.linalg.lu_solve",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 6,
+        "target": {
+          "name": "202706",
+          "api": "torch.autocast",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 7,
+        "target": {
+          "name": "202706",
+          "api": "torch.autocast",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 8,
+        "target": {
+          "name": "181723",
+          "api": "torch.cuda.make_graphed_callables",
+          "device": "cuda",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 9,
+        "target": {
+          "name": "181723",
+          "api": "torch.cuda.make_graphed_callables",
+          "device": "cuda",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 10,
+        "target": {
+          "name": "204033",
+          "api": "torch.compile",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 11,
+        "target": {
+          "name": "204033",
+          "api": "torch.compile",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 12,
+        "target": {
+          "name": "204365",
+          "api": "torch.nn.functional.batch_norm",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 13,
+        "target": {
+          "name": "204365",
+          "api": "torch.nn.functional.batch_norm",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 14,
+        "target": {
+          "name": "201268",
+          "api": "torch.add",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 15,
+        "target": {
+          "name": "201268",
+          "api": "torch.add",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 16,
+        "target": {
+          "name": "197089",
+          "api": "torch.std",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 17,
+        "target": {
+          "name": "197089",
+          "api": "torch.std",
+          "device": "cpu",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 18,
+        "target": {
+          "name": "200613",
+          "api": "torch.Tensor.copy_",
+          "device": "cuda",
+          "panel": "seen"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 19,
+        "target": {
+          "name": "200613",
+          "api": "torch.Tensor.copy_",
+          "device": "cuda",
+          "panel": "seen"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 20,
+        "target": {
+          "name": "transfer-sin",
+          "api": "torch.sin",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 21,
+        "target": {
+          "name": "transfer-sin",
+          "api": "torch.sin",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 22,
+        "target": {
+          "name": "transfer-mm",
+          "api": "torch.mm",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 23,
+        "target": {
+          "name": "transfer-mm",
+          "api": "torch.mm",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 24,
+        "target": {
+          "name": "transfer-linear",
+          "api": "torch.nn.functional.linear",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 25,
+        "target": {
+          "name": "transfer-linear",
+          "api": "torch.nn.functional.linear",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 26,
+        "target": {
+          "name": "transfer-layer-norm",
+          "api": "torch.nn.functional.layer_norm",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 27,
+        "target": {
+          "name": "transfer-layer-norm",
+          "api": "torch.nn.functional.layer_norm",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 28,
+        "target": {
+          "name": "transfer-checkpoint",
+          "api": "torch.utils.checkpoint.checkpoint",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 29,
+        "target": {
+          "name": "transfer-checkpoint",
+          "api": "torch.utils.checkpoint.checkpoint",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 30,
+        "target": {
+          "name": "transfer-no-grad",
+          "api": "torch.no_grad",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 31,
+        "target": {
+          "name": "transfer-no-grad",
+          "api": "torch.no_grad",
+          "device": "cpu",
+          "panel": "transfer"
+        },
+        "arm": "reference"
+      }
+    ],
+    "expected_searches": 32,
+    "fairness": {
+      "identical_oracle_files": {
+        "mirage/backends/pytorch.py": "f0a09c2781c482a07085f92b1d682d239a03924a6ee553e88d048735daeb4163",
+        "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+        "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+        "mirage/inspector/oracles.py": "cdfbf71b4dc835b65311a7b688fd3bce96a318774ff5b5cb03116c4b3c113c4e",
+        "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/rules/catalog.py": "dccdd89d3f3cf41252a3205fe0b1425d8b4d2c6480ffa50b6a191a0c9d7dff34",
+        "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+        "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+        "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+        "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135"
+      },
+      "changed_engine_files": [
+        "mirage/artifacts/report.py",
+        "mirage/generator/http_provider.py",
+        "mirage/generator/program.py",
+        "mirage/generator/state_plan.py",
+        "mirage/sampler/policy.py",
+        "mirage/workflow.py"
+      ]
+    },
+    "primary": "Common frozen v2 observer on originally valid sources. Report total joint units plus certificate-and-required-backward-and-operand-gradient qualified joint units, training and memory\u00d7training goal attainment, context contracts separately. No invalid source rescue or inferred backward storage. MR applicability and valid yield per actual search second are co-primary feasibility diagnostics; do not optimize only easy MRs.",
+    "heldout_policy": "Six APIs are search-campaign-heldout, may exist in unit fixtures/code. Lock before execution; no adaptive replacement/tuning after their results. Unsupported paths remain explicit unknown/invalid.",
+    "corpora": "Fresh isolated arm/API outputs; no corpus or seed sharing",
+    "pairing": "Deterministic arm-order alternation by panel/API index; fresh isolated corpus for every arm/API. Same vLLM service/provider/model/temperature/seed and testing GPU; model/kernel cache warmness is not eliminated.",
+    "timing": "Search budgets include exception reruns and automatic replay. Original detection timestamp remains pre-replay. Metadata setup, fixture/regression/control validation, posthoc evaluator replay and common scoring are separate costs.",
+    "interpretation": "Single-seed descriptive comparison; no individual-component causality or statistical significance.",
+    "audit_provenance": "Existing evaluator may reuse original numerical oracle. Raw confirmed_* are evaluator adjudications, not independent defect confirmation. Transfer targets have no known fixture labels.",
+    "generator_visible_target_fields": [
+      "api",
+      "device"
+    ],
+    "issue_inputs_supplied_to_generation": false,
+    "fixed_gates": {
+      "reference": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/general-state-research/778971/fixtures-03/reference/fixed",
+        "summary_sha256": "f12b70649680e89a001542d1adb8d24f4778c692149b38499b1405a96e13ffd5",
+        "detected": 10,
+        "scope": "Supplied known triggers and controls, not autonomous discoveries"
+      },
+      "candidate": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/general-state-research/778971/fixtures-03/candidate/fixed",
+        "summary_sha256": "45ef99c9ef9e03c9e69f95102a5ed18d1350c8462bd066d19905078be88fbb16",
+        "detected": 10,
+        "scope": "Supplied known triggers and controls, not autonomous discoveries"
+      }
+    },
+    "structural_controls_sha256": "c5fac0d47a5d6e2d0e2842b1abccf9b72e37d2cd3d6eb32a31033a1ee499d120",
+    "structural_controls_scope": "Previously frozen generic controls; not new held-out transfer evidence"
+  },
+  "010": {
+    "version": "optimizer-gradient-chain-1",
+    "protocol_revision": 3,
+    "mode": "final",
+    "engines": {
+      "reference": {
+        "root": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/frozen-reference",
+        "engine": {
+          "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+          "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+          "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+          "mirage/artifacts/corpus.py": "2b40c45ee1eaec665e0927edb2821d4da2a2322cc589f3c292acf08d44f2ae93",
+          "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+          "mirage/artifacts/report.py": "cc3775456405104e305511462eddcc7cf8cc630f9a3c318d52ad3842de103f18",
+          "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+          "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+          "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+          "mirage/backends/pytorch.py": "15af18243fd562c33ef43e8d2362d942e523226fdddfd4d1a4f0a50ba088c8ac",
+          "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+          "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+          "mirage/contracts/capabilities.py": "e60a62f137795e697a9e76ed64c4b9da42ced436a5f26581f6765c2ea58fca69",
+          "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+          "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+          "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/generator/http_provider.py": "9d8e3e7f2274d53bb6dbbbfff70c91cc54c634f807a4e7e69fdfe8369492eab6",
+          "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+          "mirage/generator/program.py": "a7769daacb4664b5d1a7d5218afc383314cc41b130cdba4dd2d8d4f21d1379bf",
+          "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+          "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+          "mirage/generator/state_plan.py": "fb8b190880ed2f5705a31351ec1e6aeccbd64fd0491a473920dd4beb2aada3e8",
+          "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+          "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+          "mirage/inspector/oracles.py": "ba8c3023db98fc033e3f69e4a21d70d01bc34f783647db75dc9eb0d10ed3f218",
+          "mirage/inspector/stateful.py": "766b3ee6c3f055bc321daa4721d62ce96ff8ee09311c2cdd8d579c23c5316080",
+          "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/rules/catalog.py": "263fe4d4125d5689fff88f0a1a5ca9ff86e0bc0376c8cc2df050aadeb88a95be",
+          "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+          "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+          "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+          "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+          "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+          "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+          "mirage/runtime/optimizer.py": "7f764b7eed84f9b736eda9ff1d1effae24b1ac026cbe7df02c404f4947bcaead",
+          "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+          "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+          "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+          "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+          "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+          "mirage/runtime/stateful.py": "698583260a6ee0f5d3aa6be4999f86bd707846391bf69abc6fb29811c9d44f8e",
+          "mirage/runtime/worker.py": "3ee089495789d8da4579c194f24afa1faee602b8b3381717b95b3f9e8dd644be",
+          "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/sampler/policy.py": "b337b7e72ae0e63d9b68fc739d193282dde2172324f91561a5959ac89a9a04fd",
+          "mirage/workflow.py": "c1a01daf4948541f8155806a658255e899f8eb9a3656d59fad23371fbd9f1771"
+        },
+        "benchmark": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "raw_baseline": {
+          "root": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/baseline-v9/code",
+          "inventory_path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/baseline-v9/inventory.json",
+          "inventory_sha256": "165b622c591ccd521e48f02f12a5269ba882d5227ede0d401e999e0076cb0246",
+          "engine": {
+            "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+            "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+            "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+            "mirage/artifacts/corpus.py": "2b40c45ee1eaec665e0927edb2821d4da2a2322cc589f3c292acf08d44f2ae93",
+            "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+            "mirage/artifacts/report.py": "cc3775456405104e305511462eddcc7cf8cc630f9a3c318d52ad3842de103f18",
+            "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+            "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+            "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+            "mirage/backends/pytorch.py": "22e42aae970b7feb3e453f1e04c3691a0d707ad684699aac3cdbea4ac71542d9",
+            "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+            "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+            "mirage/contracts/capabilities.py": "98e1283f9522dd1e9a46999d5460d1acaf55eb39b413c1ab5865bdd57cd3b703",
+            "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+            "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+            "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/generator/http_provider.py": "9d8e3e7f2274d53bb6dbbbfff70c91cc54c634f807a4e7e69fdfe8369492eab6",
+            "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+            "mirage/generator/program.py": "a7769daacb4664b5d1a7d5218afc383314cc41b130cdba4dd2d8d4f21d1379bf",
+            "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+            "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+            "mirage/generator/state_plan.py": "fb8b190880ed2f5705a31351ec1e6aeccbd64fd0491a473920dd4beb2aada3e8",
+            "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+            "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+            "mirage/inspector/oracles.py": "ba8c3023db98fc033e3f69e4a21d70d01bc34f783647db75dc9eb0d10ed3f218",
+            "mirage/inspector/stateful.py": "753cd636d69cb8552d6351d027f6dff2bd6475aae6fa4bc947ef9617ab92b5c9",
+            "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/rules/catalog.py": "dccdd89d3f3cf41252a3205fe0b1425d8b4d2c6480ffa50b6a191a0c9d7dff34",
+            "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+            "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+            "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+            "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+            "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+            "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+            "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+            "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+            "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+            "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+            "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+            "mirage/runtime/stateful.py": "c4c539c8e03d47ce11e9828f02bf0d85fa69d5fcdd5845fc517d968ec13a8c17",
+            "mirage/runtime/worker.py": "6715e072151dc7af34f7958ce2654123150d743a1a51b7c12fdcb8b9a4691b17",
+            "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/sampler/policy.py": "b337b7e72ae0e63d9b68fc739d193282dde2172324f91561a5959ac89a9a04fd",
+            "mirage/workflow.py": "c1a01daf4948541f8155806a658255e899f8eb9a3656d59fad23371fbd9f1771"
+          },
+          "benchmark": {
+            "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+            "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+            "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+            "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+            "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+          },
+          "scope": "Verified pre-change immutable baseline referenced directly; no redundant whole-snapshot copy"
+        },
+        "shared_overlay": {
+          "src/mirage/backends/pytorch.py": "15af18243fd562c33ef43e8d2362d942e523226fdddfd4d1a4f0a50ba088c8ac",
+          "src/mirage/contracts/capabilities.py": "e60a62f137795e697a9e76ed64c4b9da42ced436a5f26581f6765c2ea58fca69",
+          "src/mirage/inspector/stateful.py": "766b3ee6c3f055bc321daa4721d62ce96ff8ee09311c2cdd8d579c23c5316080",
+          "src/mirage/runtime/stateful.py": "698583260a6ee0f5d3aa6be4999f86bd707846391bf69abc6fb29811c9d44f8e",
+          "src/mirage/runtime/optimizer.py": "7f764b7eed84f9b736eda9ff1d1effae24b1ac026cbe7df02c404f4947bcaead",
+          "src/mirage/runtime/worker.py": "3ee089495789d8da4579c194f24afa1faee602b8b3381717b95b3f9e8dd644be",
+          "src/mirage/rules/catalog.py": "263fe4d4125d5689fff88f0a1a5ca9ff86e0bc0376c8cc2df050aadeb88a95be"
+        }
+      },
+      "candidate": {
+        "root": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/frozen-new",
+        "input_snapshot": "/home/asciibase64/Aubadia/Mirage/result/validation/779954/iteration-m5LrhT/code",
+        "engine": {
+          "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+          "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+          "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+          "mirage/artifacts/corpus.py": "f784b899b2bdc35ed5f82f65d7a6db1aa356813a6d7cb4eaaa5b9a571aee5981",
+          "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+          "mirage/artifacts/report.py": "5e413c04d229d57b57df10b8f9a37598ea8a3b372a8c14ff07a89a8a40b2a8d9",
+          "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+          "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+          "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+          "mirage/backends/pytorch.py": "15af18243fd562c33ef43e8d2362d942e523226fdddfd4d1a4f0a50ba088c8ac",
+          "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+          "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+          "mirage/contracts/capabilities.py": "e60a62f137795e697a9e76ed64c4b9da42ced436a5f26581f6765c2ea58fca69",
+          "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+          "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+          "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/generator/http_provider.py": "9d8e3e7f2274d53bb6dbbbfff70c91cc54c634f807a4e7e69fdfe8369492eab6",
+          "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+          "mirage/generator/program.py": "4f6e8a8bd2fe7133cde03f2a92b3ca3dfffbaedfa1aaa2843efd237194028ac9",
+          "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+          "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+          "mirage/generator/state_plan.py": "7e3895d1d6846a1857e0f79b0c9aa35001308e6b62d0df016a9eefdb80c4755b",
+          "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+          "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+          "mirage/inspector/oracles.py": "ba8c3023db98fc033e3f69e4a21d70d01bc34f783647db75dc9eb0d10ed3f218",
+          "mirage/inspector/stateful.py": "766b3ee6c3f055bc321daa4721d62ce96ff8ee09311c2cdd8d579c23c5316080",
+          "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/rules/catalog.py": "263fe4d4125d5689fff88f0a1a5ca9ff86e0bc0376c8cc2df050aadeb88a95be",
+          "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+          "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+          "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+          "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+          "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+          "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+          "mirage/runtime/optimizer.py": "7f764b7eed84f9b736eda9ff1d1effae24b1ac026cbe7df02c404f4947bcaead",
+          "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+          "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+          "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+          "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+          "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+          "mirage/runtime/stateful.py": "698583260a6ee0f5d3aa6be4999f86bd707846391bf69abc6fb29811c9d44f8e",
+          "mirage/runtime/worker.py": "3ee089495789d8da4579c194f24afa1faee602b8b3381717b95b3f9e8dd644be",
+          "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/sampler/policy.py": "b337b7e72ae0e63d9b68fc739d193282dde2172324f91561a5959ac89a9a04fd",
+          "mirage/workflow.py": "8dd34609d180cc7dd6406c1201f366f7ade48ca4d91ba74e945eb92ca2d8e2c5"
+        },
+        "benchmark": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "tests": {
+          "fixture_provider.py": "d92d3f78bbd3e666566bac6625a605708d20b89a0ae4609afa92e2a68c3a34cc",
+          "test_adaptive.py": "832c0a9319ea55c0a20ea232989b52f5bf0d8abc6a714adfcd0ecb4864bf3a20",
+          "test_artifacts.py": "74bb310d50b3483e4fc9ec4e78ef197749b6251bd6d33f84e0fc88e0ed161713",
+          "test_capabilities.py": "15a59505605213bd23f7f800b734e71f88b70ec3a34f126f55b991d3da8ff813",
+          "test_cli.py": "cb01bdcf7e5f2f56fbab6f7e9a16d4083650f4cb3936021bf7f9b380e00087ea",
+          "test_corpus.py": "d59081cfb484d095c41fbb6608b272c610ab65fe31101efc9d21b254cfc622e1",
+          "test_exploration.py": "60dab875bb35faed20b83250c45fd9c5c9db4607ee0eed2cd316fe2f420929ba",
+          "test_http_provider.py": "4826eb9824dcd40508579fde2ff181461d8ad08399960e96f5a7e1963c8d0cfa",
+          "test_mutation.py": "760786e965b93a62b5640cc7a40b2abda7343dc9c94bdaf4d53aa29409707d6c",
+          "test_numerical_gradients.py": "89c0304debdd19c7c307e3eefa7f882a94b2c71c7b32ea24a39b90532bfb59d4",
+          "test_operands.py": "f6a6182416654f89d883e7cf2ea6c8d572540251d7a35353676eed18b6e8dd6b",
+          "test_optimizer_inspection.py": "b4b344598d30bfd7d50f64ed41403d4f00b70f57a39d8e897cf4baee8e72c28c",
+          "test_optimizer_relation.py": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c",
+          "test_optimizer_runtime.py": "6debb3d75c7e6942b4c732e9cf885844b3e6906b5007ed71eea85845d47c44c7",
+          "test_oracle_routing.py": "02eb0626627ffadbc77c6d7af5e6104a18e1e336baf057b50f03e204119c429e",
+          "test_program.py": "fbe63eaed2937758a0d4f7cd866a8b89bd4646d4d5009bbc6a8880567bb2a3b3",
+          "test_properties.py": "e61b168c010ae20e7ea9d492455f54cb044da22d0dcdc2e6189ed6da43ed4fe3",
+          "test_pytorch_benchmark.py": "214acb76d8c4c2da8380bb0731ea99897a16baf907f20cfa7f6f1172522b44d0",
+          "test_relation_catalog.py": "d28a3018e5d81fa3a5b1e0fbbb11c3ad7370f9b8e83c02ca3aaf74b6f5cc2d7d",
+          "test_sbatch.py": "3f4f5ab9e96e4c2ae6668ccc04cd48d389df64ab58b5f6f456f29e2f5418cf56",
+          "test_state_plan.py": "60164af1a8deb9fd4134383531489a07e355dbae3b11a4444d13f1e653a16a04",
+          "test_stateful.py": "a405aaf534e8d0dbe7ddf188c9d1cdc172eb033133f0dc554e2b8aa796bba416",
+          "validate_generated.py": "74e584e60099f3b41346e60be3d6e7c6676d0446008a034f6a987ef2a16e0b98"
+        }
+      }
+    },
+    "arms": [
+      "reference",
+      "candidate"
+    ],
+    "targets": [
+      {
+        "name": "sin",
+        "api": "torch.sin",
+        "device": "cpu",
+        "panel": "development"
+      },
+      {
+        "name": "add",
+        "api": "torch.add",
+        "device": "cpu",
+        "panel": "development"
+      },
+      {
+        "name": "mm",
+        "api": "torch.mm",
+        "device": "cpu",
+        "panel": "locked-transfer"
+      },
+      {
+        "name": "linear",
+        "api": "torch.nn.functional.linear",
+        "device": "cpu",
+        "panel": "locked-transfer"
+      },
+      {
+        "name": "tanh",
+        "api": "torch.tanh",
+        "device": "cpu",
+        "panel": "locked-transfer"
+      },
+      {
+        "name": "bmm",
+        "api": "torch.bmm",
+        "device": "cpu",
+        "panel": "locked-transfer"
+      }
+    ],
+    "seed": 0,
+    "seconds_per_api": 120,
+    "paired_schedule": [
+      {
+        "index": 0,
+        "target": {
+          "name": "sin",
+          "api": "torch.sin",
+          "device": "cpu",
+          "panel": "development"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 1,
+        "target": {
+          "name": "sin",
+          "api": "torch.sin",
+          "device": "cpu",
+          "panel": "development"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 2,
+        "target": {
+          "name": "add",
+          "api": "torch.add",
+          "device": "cpu",
+          "panel": "development"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 3,
+        "target": {
+          "name": "add",
+          "api": "torch.add",
+          "device": "cpu",
+          "panel": "development"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 4,
+        "target": {
+          "name": "mm",
+          "api": "torch.mm",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 5,
+        "target": {
+          "name": "mm",
+          "api": "torch.mm",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 6,
+        "target": {
+          "name": "linear",
+          "api": "torch.nn.functional.linear",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 7,
+        "target": {
+          "name": "linear",
+          "api": "torch.nn.functional.linear",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 8,
+        "target": {
+          "name": "tanh",
+          "api": "torch.tanh",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 9,
+        "target": {
+          "name": "tanh",
+          "api": "torch.tanh",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 10,
+        "target": {
+          "name": "bmm",
+          "api": "torch.bmm",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 11,
+        "target": {
+          "name": "bmm",
+          "api": "torch.bmm",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "reference"
+      }
+    ],
+    "expected_searches": 12,
+    "expected_steps": 13,
+    "regression_patterns": [
+      "test_optimizer_runtime.py",
+      "test_optimizer_inspection.py",
+      "test_optimizer_relation.py",
+      "test_capabilities.py",
+      "test_state_plan.py",
+      "test_program.py",
+      "test_stateful.py",
+      "test_corpus.py",
+      "test_adaptive.py",
+      "test_relation_catalog.py",
+      "test_oracle_routing.py",
+      "test_numerical_gradients.py",
+      "test_http_provider.py"
+    ],
+    "fixed_fixture_worker_timeout_seconds": 600,
+    "driver_sha256": "81dbbef4ea02b5b2e54863114a426d2ad2a1fba6e0770d72fb4cf53cc1668cf1",
+    "proposal_sha256": "d87f784a18b84e9f47a1935d0fb6393f3ff6c9efa7fca53f3964478be3941e8e",
+    "started_utc": "2026-11-15T06:21:22.867495+00:00",
+    "environment": {
+      "python": "3.14.10 (main, Oct 26 2026, 14:09:22) [Clang 23.1.3 ]",
+      "executable": "/home/asciibase64/Aubadia/Mirage/.venv/bin/python",
+      "torch": "2.15.0+cu132",
+      "cuda_runtime": "13.2",
+      "host": "25a-hgpn007",
+      "job": "779954",
+      "step": "4",
+      "cuda_visible_devices": "0",
+      "gpu": "NVIDIA H200",
+      "serving": {
+        "job_id": "779954",
+        "host": "25a-hgpn007",
+        "step_id": "0",
+        "python": "/work/asciibase64/Mirage/environments/vllm/qwen3-coder-next/bin/python",
+        "vllm": "0.33.0",
+        "torch": "2.14.0+cu132",
+        "transformers": "5.20.2",
+        "gpu_uuid": "4f5d5e10-dd6e-f302-ac73-0516eefd0f09",
+        "cuda_visible_devices": "0",
+        "model": "Qwen/Qwen3.8-27B",
+        "model_path": "/work/asciibase64/Mirage/models/Qwen3.8-27B/37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "declared_revision": "37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "config_sha256": "191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab",
+        "endpoint": "http://127.0.0.1:8000/v1",
+        "mtp_tokens": 3,
+        "prefix_caching": true,
+        "cuda_graph_policy": "vLLM automatic; verify startup logs",
+        "attention_backend": "vLLM automatic; verify startup logs",
+        "max_model_len": 16384,
+        "max_num_seqs": 2
+      },
+      "serving_evidence_sha256": "eed99807b74b2da47967062b0370d710ae62ba18221be424128afdb949f961b8",
+      "provider_settings": {
+        "MIRAGE_VLLM_MODEL": "Qwen/Qwen3.8-27B",
+        "MIRAGE_MAX_TOKENS": "4096",
+        "MIRAGE_TEMPERATURE": null,
+        "MIRAGE_TOP_P": null
+      },
+      "cache_paths": {
+        "TORCHINDUCTOR_CACHE_DIR": "/tmp/mirage-test-779954.JRh4QF/inductor",
+        "TRITON_CACHE_DIR": "/tmp/mirage-test-779954.JRh4QF/triton"
+      }
+    },
+    "fairness": {
+      "shared_files": {
+        "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+        "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+        "mirage/backends/pytorch.py": "15af18243fd562c33ef43e8d2362d942e523226fdddfd4d1a4f0a50ba088c8ac",
+        "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+        "mirage/contracts/capabilities.py": "e60a62f137795e697a9e76ed64c4b9da42ced436a5f26581f6765c2ea58fca69",
+        "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+        "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+        "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+        "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+        "mirage/inspector/oracles.py": "ba8c3023db98fc033e3f69e4a21d70d01bc34f783647db75dc9eb0d10ed3f218",
+        "mirage/inspector/stateful.py": "766b3ee6c3f055bc321daa4721d62ce96ff8ee09311c2cdd8d579c23c5316080",
+        "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/rules/catalog.py": "263fe4d4125d5689fff88f0a1a5ca9ff86e0bc0376c8cc2df050aadeb88a95be",
+        "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+        "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+        "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+        "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+        "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+        "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+        "mirage/runtime/optimizer.py": "7f764b7eed84f9b736eda9ff1d1effae24b1ac026cbe7df02c404f4947bcaead",
+        "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+        "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+        "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+        "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+        "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+        "mirage/runtime/stateful.py": "698583260a6ee0f5d3aa6be4999f86bd707846391bf69abc6fb29811c9d44f8e",
+        "mirage/runtime/worker.py": "3ee089495789d8da4579c194f24afa1faee602b8b3381717b95b3f9e8dd644be"
+      },
+      "different_files": [
+        "mirage/generator/program.py",
+        "mirage/workflow.py",
+        "mirage/artifacts/corpus.py",
+        "mirage/artifacts/report.py",
+        "mirage/generator/state_plan.py"
+      ]
+    },
+    "reference_description": "Frozen phase009 generator/planner/workflow and sampler with identical final optimizer runtime, inspector, contracts and MR overlays; shared observations do not add phase010 goals or planner feedback to reference.",
+    "primary": "Common optimizer-chain-1 observer with original source validity/mutation obligations: target Node -> completed backward -> registered parameter post-accumulate -> consumed gradient layout -> completed native SGD. Source chain cases/unique units and planned gradient-representation+update goal attainment remain separate from followup attainment.",
+    "search_settings": {
+      "worker_timeout_seconds": 120,
+      "case_cap": 100000,
+      "path_policy": "backward",
+      "search_policy": "adaptive",
+      "generation_mode": "local",
+      "coverage_basis": "semantic",
+      "coverage_refinement": true
+    },
+    "pre_model_amendment": {
+      "id": "backward-required-before-model-1",
+      "previous_path_policy": "mixed",
+      "path_policy": "backward",
+      "scope": "Both reference and candidate development/final searches; all six locked targets are differentiable tensor APIs.",
+      "reason": "The endpoint requires attributable target backward and optimizer completion. Mixed attempt0 is forward-only and inherited parent obligations can consume the bounded campaign without exercising the endpoint.",
+      "timing": "Root must freeze this amendment in the protocol ledger before any model call; completed runtime-only validation remains separate.",
+      "unchanged": [
+        "six locked final APIs",
+        "two development APIs",
+        "seed0 per arm",
+        "120 seconds per final API",
+        "90 seconds per development API",
+        "shared runtime/inspector/MR",
+        "same provider/model options"
+      ],
+      "interpretation": "A deliberately backward-required capability-study denominator; not broad API coverage or general mixed-path throughput superiority."
+    },
+    "development_amendment": {
+      "after": "779954/development-01",
+      "before": "development-02 and all final searches",
+      "evidence": "All four 90-second searches stopped after one fresh case on whole-round reserve; candidate sin had a verified reusable chain; add lacked source-effects admission for indexed initialization/loop/computed parameter collections.",
+      "candidate_changes": [
+        "bounded library configuration candidates, with only actually selected goals consumed across proposal routes",
+        "same-parent completed-worker reserve for known configurations, unchanged factor1.5 plus5 floor10; quota first, unknown/general/repair retain whole-round reserve",
+        "generator communicates existing straight-line source-effects fragment; oracle domain unchanged"
+      ],
+      "scope": "Bundled system treatment; no isolated attribution. Final panel,seed0,time120 and symmetric oracle/runtime unchanged."
+    },
+    "numerical_audit_scope": {
+      "required_fields": [
+        "numerical_audit_statuses",
+        "numerical_unknown_reasons",
+        "numerical_audit_seconds",
+        "numerically_reported_cases"
+      ],
+      "status_denominator": "Saved source/followup member audit records, not unique programs or actual finite-difference executions. Unknown/not-selected entries remain distinguishable by reason.",
+      "tradeoff": "The existing local numerical-gradient audit admits pure/local-VJP source certificates, not the separate optimizer-update certificate. Source-owned optimizer.step may therefore make a selected audit unsupported despite complete target Node evidence.",
+      "interpretation": "Report this lost audit eligibility explicitly alongside optimizer MR applicability. Equal pre-update logical gradients plus equal post-update parameters/slots test gradient-representation consumption; they do not independently establish derivative correctness or confirm a framework defect.",
+      "policy": "Keep existing numerical oracle routing and thresholds unchanged in both arms."
+    },
+    "heldout_policy": "Only sin/add are development search targets. mm/linear/tanh/bmm locked before final; existing code/unit use does not make APIs implementation-unseen. No outcome-dependent replacement or post-final tuning.",
+    "timing": "Original detection timestamps preserved; exception reruns/automatic replay consume search wall budget. Metadata setup, controls/regression/fixtures, common raw-record scoring separate. Do not add overlapping cost components or call allocated GPU time utilization.",
+    "interpretation": "One seed descriptive feasibility study, no statistical superiority/component causality or confirmed-defect claim. Zero parameter change remains valid; nonzero update is a secondary informative subset. Layout transformation occurs after target backward, not before accumulation. Both arms require backward on this differentiable panel; results do not measure broad mixed-path API exploration.",
+    "fixed_gates": {
+      "reference": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/reference/fixed",
+        "summary_sha256": "16083d0b847fff3e1be0289c6834b4e3bc81fb3dc6d046e1b695b97efdb4e2bd",
+        "detected": 10,
+        "fixture_protocol": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/protocol.json",
+        "fixture_protocol_sha256": "7c8170a7d839fdcb1c9e0ff15f879c83fd454d8ffc33495d51975544efdfcd5b",
+        "benchmark_sha256": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "scope": "Supplied known triggers and controls, not autonomous discoveries"
+      },
+      "candidate": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/candidate/fixed",
+        "summary_sha256": "ccc05b5c6fde72388f7cf4445078a436197770a271fe2a86de6ba05049386e6d",
+        "detected": 10,
+        "fixture_protocol": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/protocol.json",
+        "fixture_protocol_sha256": "7c8170a7d839fdcb1c9e0ff15f879c83fd454d8ffc33495d51975544efdfcd5b",
+        "benchmark_sha256": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "scope": "Supplied known triggers and controls, not autonomous discoveries"
+      }
+    },
+    "native_control_gates": {
+      "reference": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/controls-02/reference/controls/summary.json",
+        "sha256": "aefd1ac500aa309067888d647ee07e1fb6afe6ce817fd9475394691035eb40c9",
+        "controls_sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c"
+      },
+      "candidate": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/controls-02/candidate/controls/summary.json",
+        "sha256": "ad829b47ec1a5681e8b910d3c37b168bb6b4a0d2acca0952190bf20e038364d5",
+        "controls_sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c"
+      }
+    }
+  }
+}

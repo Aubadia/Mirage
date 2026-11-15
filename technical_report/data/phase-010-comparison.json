@@ -1,0 +1,2591 @@
+{
+  "version": "optimizer-chain-report-1",
+  "created_utc": "2026-11-15T06:44:44.979303+00:00",
+  "campaign": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0",
+  "complete": true,
+  "gates": {
+    "frozen_control_test_matches_manifest": true,
+    "reference_engine_manifest_unchanged": true,
+    "reference_native_control_summary_hash": true,
+    "reference_native_control_engine_and_test_hash": true,
+    "reference_fixed10_summary_hash": true,
+    "reference_fixed10_complete": true,
+    "reference_fixed10_benchmark_code_hash": true,
+    "candidate_engine_manifest_unchanged": true,
+    "candidate_native_control_summary_hash": true,
+    "candidate_native_control_engine_and_test_hash": true,
+    "candidate_fixed10_summary_hash": true,
+    "candidate_fixed10_complete": true,
+    "candidate_fixed10_benchmark_code_hash": true,
+    "paired_protocol": true,
+    "expected_searches": true,
+    "all_driver_steps_complete": true,
+    "common_score_complete": true,
+    "driver_hash": true,
+    "proposal_hash": true,
+    "reference_raw_hash_manifest": true,
+    "reference_target_results_complete": true,
+    "reference_original_artifacts_unchanged_at_scoring": true,
+    "candidate_raw_hash_manifest": true,
+    "candidate_target_results_complete": true,
+    "candidate_original_artifacts_unchanged_at_scoring": true,
+    "source_summary_hashes_match_scorer": true,
+    "read_json_hashes_match_scorer": true,
+    "read_json_unchanged": true,
+    "no_missing_or_malformed_required_json": true
+  },
+  "mode": "final",
+  "arms": [
+    {
+      "arm": "reference",
+      "metrics": {
+        "attempts": 13,
+        "source_valid": 10,
+        "source_chain_cases": 0,
+        "planned_gradient_update_attempts": 0,
+        "planned_gradient_update_attained": 0,
+        "configuration_reuse_cases": 0,
+        "configuration_reuse_valid_cases": 0,
+        "configuration_reuse_chain_cases": 0,
+        "suspected_cases_all_oracles": 0,
+        "optimizer_mr_selected": 0,
+        "source_observed_verified_zero": 11,
+        "source_observed_verified_zero_valid": 10,
+        "cases_with_numerical_audit_records": 11,
+        "cases_without_numerical_audit_records": 2,
+        "initial_worker_cost_observed_cases": 12,
+        "automatic_replays": 0,
+        "automatic_replays_verified": 0,
+        "source_observer_unmeasured": 2,
+        "exception_reruns": 1,
+        "source_update_amount_observed": 0,
+        "source_update_nonzero": 0,
+        "source_update_zero": 0,
+        "source_update_amount_unknown": 0,
+        "source_observed_count_unknown": 0,
+        "source_observed_verified_nonzero": 0,
+        "source_observed_verified_nonzero_valid": 0,
+        "source_chain_by_origin": {},
+        "optimizer_mr_verdicts": {},
+        "optimizer_mr_applicable": 0,
+        "optimizer_mr_pass": 0,
+        "optimizer_mr_suspect": 0,
+        "numerical_audit_member_records": 21,
+        "numerical_audit_statuses": {
+          "agreement": 8,
+          "unknown": 11,
+          "unsupported": 2
+        },
+        "numerical_audit_statuses_by_member": {
+          "source": {
+            "agreement": 4,
+            "unknown": 6,
+            "unsupported": 1
+          },
+          "followup": {
+            "agreement": 4,
+            "unknown": 5,
+            "unsupported": 1
+          }
+        },
+        "numerical_unknown_reasons": {
+          "not selected by bounded audit schedule": 10,
+          "original execution/state/path is not verified": 1,
+          "source effects are outside the existing execution certificate": 2
+        },
+        "blocking_stages": {
+          "none": 10,
+          "backward": 1,
+          "generation": 1,
+          "unresolved_runtime": 1
+        },
+        "cost_components": {
+          "numerical_audit_seconds": 0.6600305363535881,
+          "initial_worker_seconds": 353.6855291160755,
+          "initial_attempt_seconds": 524.8157428381965,
+          "exception_rerun_seconds": 28.98768539307639
+        },
+        "source_chain_units": 0,
+        "followup_chain_cases": 0,
+        "followup_chain_units": 0,
+        "search_seconds": 530.0867316578515,
+        "known_tokens": 105320,
+        "token_usage_complete": true,
+        "native_source_chain_cases_match_common": true,
+        "common_optimizer_metrics": {
+          "version": "optimizer-chain-1",
+          "measured_source_cases": 11,
+          "unmeasured_source_cases": 2,
+          "measured_count_unknown_cases": 0,
+          "measured_verified_zero_count_cases": 11,
+          "measured_verified_nonzero_count_cases": 0,
+          "source_linked_cases": 0,
+          "source_units": 0,
+          "source_linked_by_origin": {},
+          "followup_linked_cases": 0,
+          "followup_units": 0,
+          "goal_attempts": 0,
+          "goal_attained_cases": 0,
+          "gradient_goal_attempts": 0,
+          "gradient_update_conjunction_attained_cases": 0,
+          "mr_selected_cases": 0,
+          "mr_verdicts": {},
+          "mr_applicable_cases": 0,
+          "source_update_amount_observed_cases": 0,
+          "source_nonzero_parameter_update_cases": 0,
+          "source_unchanged_parameter_cases": 0,
+          "source_units_per_second": 0.0,
+          "limitations": {},
+          "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+          "coverage_denominator": null,
+          "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+        }
+      },
+      "targets": [
+        {
+          "target": {
+            "name": "sin",
+            "api": "torch.sin",
+            "device": "cpu",
+            "panel": "development"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 2,
+            "source_valid": 2,
+            "source_chain_cases": 0,
+            "planned_gradient_update_attempts": 0,
+            "planned_gradient_update_attained": 0,
+            "configuration_reuse_cases": 0,
+            "configuration_reuse_valid_cases": 0,
+            "configuration_reuse_chain_cases": 0,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 0,
+            "source_observed_verified_zero": 2,
+            "source_observed_verified_zero_valid": 2,
+            "cases_with_numerical_audit_records": 2,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 2,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_observed": 0,
+            "source_update_nonzero": 0,
+            "source_update_zero": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_nonzero": 0,
+            "source_observed_verified_nonzero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {},
+            "optimizer_mr_verdicts": {},
+            "optimizer_mr_applicable": 0,
+            "optimizer_mr_pass": 0,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 4,
+            "numerical_audit_statuses": {
+              "agreement": 2,
+              "unknown": 2
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "agreement": 1,
+                "unknown": 1
+              },
+              "followup": {
+                "agreement": 1,
+                "unknown": 1
+              }
+            },
+            "numerical_unknown_reasons": {
+              "not selected by bounded audit schedule": 2
+            },
+            "blocking_stages": {
+              "none": 2
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.12271947413682938,
+              "initial_worker_seconds": 59.170377949252725,
+              "initial_attempt_seconds": 78.55663585616276
+            },
+            "source_chain_units": 0,
+            "followup_chain_cases": 0,
+            "followup_chain_units": 0,
+            "search_seconds": 79.46055872784927,
+            "known_tokens": 12901,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 2,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 2,
+              "measured_verified_nonzero_count_cases": 0,
+              "source_linked_cases": 0,
+              "source_units": 0,
+              "source_linked_by_origin": {},
+              "followup_linked_cases": 0,
+              "followup_units": 0,
+              "goal_attempts": 0,
+              "goal_attained_cases": 0,
+              "gradient_goal_attempts": 0,
+              "gradient_update_conjunction_attained_cases": 0,
+              "mr_selected_cases": 0,
+              "mr_verdicts": {},
+              "mr_applicable_cases": 0,
+              "source_update_amount_observed_cases": 0,
+              "source_nonzero_parameter_update_cases": 0,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.0,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 97.18799600517377,
+            "metadata_seconds": 16.797644118312746,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 2,
+            "source_valid": 2,
+            "source_native_coverage_match": 2,
+            "followup_saved": 2,
+            "followup_valid": 2,
+            "followup_native_coverage_match": 2
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/sin/summary.json",
+          "source_summary_sha256": "f7bed420f210115fa02df11396fe58765ad64573907e13e2501a0b2bc81ce675"
+        },
+        {
+          "target": {
+            "name": "add",
+            "api": "torch.add",
+            "device": "cpu",
+            "panel": "development"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 2,
+            "source_valid": 2,
+            "source_chain_cases": 0,
+            "planned_gradient_update_attempts": 0,
+            "planned_gradient_update_attained": 0,
+            "configuration_reuse_cases": 0,
+            "configuration_reuse_valid_cases": 0,
+            "configuration_reuse_chain_cases": 0,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 0,
+            "source_observed_verified_zero": 2,
+            "source_observed_verified_zero_valid": 2,
+            "cases_with_numerical_audit_records": 2,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 2,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_observed": 0,
+            "source_update_nonzero": 0,
+            "source_update_zero": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_nonzero": 0,
+            "source_observed_verified_nonzero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {},
+            "optimizer_mr_verdicts": {},
+            "optimizer_mr_applicable": 0,
+            "optimizer_mr_pass": 0,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 4,
+            "numerical_audit_statuses": {
+              "agreement": 2,
+              "unknown": 2
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "agreement": 1,
+                "unknown": 1
+              },
+              "followup": {
+                "agreement": 1,
+                "unknown": 1
+              }
+            },
+            "numerical_unknown_reasons": {
+              "not selected by bounded audit schedule": 2
+            },
+            "blocking_stages": {
+              "none": 2
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.16421235213056207,
+              "initial_worker_seconds": 59.318675111047924,
+              "initial_attempt_seconds": 85.43466863082722
+            },
+            "source_chain_units": 0,
+            "followup_chain_cases": 0,
+            "followup_chain_units": 0,
+            "search_seconds": 86.49993549799547,
+            "known_tokens": 20854,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 2,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 2,
+              "measured_verified_nonzero_count_cases": 0,
+              "source_linked_cases": 0,
+              "source_units": 0,
+              "source_linked_by_origin": {},
+              "followup_linked_cases": 0,
+              "followup_units": 0,
+              "goal_attempts": 0,
+              "goal_attained_cases": 0,
+              "gradient_goal_attempts": 0,
+              "gradient_update_conjunction_attained_cases": 0,
+              "mr_selected_cases": 0,
+              "mr_verdicts": {},
+              "mr_applicable_cases": 0,
+              "source_update_amount_observed_cases": 0,
+              "source_nonzero_parameter_update_cases": 0,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.0,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 103.87739397678524,
+            "metadata_seconds": 16.403478630818427,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 2,
+            "source_valid": 2,
+            "source_native_coverage_match": 2,
+            "followup_saved": 2,
+            "followup_valid": 2,
+            "followup_native_coverage_match": 2
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/add/summary.json",
+          "source_summary_sha256": "55e3b9fb08ec8db7b43d4c6bc0265d7518d32dee8178b45e2f1659c904c1789a"
+        },
+        {
+          "target": {
+            "name": "mm",
+            "api": "torch.mm",
+            "device": "cpu",
+            "panel": "locked-transfer"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 2,
+            "source_valid": 2,
+            "source_chain_cases": 0,
+            "planned_gradient_update_attempts": 0,
+            "planned_gradient_update_attained": 0,
+            "configuration_reuse_cases": 0,
+            "configuration_reuse_valid_cases": 0,
+            "configuration_reuse_chain_cases": 0,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 0,
+            "source_observed_verified_zero": 2,
+            "source_observed_verified_zero_valid": 2,
+            "cases_with_numerical_audit_records": 2,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 2,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_observed": 0,
+            "source_update_nonzero": 0,
+            "source_update_zero": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_nonzero": 0,
+            "source_observed_verified_nonzero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {},
+            "optimizer_mr_verdicts": {},
+            "optimizer_mr_applicable": 0,
+            "optimizer_mr_pass": 0,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 4,
+            "numerical_audit_statuses": {
+              "agreement": 2,
+              "unknown": 2
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "agreement": 1,
+                "unknown": 1
+              },
+              "followup": {
+                "agreement": 1,
+                "unknown": 1
+              }
+            },
+            "numerical_unknown_reasons": {
+              "not selected by bounded audit schedule": 2
+            },
+            "blocking_stages": {
+              "none": 2
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.2595825488679111,
+              "initial_worker_seconds": 59.741163848433644,
+              "initial_attempt_seconds": 88.1617172434926
+            },
+            "source_chain_units": 0,
+            "followup_chain_cases": 0,
+            "followup_chain_units": 0,
+            "search_seconds": 89.24418462486938,
+            "known_tokens": 24444,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 2,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 2,
+              "measured_verified_nonzero_count_cases": 0,
+              "source_linked_cases": 0,
+              "source_units": 0,
+              "source_linked_by_origin": {},
+              "followup_linked_cases": 0,
+              "followup_units": 0,
+              "goal_attempts": 0,
+              "goal_attained_cases": 0,
+              "gradient_goal_attempts": 0,
+              "gradient_update_conjunction_attained_cases": 0,
+              "mr_selected_cases": 0,
+              "mr_verdicts": {},
+              "mr_applicable_cases": 0,
+              "source_update_amount_observed_cases": 0,
+              "source_nonzero_parameter_update_cases": 0,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.0,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 106.9080300591886,
+            "metadata_seconds": 16.69492844119668,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 2,
+            "source_valid": 2,
+            "source_native_coverage_match": 2,
+            "followup_saved": 2,
+            "followup_valid": 2,
+            "followup_native_coverage_match": 2
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/mm/summary.json",
+          "source_summary_sha256": "1659fce0795efd363bcff154238555ab2300eb0b6c6be5288468d79b42afd620"
+        },
+        {
+          "target": {
+            "name": "linear",
+            "api": "torch.nn.functional.linear",
+            "device": "cpu",
+            "panel": "locked-transfer"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 3,
+            "source_valid": 0,
+            "source_chain_cases": 0,
+            "planned_gradient_update_attempts": 0,
+            "planned_gradient_update_attained": 0,
+            "configuration_reuse_cases": 0,
+            "configuration_reuse_valid_cases": 0,
+            "configuration_reuse_chain_cases": 0,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 0,
+            "source_observed_verified_zero": 1,
+            "source_observed_verified_zero_valid": 0,
+            "cases_with_numerical_audit_records": 1,
+            "cases_without_numerical_audit_records": 2,
+            "initial_worker_cost_observed_cases": 2,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_observer_unmeasured": 2,
+            "exception_reruns": 1,
+            "source_update_amount_observed": 0,
+            "source_update_nonzero": 0,
+            "source_update_zero": 0,
+            "source_update_amount_unknown": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_nonzero": 0,
+            "source_observed_verified_nonzero_valid": 0,
+            "source_chain_by_origin": {},
+            "optimizer_mr_verdicts": {},
+            "optimizer_mr_applicable": 0,
+            "optimizer_mr_pass": 0,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 1,
+            "numerical_audit_statuses": {
+              "unknown": 1
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "unknown": 1
+              }
+            },
+            "numerical_unknown_reasons": {
+              "original execution/state/path is not verified": 1
+            },
+            "blocking_stages": {
+              "backward": 1,
+              "generation": 1,
+              "unresolved_runtime": 1
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.0,
+              "initial_worker_seconds": 57.29727623285726,
+              "initial_attempt_seconds": 102.28746065916494,
+              "exception_rerun_seconds": 28.98768539307639
+            },
+            "source_chain_units": 0,
+            "followup_chain_cases": 0,
+            "followup_chain_units": 0,
+            "search_seconds": 102.4725432950072,
+            "known_tokens": 9363,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 1,
+              "unmeasured_source_cases": 2,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 1,
+              "measured_verified_nonzero_count_cases": 0,
+              "source_linked_cases": 0,
+              "source_units": 0,
+              "source_linked_by_origin": {},
+              "followup_linked_cases": 0,
+              "followup_units": 0,
+              "goal_attempts": 0,
+              "goal_attained_cases": 0,
+              "gradient_goal_attempts": 0,
+              "gradient_update_conjunction_attained_cases": 0,
+              "mr_selected_cases": 0,
+              "mr_verdicts": {},
+              "mr_applicable_cases": 0,
+              "source_update_amount_observed_cases": 0,
+              "source_nonzero_parameter_update_cases": 0,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.0,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 120.52082275180146,
+            "metadata_seconds": 17.171526298858225,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 1,
+            "source_valid": 0,
+            "source_native_coverage_match": 1,
+            "followup_missing_expected": 0,
+            "source_missing_expected": 0
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/linear/summary.json",
+          "source_summary_sha256": "fdd003d7d3cbf843fc4de854d04c5e6448c7d6f82ba970252f86dec5206c6101"
+        },
+        {
+          "target": {
+            "name": "tanh",
+            "api": "torch.tanh",
+            "device": "cpu",
+            "panel": "locked-transfer"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 2,
+            "source_valid": 2,
+            "source_chain_cases": 0,
+            "planned_gradient_update_attempts": 0,
+            "planned_gradient_update_attained": 0,
+            "configuration_reuse_cases": 0,
+            "configuration_reuse_valid_cases": 0,
+            "configuration_reuse_chain_cases": 0,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 0,
+            "source_observed_verified_zero": 2,
+            "source_observed_verified_zero_valid": 2,
+            "cases_with_numerical_audit_records": 2,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 2,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_observed": 0,
+            "source_update_nonzero": 0,
+            "source_update_zero": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_nonzero": 0,
+            "source_observed_verified_nonzero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {},
+            "optimizer_mr_verdicts": {},
+            "optimizer_mr_applicable": 0,
+            "optimizer_mr_pass": 0,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 4,
+            "numerical_audit_statuses": {
+              "agreement": 2,
+              "unknown": 2
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "agreement": 1,
+                "unknown": 1
+              },
+              "followup": {
+                "agreement": 1,
+                "unknown": 1
+              }
+            },
+            "numerical_unknown_reasons": {
+              "not selected by bounded audit schedule": 2
+            },
+            "blocking_stages": {
+              "none": 2
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.11351616121828556,
+              "initial_worker_seconds": 57.64443437894806,
+              "initial_attempt_seconds": 81.91292495001107
+            },
+            "source_chain_units": 0,
+            "followup_chain_cases": 0,
+            "followup_chain_units": 0,
+            "search_seconds": 82.89712922414765,
+            "known_tokens": 13362,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 2,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 2,
+              "measured_verified_nonzero_count_cases": 0,
+              "source_linked_cases": 0,
+              "source_units": 0,
+              "source_linked_by_origin": {},
+              "followup_linked_cases": 0,
+              "followup_units": 0,
+              "goal_attempts": 0,
+              "goal_attained_cases": 0,
+              "gradient_goal_attempts": 0,
+              "gradient_update_conjunction_attained_cases": 0,
+              "mr_selected_cases": 0,
+              "mr_verdicts": {},
+              "mr_applicable_cases": 0,
+              "source_update_amount_observed_cases": 0,
+              "source_nonzero_parameter_update_cases": 0,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.0,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 100.30513432109728,
+            "metadata_seconds": 16.49886034009978,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 2,
+            "source_valid": 2,
+            "source_native_coverage_match": 2,
+            "followup_saved": 2,
+            "followup_valid": 2,
+            "followup_native_coverage_match": 2
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/tanh/summary.json",
+          "source_summary_sha256": "d8eeeee03f982f90bc89c0bd5aaf6933e40324b23872f3f12d04bf6e1b747678"
+        },
+        {
+          "target": {
+            "name": "bmm",
+            "api": "torch.bmm",
+            "device": "cpu",
+            "panel": "locked-transfer"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 2,
+            "source_valid": 2,
+            "source_chain_cases": 0,
+            "planned_gradient_update_attempts": 0,
+            "planned_gradient_update_attained": 0,
+            "configuration_reuse_cases": 0,
+            "configuration_reuse_valid_cases": 0,
+            "configuration_reuse_chain_cases": 0,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 0,
+            "source_observed_verified_zero": 2,
+            "source_observed_verified_zero_valid": 2,
+            "cases_with_numerical_audit_records": 2,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 2,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_observed": 0,
+            "source_update_nonzero": 0,
+            "source_update_zero": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_nonzero": 0,
+            "source_observed_verified_nonzero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {},
+            "optimizer_mr_verdicts": {},
+            "optimizer_mr_applicable": 0,
+            "optimizer_mr_pass": 0,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 4,
+            "numerical_audit_statuses": {
+              "unsupported": 2,
+              "unknown": 2
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "unsupported": 1,
+                "unknown": 1
+              },
+              "followup": {
+                "unsupported": 1,
+                "unknown": 1
+              }
+            },
+            "numerical_unknown_reasons": {
+              "source effects are outside the existing execution certificate": 2,
+              "not selected by bounded audit schedule": 2
+            },
+            "blocking_stages": {
+              "none": 2
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.0,
+              "initial_worker_seconds": 60.513601595535874,
+              "initial_attempt_seconds": 88.46233549853787
+            },
+            "source_chain_units": 0,
+            "followup_chain_cases": 0,
+            "followup_chain_units": 0,
+            "search_seconds": 89.51238028798252,
+            "known_tokens": 24396,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 2,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 2,
+              "measured_verified_nonzero_count_cases": 0,
+              "source_linked_cases": 0,
+              "source_units": 0,
+              "source_linked_by_origin": {},
+              "followup_linked_cases": 0,
+              "followup_units": 0,
+              "goal_attempts": 0,
+              "goal_attained_cases": 0,
+              "gradient_goal_attempts": 0,
+              "gradient_update_conjunction_attained_cases": 0,
+              "mr_selected_cases": 0,
+              "mr_verdicts": {},
+              "mr_applicable_cases": 0,
+              "source_update_amount_observed_cases": 0,
+              "source_nonzero_parameter_update_cases": 0,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.0,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 107.94029577681795,
+            "metadata_seconds": 17.468328661751002,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 2,
+            "source_valid": 2,
+            "source_native_coverage_match": 2,
+            "followup_saved": 2,
+            "followup_valid": 2,
+            "followup_native_coverage_match": 2
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/bmm/summary.json",
+          "source_summary_sha256": "90ad31963023c401adf065523d8d54499449bfe86c2d6eeff4489394429b7042"
+        }
+      ],
+      "observed_original_row_counts": {
+        "attempts": 13,
+        "source_valid": 10,
+        "source_chain_cases": 0,
+        "planned_gradient_update_attempts": 0,
+        "planned_gradient_update_attained": 0,
+        "configuration_reuse_cases": 0,
+        "configuration_reuse_valid_cases": 0,
+        "configuration_reuse_chain_cases": 0,
+        "suspected_cases_all_oracles": 0,
+        "optimizer_mr_selected": 0,
+        "source_observed_verified_zero": 11,
+        "source_observed_verified_zero_valid": 10,
+        "cases_with_numerical_audit_records": 11,
+        "cases_without_numerical_audit_records": 2,
+        "initial_worker_cost_observed_cases": 12,
+        "automatic_replays": 0,
+        "automatic_replays_verified": 0,
+        "source_observer_unmeasured": 2,
+        "exception_reruns": 1,
+        "source_update_amount_observed": 0,
+        "source_update_nonzero": 0,
+        "source_update_zero": 0,
+        "source_update_amount_unknown": 0,
+        "source_observed_count_unknown": 0,
+        "source_observed_verified_nonzero": 0,
+        "source_observed_verified_nonzero_valid": 0,
+        "source_chain_by_origin": {},
+        "optimizer_mr_verdicts": {},
+        "optimizer_mr_applicable": 0,
+        "optimizer_mr_pass": 0,
+        "optimizer_mr_suspect": 0,
+        "numerical_audit_member_records": 21,
+        "numerical_audit_statuses": {
+          "agreement": 8,
+          "unknown": 11,
+          "unsupported": 2
+        },
+        "numerical_audit_statuses_by_member": {
+          "source": {
+            "agreement": 4,
+            "unknown": 6,
+            "unsupported": 1
+          },
+          "followup": {
+            "agreement": 4,
+            "unknown": 5,
+            "unsupported": 1
+          }
+        },
+        "numerical_unknown_reasons": {
+          "not selected by bounded audit schedule": 10,
+          "original execution/state/path is not verified": 1,
+          "source effects are outside the existing execution certificate": 2
+        },
+        "blocking_stages": {
+          "none": 10,
+          "backward": 1,
+          "generation": 1,
+          "unresolved_runtime": 1
+        },
+        "cost_components": {
+          "numerical_audit_seconds": 0.6600305363535881,
+          "initial_worker_seconds": 353.6855291160755,
+          "initial_attempt_seconds": 524.8157428381965,
+          "exception_rerun_seconds": 28.98768539307639
+        }
+      },
+      "aggregation_inputs_complete": true
+    },
+    {
+      "arm": "candidate",
+      "metrics": {
+        "attempts": 18,
+        "source_valid": 15,
+        "source_chain_cases": 15,
+        "planned_gradient_update_attempts": 10,
+        "planned_gradient_update_attained": 10,
+        "configuration_reuse_cases": 10,
+        "configuration_reuse_valid_cases": 10,
+        "configuration_reuse_chain_cases": 10,
+        "suspected_cases_all_oracles": 0,
+        "optimizer_mr_selected": 15,
+        "source_update_amount_observed": 15,
+        "source_update_nonzero": 15,
+        "source_update_zero": 0,
+        "source_observed_verified_nonzero": 15,
+        "source_observed_verified_nonzero_valid": 15,
+        "cases_with_numerical_audit_records": 17,
+        "cases_without_numerical_audit_records": 1,
+        "initial_worker_cost_observed_cases": 17,
+        "automatic_replays": 0,
+        "automatic_replays_verified": 0,
+        "source_observed_count_unknown": 2,
+        "source_observer_unmeasured": 1,
+        "source_update_amount_unknown": 0,
+        "source_observed_verified_zero": 0,
+        "source_observed_verified_zero_valid": 0,
+        "exception_reruns": 0,
+        "source_chain_by_origin": {
+          "fresh": 5,
+          "planned": 10
+        },
+        "optimizer_mr_verdicts": {
+          "pass": 15
+        },
+        "optimizer_mr_applicable": 15,
+        "optimizer_mr_pass": 15,
+        "optimizer_mr_suspect": 0,
+        "numerical_audit_member_records": 32,
+        "numerical_audit_statuses": {
+          "unsupported": 10,
+          "unknown": 22
+        },
+        "numerical_audit_statuses_by_member": {
+          "source": {
+            "unsupported": 5,
+            "unknown": 12
+          },
+          "followup": {
+            "unsupported": 5,
+            "unknown": 10
+          }
+        },
+        "numerical_unknown_reasons": {
+          "source effects are outside the existing execution certificate": 10,
+          "not selected by bounded audit schedule": 21,
+          "original execution/state/path is not verified": 1
+        },
+        "blocking_stages": {
+          "none": 15,
+          "backward": 2,
+          "generation": 1
+        },
+        "cost_components": {
+          "numerical_audit_seconds": 0.0,
+          "initial_worker_seconds": 499.9945391197689,
+          "initial_attempt_seconds": 548.2255931110121
+        },
+        "source_chain_units": 17,
+        "followup_chain_cases": 15,
+        "followup_chain_units": 12,
+        "search_seconds": 558.6827924060635,
+        "known_tokens": 29868,
+        "token_usage_complete": true,
+        "native_source_chain_cases_match_common": true,
+        "common_optimizer_metrics": {
+          "version": "optimizer-chain-1",
+          "measured_source_cases": 17,
+          "unmeasured_source_cases": 1,
+          "measured_count_unknown_cases": 2,
+          "measured_verified_zero_count_cases": 0,
+          "measured_verified_nonzero_count_cases": 15,
+          "source_linked_cases": 15,
+          "source_units": 17,
+          "source_linked_by_origin": {
+            "fresh": 5,
+            "planned": 10
+          },
+          "followup_linked_cases": 15,
+          "followup_units": 12,
+          "goal_attempts": 10,
+          "goal_attained_cases": 10,
+          "gradient_goal_attempts": 10,
+          "gradient_update_conjunction_attained_cases": 10,
+          "mr_selected_cases": 15,
+          "mr_verdicts": {
+            "pass": 15
+          },
+          "mr_applicable_cases": 15,
+          "source_update_amount_observed_cases": 15,
+          "source_nonzero_parameter_update_cases": 15,
+          "source_unchanged_parameter_cases": 0,
+          "source_units_per_second": 0.030428715956664024,
+          "limitations": {
+            "source effects lack the optimizer-specific certificate": 2
+          },
+          "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+          "coverage_denominator": null,
+          "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+        }
+      },
+      "targets": [
+        {
+          "target": {
+            "name": "sin",
+            "api": "torch.sin",
+            "device": "cpu",
+            "panel": "development"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 3,
+            "source_valid": 3,
+            "source_chain_cases": 3,
+            "planned_gradient_update_attempts": 2,
+            "planned_gradient_update_attained": 2,
+            "configuration_reuse_cases": 2,
+            "configuration_reuse_valid_cases": 2,
+            "configuration_reuse_chain_cases": 2,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 3,
+            "source_update_amount_observed": 3,
+            "source_update_nonzero": 3,
+            "source_update_zero": 0,
+            "source_observed_verified_nonzero": 3,
+            "source_observed_verified_nonzero_valid": 3,
+            "cases_with_numerical_audit_records": 3,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 3,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_zero": 0,
+            "source_observed_verified_zero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {
+              "fresh": 1,
+              "planned": 2
+            },
+            "optimizer_mr_verdicts": {
+              "pass": 3
+            },
+            "optimizer_mr_applicable": 3,
+            "optimizer_mr_pass": 3,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 6,
+            "numerical_audit_statuses": {
+              "unsupported": 2,
+              "unknown": 4
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "unsupported": 1,
+                "unknown": 2
+              },
+              "followup": {
+                "unsupported": 1,
+                "unknown": 2
+              }
+            },
+            "numerical_unknown_reasons": {
+              "source effects are outside the existing execution certificate": 2,
+              "not selected by bounded audit schedule": 4
+            },
+            "blocking_stages": {
+              "none": 3
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.0,
+              "initial_worker_seconds": 88.83003792492673,
+              "initial_attempt_seconds": 93.51005805982277
+            },
+            "source_chain_units": 3,
+            "followup_chain_cases": 3,
+            "followup_chain_units": 2,
+            "search_seconds": 95.33784679928795,
+            "known_tokens": 3113,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 3,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 0,
+              "measured_verified_nonzero_count_cases": 3,
+              "source_linked_cases": 3,
+              "source_units": 3,
+              "source_linked_by_origin": {
+                "fresh": 1,
+                "planned": 2
+              },
+              "followup_linked_cases": 3,
+              "followup_units": 2,
+              "goal_attempts": 2,
+              "goal_attained_cases": 2,
+              "gradient_goal_attempts": 2,
+              "gradient_update_conjunction_attained_cases": 2,
+              "mr_selected_cases": 3,
+              "mr_verdicts": {
+                "pass": 3
+              },
+              "mr_applicable_cases": 3,
+              "source_update_amount_observed_cases": 3,
+              "source_nonzero_parameter_update_cases": 3,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.03146704169138427,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 113.45841508824378,
+            "metadata_seconds": 17.130824512336403,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 3,
+            "source_valid": 3,
+            "source_native_coverage_match": 3,
+            "followup_saved": 3,
+            "followup_valid": 3,
+            "followup_native_coverage_match": 3
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/summary.json",
+          "source_summary_sha256": "f33845c17009907d68ba1d78dd786bda51cd19ca3d5b67feb9457c254cf18464"
+        },
+        {
+          "target": {
+            "name": "add",
+            "api": "torch.add",
+            "device": "cpu",
+            "panel": "development"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 3,
+            "source_valid": 3,
+            "source_chain_cases": 3,
+            "planned_gradient_update_attempts": 2,
+            "planned_gradient_update_attained": 2,
+            "configuration_reuse_cases": 2,
+            "configuration_reuse_valid_cases": 2,
+            "configuration_reuse_chain_cases": 2,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 3,
+            "source_update_amount_observed": 3,
+            "source_update_nonzero": 3,
+            "source_update_zero": 0,
+            "source_observed_verified_nonzero": 3,
+            "source_observed_verified_nonzero_valid": 3,
+            "cases_with_numerical_audit_records": 3,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 3,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_zero": 0,
+            "source_observed_verified_zero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {
+              "fresh": 1,
+              "planned": 2
+            },
+            "optimizer_mr_verdicts": {
+              "pass": 3
+            },
+            "optimizer_mr_applicable": 3,
+            "optimizer_mr_pass": 3,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 6,
+            "numerical_audit_statuses": {
+              "unsupported": 2,
+              "unknown": 4
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "unsupported": 1,
+                "unknown": 2
+              },
+              "followup": {
+                "unsupported": 1,
+                "unknown": 2
+              }
+            },
+            "numerical_unknown_reasons": {
+              "source effects are outside the existing execution certificate": 2,
+              "not selected by bounded audit schedule": 4
+            },
+            "blocking_stages": {
+              "none": 3
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.0,
+              "initial_worker_seconds": 89.06502497801557,
+              "initial_attempt_seconds": 94.26795453159139
+            },
+            "source_chain_units": 3,
+            "followup_chain_cases": 3,
+            "followup_chain_units": 2,
+            "search_seconds": 96.27837179088965,
+            "known_tokens": 3543,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 3,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 0,
+              "measured_verified_nonzero_count_cases": 3,
+              "source_linked_cases": 3,
+              "source_units": 3,
+              "source_linked_by_origin": {
+                "fresh": 1,
+                "planned": 2
+              },
+              "followup_linked_cases": 3,
+              "followup_units": 2,
+              "goal_attempts": 2,
+              "goal_attained_cases": 2,
+              "gradient_goal_attempts": 2,
+              "gradient_update_conjunction_attained_cases": 2,
+              "mr_selected_cases": 3,
+              "mr_verdicts": {
+                "pass": 3
+              },
+              "mr_applicable_cases": 3,
+              "source_update_amount_observed_cases": 3,
+              "source_nonzero_parameter_update_cases": 3,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.031159646182174792,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 113.92831606790423,
+            "metadata_seconds": 16.67281400691718,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 3,
+            "source_valid": 3,
+            "source_native_coverage_match": 3,
+            "followup_saved": 3,
+            "followup_valid": 3,
+            "followup_native_coverage_match": 3
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/summary.json",
+          "source_summary_sha256": "b1b791cfbb808bb2d14be88a788d88634bc2d903deb8a50deaee2ee271318c9d"
+        },
+        {
+          "target": {
+            "name": "mm",
+            "api": "torch.mm",
+            "device": "cpu",
+            "panel": "locked-transfer"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 3,
+            "source_valid": 3,
+            "source_chain_cases": 3,
+            "planned_gradient_update_attempts": 2,
+            "planned_gradient_update_attained": 2,
+            "configuration_reuse_cases": 2,
+            "configuration_reuse_valid_cases": 2,
+            "configuration_reuse_chain_cases": 2,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 3,
+            "source_update_amount_observed": 3,
+            "source_update_nonzero": 3,
+            "source_update_zero": 0,
+            "source_observed_verified_nonzero": 3,
+            "source_observed_verified_nonzero_valid": 3,
+            "cases_with_numerical_audit_records": 3,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 3,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_zero": 0,
+            "source_observed_verified_zero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {
+              "fresh": 1,
+              "planned": 2
+            },
+            "optimizer_mr_verdicts": {
+              "pass": 3
+            },
+            "optimizer_mr_applicable": 3,
+            "optimizer_mr_pass": 3,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 6,
+            "numerical_audit_statuses": {
+              "unsupported": 2,
+              "unknown": 4
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "unsupported": 1,
+                "unknown": 2
+              },
+              "followup": {
+                "unsupported": 1,
+                "unknown": 2
+              }
+            },
+            "numerical_unknown_reasons": {
+              "source effects are outside the existing execution certificate": 2,
+              "not selected by bounded audit schedule": 4
+            },
+            "blocking_stages": {
+              "none": 3
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.0,
+              "initial_worker_seconds": 88.33590987324715,
+              "initial_attempt_seconds": 94.75175021355972
+            },
+            "source_chain_units": 4,
+            "followup_chain_cases": 3,
+            "followup_chain_units": 3,
+            "search_seconds": 96.93093982012942,
+            "known_tokens": 4784,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 3,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 0,
+              "measured_verified_nonzero_count_cases": 3,
+              "source_linked_cases": 3,
+              "source_units": 4,
+              "source_linked_by_origin": {
+                "fresh": 1,
+                "planned": 2
+              },
+              "followup_linked_cases": 3,
+              "followup_units": 3,
+              "goal_attempts": 2,
+              "goal_attained_cases": 2,
+              "gradient_goal_attempts": 2,
+              "gradient_update_conjunction_attained_cases": 2,
+              "mr_selected_cases": 3,
+              "mr_verdicts": {
+                "pass": 3
+              },
+              "mr_applicable_cases": 3,
+              "source_update_amount_observed_cases": 3,
+              "source_nonzero_parameter_update_cases": 3,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.04126649352025914,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 114.93136918311939,
+            "metadata_seconds": 16.9667939087376,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 3,
+            "source_valid": 3,
+            "source_native_coverage_match": 3,
+            "followup_saved": 3,
+            "followup_valid": 3,
+            "followup_native_coverage_match": 3
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/summary.json",
+          "source_summary_sha256": "0da1af71a30dea6613be983c3323eda8cd18fb22c0b1062306ccf5759463ae6c"
+        },
+        {
+          "target": {
+            "name": "linear",
+            "api": "torch.nn.functional.linear",
+            "device": "cpu",
+            "panel": "locked-transfer"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 3,
+            "source_valid": 0,
+            "source_chain_cases": 0,
+            "planned_gradient_update_attempts": 0,
+            "planned_gradient_update_attained": 0,
+            "configuration_reuse_cases": 0,
+            "configuration_reuse_valid_cases": 0,
+            "configuration_reuse_chain_cases": 0,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 0,
+            "source_observed_count_unknown": 2,
+            "cases_with_numerical_audit_records": 2,
+            "cases_without_numerical_audit_records": 1,
+            "initial_worker_cost_observed_cases": 2,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_observer_unmeasured": 1,
+            "source_update_amount_observed": 0,
+            "source_update_nonzero": 0,
+            "source_update_zero": 0,
+            "source_update_amount_unknown": 0,
+            "source_observed_verified_zero": 0,
+            "source_observed_verified_nonzero": 0,
+            "source_observed_verified_zero_valid": 0,
+            "source_observed_verified_nonzero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {},
+            "optimizer_mr_verdicts": {},
+            "optimizer_mr_applicable": 0,
+            "optimizer_mr_pass": 0,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 2,
+            "numerical_audit_statuses": {
+              "unknown": 2
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "unknown": 2
+              }
+            },
+            "numerical_unknown_reasons": {
+              "original execution/state/path is not verified": 1,
+              "not selected by bounded audit schedule": 1
+            },
+            "blocking_stages": {
+              "backward": 2,
+              "generation": 1
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.0,
+              "initial_worker_seconds": 58.89701528288424,
+              "initial_attempt_seconds": 77.92138605425134
+            },
+            "source_chain_units": 0,
+            "followup_chain_cases": 0,
+            "followup_chain_units": 0,
+            "search_seconds": 78.25884971907362,
+            "known_tokens": 10544,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 2,
+              "unmeasured_source_cases": 1,
+              "measured_count_unknown_cases": 2,
+              "measured_verified_zero_count_cases": 0,
+              "measured_verified_nonzero_count_cases": 0,
+              "source_linked_cases": 0,
+              "source_units": 0,
+              "source_linked_by_origin": {},
+              "followup_linked_cases": 0,
+              "followup_units": 0,
+              "goal_attempts": 0,
+              "goal_attained_cases": 0,
+              "gradient_goal_attempts": 0,
+              "gradient_update_conjunction_attained_cases": 0,
+              "mr_selected_cases": 0,
+              "mr_verdicts": {},
+              "mr_applicable_cases": 0,
+              "source_update_amount_observed_cases": 0,
+              "source_nonzero_parameter_update_cases": 0,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.0,
+              "limitations": {
+                "source effects lack the optimizer-specific certificate": 2
+              },
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 95.9110560528934,
+            "metadata_seconds": 16.689735340885818,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 2,
+            "source_valid": 0,
+            "source_native_coverage_match": 2,
+            "followup_missing_expected": 0,
+            "source_missing_expected": 0
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/linear/summary.json",
+          "source_summary_sha256": "4d3aa0469f8cc72a7c874869977cd395bb0adbc6dfd47a80b35a6381d5947677"
+        },
+        {
+          "target": {
+            "name": "tanh",
+            "api": "torch.tanh",
+            "device": "cpu",
+            "panel": "locked-transfer"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 3,
+            "source_valid": 3,
+            "source_chain_cases": 3,
+            "planned_gradient_update_attempts": 2,
+            "planned_gradient_update_attained": 2,
+            "configuration_reuse_cases": 2,
+            "configuration_reuse_valid_cases": 2,
+            "configuration_reuse_chain_cases": 2,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 3,
+            "source_update_amount_observed": 3,
+            "source_update_nonzero": 3,
+            "source_update_zero": 0,
+            "source_observed_verified_nonzero": 3,
+            "source_observed_verified_nonzero_valid": 3,
+            "cases_with_numerical_audit_records": 3,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 3,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_zero": 0,
+            "source_observed_verified_zero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {
+              "fresh": 1,
+              "planned": 2
+            },
+            "optimizer_mr_verdicts": {
+              "pass": 3
+            },
+            "optimizer_mr_applicable": 3,
+            "optimizer_mr_pass": 3,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 6,
+            "numerical_audit_statuses": {
+              "unsupported": 2,
+              "unknown": 4
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "unsupported": 1,
+                "unknown": 2
+              },
+              "followup": {
+                "unsupported": 1,
+                "unknown": 2
+              }
+            },
+            "numerical_unknown_reasons": {
+              "source effects are outside the existing execution certificate": 2,
+              "not selected by bounded audit schedule": 4
+            },
+            "blocking_stages": {
+              "none": 3
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.0,
+              "initial_worker_seconds": 86.59057615650818,
+              "initial_attempt_seconds": 92.09878834616393
+            },
+            "source_chain_units": 3,
+            "followup_chain_cases": 3,
+            "followup_chain_units": 2,
+            "search_seconds": 94.00589260831475,
+            "known_tokens": 3129,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 3,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 0,
+              "measured_verified_nonzero_count_cases": 3,
+              "source_linked_cases": 3,
+              "source_units": 3,
+              "source_linked_by_origin": {
+                "fresh": 1,
+                "planned": 2
+              },
+              "followup_linked_cases": 3,
+              "followup_units": 2,
+              "goal_attempts": 2,
+              "goal_attained_cases": 2,
+              "gradient_goal_attempts": 2,
+              "gradient_update_conjunction_attained_cases": 2,
+              "mr_selected_cases": 3,
+              "mr_verdicts": {
+                "pass": 3
+              },
+              "mr_applicable_cases": 3,
+              "source_update_amount_observed_cases": 3,
+              "source_nonzero_parameter_update_cases": 3,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.03191289308320074,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 111.2556425766088,
+            "metadata_seconds": 16.312076800968498,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 3,
+            "source_valid": 3,
+            "source_native_coverage_match": 3,
+            "followup_saved": 3,
+            "followup_valid": 3,
+            "followup_native_coverage_match": 3
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/summary.json",
+          "source_summary_sha256": "8ffc332e6ca4d55f3eff0359f7e1c84dc99c0616ada620bdf1bac5923d9d4c3f"
+        },
+        {
+          "target": {
+            "name": "bmm",
+            "api": "torch.bmm",
+            "device": "cpu",
+            "panel": "locked-transfer"
+          },
+          "complete": true,
+          "metrics": {
+            "attempts": 3,
+            "source_valid": 3,
+            "source_chain_cases": 3,
+            "planned_gradient_update_attempts": 2,
+            "planned_gradient_update_attained": 2,
+            "configuration_reuse_cases": 2,
+            "configuration_reuse_valid_cases": 2,
+            "configuration_reuse_chain_cases": 2,
+            "suspected_cases_all_oracles": 0,
+            "optimizer_mr_selected": 3,
+            "source_update_amount_observed": 3,
+            "source_update_nonzero": 3,
+            "source_update_zero": 0,
+            "source_observed_verified_nonzero": 3,
+            "source_observed_verified_nonzero_valid": 3,
+            "cases_with_numerical_audit_records": 3,
+            "cases_without_numerical_audit_records": 0,
+            "initial_worker_cost_observed_cases": 3,
+            "automatic_replays": 0,
+            "automatic_replays_verified": 0,
+            "source_update_amount_unknown": 0,
+            "source_observer_unmeasured": 0,
+            "source_observed_count_unknown": 0,
+            "source_observed_verified_zero": 0,
+            "source_observed_verified_zero_valid": 0,
+            "exception_reruns": 0,
+            "source_chain_by_origin": {
+              "fresh": 1,
+              "planned": 2
+            },
+            "optimizer_mr_verdicts": {
+              "pass": 3
+            },
+            "optimizer_mr_applicable": 3,
+            "optimizer_mr_pass": 3,
+            "optimizer_mr_suspect": 0,
+            "numerical_audit_member_records": 6,
+            "numerical_audit_statuses": {
+              "unsupported": 2,
+              "unknown": 4
+            },
+            "numerical_audit_statuses_by_member": {
+              "source": {
+                "unsupported": 1,
+                "unknown": 2
+              },
+              "followup": {
+                "unsupported": 1,
+                "unknown": 2
+              }
+            },
+            "numerical_unknown_reasons": {
+              "source effects are outside the existing execution certificate": 2,
+              "not selected by bounded audit schedule": 4
+            },
+            "blocking_stages": {
+              "none": 3
+            },
+            "cost_components": {
+              "numerical_audit_seconds": 0.0,
+              "initial_worker_seconds": 88.27597490418702,
+              "initial_attempt_seconds": 95.67565590562299
+            },
+            "source_chain_units": 4,
+            "followup_chain_cases": 3,
+            "followup_chain_units": 3,
+            "search_seconds": 97.87089166836813,
+            "known_tokens": 4755,
+            "token_usage_complete": true,
+            "native_source_chain_cases_match_common": true,
+            "common_optimizer_metrics": {
+              "version": "optimizer-chain-1",
+              "measured_source_cases": 3,
+              "unmeasured_source_cases": 0,
+              "measured_count_unknown_cases": 0,
+              "measured_verified_zero_count_cases": 0,
+              "measured_verified_nonzero_count_cases": 3,
+              "source_linked_cases": 3,
+              "source_units": 4,
+              "source_linked_by_origin": {
+                "fresh": 1,
+                "planned": 2
+              },
+              "followup_linked_cases": 3,
+              "followup_units": 3,
+              "goal_attempts": 2,
+              "goal_attained_cases": 2,
+              "gradient_goal_attempts": 2,
+              "gradient_update_conjunction_attained_cases": 2,
+              "mr_selected_cases": 3,
+              "mr_verdicts": {
+                "pass": 3
+              },
+              "mr_applicable_cases": 3,
+              "source_update_amount_observed_cases": 3,
+              "source_nonzero_parameter_update_cases": 3,
+              "source_unchanged_parameter_cases": 0,
+              "source_units_per_second": 0.04087017019885597,
+              "limitations": {},
+              "goal_denominator": "all attempts requesting optimizer or gradient-representation predicates",
+              "coverage_denominator": null,
+              "scope": "bounded target-linked native updates; source and followup counted separately; no theoretical coverage fraction"
+            },
+            "wall_seconds_including_metadata": 115.22360572824255,
+            "metadata_seconds": 16.322502302005887,
+            "source_valid_matches_common": true
+          },
+          "member_counts": {
+            "source_saved": 3,
+            "source_valid": 3,
+            "source_native_coverage_match": 3,
+            "followup_saved": 3,
+            "followup_valid": 3,
+            "followup_native_coverage_match": 3
+          },
+          "source_summary": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/summary.json",
+          "source_summary_sha256": "d90448fff65f3dc2bc7fde7763a7b8f438c2f83bda93493ece5b603faa92e7a0"
+        }
+      ],
+      "observed_original_row_counts": {
+        "attempts": 18,
+        "source_valid": 15,
+        "source_chain_cases": 15,
+        "planned_gradient_update_attempts": 10,
+        "planned_gradient_update_attained": 10,
+        "configuration_reuse_cases": 10,
+        "configuration_reuse_valid_cases": 10,
+        "configuration_reuse_chain_cases": 10,
+        "suspected_cases_all_oracles": 0,
+        "optimizer_mr_selected": 15,
+        "source_update_amount_observed": 15,
+        "source_update_nonzero": 15,
+        "source_update_zero": 0,
+        "source_observed_verified_nonzero": 15,
+        "source_observed_verified_nonzero_valid": 15,
+        "cases_with_numerical_audit_records": 17,
+        "cases_without_numerical_audit_records": 1,
+        "initial_worker_cost_observed_cases": 17,
+        "automatic_replays": 0,
+        "automatic_replays_verified": 0,
+        "source_observed_count_unknown": 2,
+        "source_observer_unmeasured": 1,
+        "source_update_amount_unknown": 0,
+        "source_observed_verified_zero": 0,
+        "source_observed_verified_zero_valid": 0,
+        "exception_reruns": 0,
+        "source_chain_by_origin": {
+          "fresh": 5,
+          "planned": 10
+        },
+        "optimizer_mr_verdicts": {
+          "pass": 15
+        },
+        "optimizer_mr_applicable": 15,
+        "optimizer_mr_pass": 15,
+        "optimizer_mr_suspect": 0,
+        "numerical_audit_member_records": 32,
+        "numerical_audit_statuses": {
+          "unsupported": 10,
+          "unknown": 22
+        },
+        "numerical_audit_statuses_by_member": {
+          "source": {
+            "unsupported": 5,
+            "unknown": 12
+          },
+          "followup": {
+            "unsupported": 5,
+            "unknown": 10
+          }
+        },
+        "numerical_unknown_reasons": {
+          "source effects are outside the existing execution certificate": 10,
+          "not selected by bounded audit schedule": 21,
+          "original execution/state/path is not verified": 1
+        },
+        "blocking_stages": {
+          "none": 15,
+          "backward": 2,
+          "generation": 1
+        },
+        "cost_components": {
+          "numerical_audit_seconds": 0.0,
+          "initial_worker_seconds": 499.9945391197689,
+          "initial_attempt_seconds": 548.2255931110121
+        }
+      },
+      "aggregation_inputs_complete": true
+    }
+  ],
+  "driver_elapsed_seconds": 1360.23912560381,
+  "protocol": {
+    "version": "optimizer-gradient-chain-1",
+    "protocol_revision": 3,
+    "mode": "final",
+    "engines": {
+      "reference": {
+        "root": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/frozen-reference",
+        "engine": {
+          "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+          "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+          "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+          "mirage/artifacts/corpus.py": "2b40c45ee1eaec665e0927edb2821d4da2a2322cc589f3c292acf08d44f2ae93",
+          "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+          "mirage/artifacts/report.py": "cc3775456405104e305511462eddcc7cf8cc630f9a3c318d52ad3842de103f18",
+          "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+          "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+          "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+          "mirage/backends/pytorch.py": "15af18243fd562c33ef43e8d2362d942e523226fdddfd4d1a4f0a50ba088c8ac",
+          "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+          "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+          "mirage/contracts/capabilities.py": "e60a62f137795e697a9e76ed64c4b9da42ced436a5f26581f6765c2ea58fca69",
+          "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+          "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+          "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/generator/http_provider.py": "9d8e3e7f2274d53bb6dbbbfff70c91cc54c634f807a4e7e69fdfe8369492eab6",
+          "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+          "mirage/generator/program.py": "a7769daacb4664b5d1a7d5218afc383314cc41b130cdba4dd2d8d4f21d1379bf",
+          "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+          "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+          "mirage/generator/state_plan.py": "fb8b190880ed2f5705a31351ec1e6aeccbd64fd0491a473920dd4beb2aada3e8",
+          "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+          "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+          "mirage/inspector/oracles.py": "ba8c3023db98fc033e3f69e4a21d70d01bc34f783647db75dc9eb0d10ed3f218",
+          "mirage/inspector/stateful.py": "766b3ee6c3f055bc321daa4721d62ce96ff8ee09311c2cdd8d579c23c5316080",
+          "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/rules/catalog.py": "263fe4d4125d5689fff88f0a1a5ca9ff86e0bc0376c8cc2df050aadeb88a95be",
+          "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+          "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+          "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+          "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+          "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+          "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+          "mirage/runtime/optimizer.py": "7f764b7eed84f9b736eda9ff1d1effae24b1ac026cbe7df02c404f4947bcaead",
+          "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+          "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+          "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+          "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+          "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+          "mirage/runtime/stateful.py": "698583260a6ee0f5d3aa6be4999f86bd707846391bf69abc6fb29811c9d44f8e",
+          "mirage/runtime/worker.py": "3ee089495789d8da4579c194f24afa1faee602b8b3381717b95b3f9e8dd644be",
+          "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/sampler/policy.py": "b337b7e72ae0e63d9b68fc739d193282dde2172324f91561a5959ac89a9a04fd",
+          "mirage/workflow.py": "c1a01daf4948541f8155806a658255e899f8eb9a3656d59fad23371fbd9f1771"
+        },
+        "benchmark": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "raw_baseline": {
+          "root": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/baseline-v9/code",
+          "inventory_path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/baseline-v9/inventory.json",
+          "inventory_sha256": "165b622c591ccd521e48f02f12a5269ba882d5227ede0d401e999e0076cb0246",
+          "engine": {
+            "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+            "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+            "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+            "mirage/artifacts/corpus.py": "2b40c45ee1eaec665e0927edb2821d4da2a2322cc589f3c292acf08d44f2ae93",
+            "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+            "mirage/artifacts/report.py": "cc3775456405104e305511462eddcc7cf8cc630f9a3c318d52ad3842de103f18",
+            "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+            "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+            "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+            "mirage/backends/pytorch.py": "22e42aae970b7feb3e453f1e04c3691a0d707ad684699aac3cdbea4ac71542d9",
+            "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+            "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+            "mirage/contracts/capabilities.py": "98e1283f9522dd1e9a46999d5460d1acaf55eb39b413c1ab5865bdd57cd3b703",
+            "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+            "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+            "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/generator/http_provider.py": "9d8e3e7f2274d53bb6dbbbfff70c91cc54c634f807a4e7e69fdfe8369492eab6",
+            "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+            "mirage/generator/program.py": "a7769daacb4664b5d1a7d5218afc383314cc41b130cdba4dd2d8d4f21d1379bf",
+            "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+            "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+            "mirage/generator/state_plan.py": "fb8b190880ed2f5705a31351ec1e6aeccbd64fd0491a473920dd4beb2aada3e8",
+            "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+            "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+            "mirage/inspector/oracles.py": "ba8c3023db98fc033e3f69e4a21d70d01bc34f783647db75dc9eb0d10ed3f218",
+            "mirage/inspector/stateful.py": "753cd636d69cb8552d6351d027f6dff2bd6475aae6fa4bc947ef9617ab92b5c9",
+            "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/rules/catalog.py": "dccdd89d3f3cf41252a3205fe0b1425d8b4d2c6480ffa50b6a191a0c9d7dff34",
+            "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+            "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+            "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+            "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+            "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+            "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+            "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+            "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+            "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+            "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+            "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+            "mirage/runtime/stateful.py": "c4c539c8e03d47ce11e9828f02bf0d85fa69d5fcdd5845fc517d968ec13a8c17",
+            "mirage/runtime/worker.py": "6715e072151dc7af34f7958ce2654123150d743a1a51b7c12fdcb8b9a4691b17",
+            "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "mirage/sampler/policy.py": "b337b7e72ae0e63d9b68fc739d193282dde2172324f91561a5959ac89a9a04fd",
+            "mirage/workflow.py": "c1a01daf4948541f8155806a658255e899f8eb9a3656d59fad23371fbd9f1771"
+          },
+          "benchmark": {
+            "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+            "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+            "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+            "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+            "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+          },
+          "scope": "Verified pre-change immutable baseline referenced directly; no redundant whole-snapshot copy"
+        },
+        "shared_overlay": {
+          "src/mirage/backends/pytorch.py": "15af18243fd562c33ef43e8d2362d942e523226fdddfd4d1a4f0a50ba088c8ac",
+          "src/mirage/contracts/capabilities.py": "e60a62f137795e697a9e76ed64c4b9da42ced436a5f26581f6765c2ea58fca69",
+          "src/mirage/inspector/stateful.py": "766b3ee6c3f055bc321daa4721d62ce96ff8ee09311c2cdd8d579c23c5316080",
+          "src/mirage/runtime/stateful.py": "698583260a6ee0f5d3aa6be4999f86bd707846391bf69abc6fb29811c9d44f8e",
+          "src/mirage/runtime/optimizer.py": "7f764b7eed84f9b736eda9ff1d1effae24b1ac026cbe7df02c404f4947bcaead",
+          "src/mirage/runtime/worker.py": "3ee089495789d8da4579c194f24afa1faee602b8b3381717b95b3f9e8dd644be",
+          "src/mirage/rules/catalog.py": "263fe4d4125d5689fff88f0a1a5ca9ff86e0bc0376c8cc2df050aadeb88a95be"
+        }
+      },
+      "candidate": {
+        "root": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/frozen-new",
+        "input_snapshot": "/home/asciibase64/Aubadia/Mirage/result/validation/779954/iteration-m5LrhT/code",
+        "engine": {
+          "mirage/__init__.py": "9b3f9adea8073f9c3893e895fc3f4aaf31553403346a98c799b59796b6917cfa",
+          "mirage/__main__.py": "3450a22e8d8d9667c98b5cc3873d76e19e39568e57ae920fcd92a4e03ee93f2d",
+          "mirage/artifacts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/artifacts/bundle.py": "2daf09b97929d1acc8937527d723ca2f1fed13e74e1e9a9144d930d771e7069e",
+          "mirage/artifacts/corpus.py": "f784b899b2bdc35ed5f82f65d7a6db1aa356813a6d7cb4eaaa5b9a571aee5981",
+          "mirage/artifacts/replay.py": "f6cb90bb6cbf47534144ea04c2ddb8c4addb6dde54da719dd8593bd75af0c816",
+          "mirage/artifacts/report.py": "5e413c04d229d57b57df10b8f9a37598ea8a3b372a8c14ff07a89a8a40b2a8d9",
+          "mirage/artifacts/store.py": "366d0a4422758e8e36f00aedff81b7d935109d3caadec0d8cf68bab8f898804b",
+          "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+          "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+          "mirage/backends/pytorch.py": "15af18243fd562c33ef43e8d2362d942e523226fdddfd4d1a4f0a50ba088c8ac",
+          "mirage/cli.py": "163dd06b4eabd953606b6c300fbb65d6914b92cee13c1da731cbe8a46de5ff01",
+          "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+          "mirage/contracts/capabilities.py": "e60a62f137795e697a9e76ed64c4b9da42ced436a5f26581f6765c2ea58fca69",
+          "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+          "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+          "mirage/generator/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/generator/http_provider.py": "9d8e3e7f2274d53bb6dbbbfff70c91cc54c634f807a4e7e69fdfe8369492eab6",
+          "mirage/generator/mutation.py": "57f4a197f0db10302c830b24dcfb6cfe8696076e3606de966dac155dcffdfcfd",
+          "mirage/generator/program.py": "4f6e8a8bd2fe7133cde03f2a92b3ca3dfffbaedfa1aaa2843efd237194028ac9",
+          "mirage/generator/provider.py": "5f64dedaff71fbc7a02cdba922122880ef6e65e611cd1849d917958558e4da99",
+          "mirage/generator/repair.py": "57a46d4ab5c96cc2ad4bfcc4b47ed75be8e4039ea404988c1c741748259a02a0",
+          "mirage/generator/state_plan.py": "7e3895d1d6846a1857e0f79b0c9aa35001308e6b62d0df016a9eefdb80c4755b",
+          "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+          "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+          "mirage/inspector/oracles.py": "ba8c3023db98fc033e3f69e4a21d70d01bc34f783647db75dc9eb0d10ed3f218",
+          "mirage/inspector/stateful.py": "766b3ee6c3f055bc321daa4721d62ce96ff8ee09311c2cdd8d579c23c5316080",
+          "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/rules/catalog.py": "263fe4d4125d5689fff88f0a1a5ca9ff86e0bc0376c8cc2df050aadeb88a95be",
+          "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+          "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+          "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+          "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+          "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+          "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+          "mirage/runtime/optimizer.py": "7f764b7eed84f9b736eda9ff1d1effae24b1ac026cbe7df02c404f4947bcaead",
+          "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+          "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+          "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+          "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+          "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+          "mirage/runtime/stateful.py": "698583260a6ee0f5d3aa6be4999f86bd707846391bf69abc6fb29811c9d44f8e",
+          "mirage/runtime/worker.py": "3ee089495789d8da4579c194f24afa1faee602b8b3381717b95b3f9e8dd644be",
+          "mirage/sampler/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "mirage/sampler/policy.py": "b337b7e72ae0e63d9b68fc739d193282dde2172324f91561a5959ac89a9a04fd",
+          "mirage/workflow.py": "8dd34609d180cc7dd6406c1201f366f7ade48ca4d91ba74e945eb92ca2d8e2c5"
+        },
+        "benchmark": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "tests": {
+          "fixture_provider.py": "d92d3f78bbd3e666566bac6625a605708d20b89a0ae4609afa92e2a68c3a34cc",
+          "test_adaptive.py": "832c0a9319ea55c0a20ea232989b52f5bf0d8abc6a714adfcd0ecb4864bf3a20",
+          "test_artifacts.py": "74bb310d50b3483e4fc9ec4e78ef197749b6251bd6d33f84e0fc88e0ed161713",
+          "test_capabilities.py": "15a59505605213bd23f7f800b734e71f88b70ec3a34f126f55b991d3da8ff813",
+          "test_cli.py": "cb01bdcf7e5f2f56fbab6f7e9a16d4083650f4cb3936021bf7f9b380e00087ea",
+          "test_corpus.py": "d59081cfb484d095c41fbb6608b272c610ab65fe31101efc9d21b254cfc622e1",
+          "test_exploration.py": "60dab875bb35faed20b83250c45fd9c5c9db4607ee0eed2cd316fe2f420929ba",
+          "test_http_provider.py": "4826eb9824dcd40508579fde2ff181461d8ad08399960e96f5a7e1963c8d0cfa",
+          "test_mutation.py": "760786e965b93a62b5640cc7a40b2abda7343dc9c94bdaf4d53aa29409707d6c",
+          "test_numerical_gradients.py": "89c0304debdd19c7c307e3eefa7f882a94b2c71c7b32ea24a39b90532bfb59d4",
+          "test_operands.py": "f6a6182416654f89d883e7cf2ea6c8d572540251d7a35353676eed18b6e8dd6b",
+          "test_optimizer_inspection.py": "b4b344598d30bfd7d50f64ed41403d4f00b70f57a39d8e897cf4baee8e72c28c",
+          "test_optimizer_relation.py": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c",
+          "test_optimizer_runtime.py": "6debb3d75c7e6942b4c732e9cf885844b3e6906b5007ed71eea85845d47c44c7",
+          "test_oracle_routing.py": "02eb0626627ffadbc77c6d7af5e6104a18e1e336baf057b50f03e204119c429e",
+          "test_program.py": "fbe63eaed2937758a0d4f7cd866a8b89bd4646d4d5009bbc6a8880567bb2a3b3",
+          "test_properties.py": "e61b168c010ae20e7ea9d492455f54cb044da22d0dcdc2e6189ed6da43ed4fe3",
+          "test_pytorch_benchmark.py": "214acb76d8c4c2da8380bb0731ea99897a16baf907f20cfa7f6f1172522b44d0",
+          "test_relation_catalog.py": "d28a3018e5d81fa3a5b1e0fbbb11c3ad7370f9b8e83c02ca3aaf74b6f5cc2d7d",
+          "test_sbatch.py": "3f4f5ab9e96e4c2ae6668ccc04cd48d389df64ab58b5f6f456f29e2f5418cf56",
+          "test_state_plan.py": "60164af1a8deb9fd4134383531489a07e355dbae3b11a4444d13f1e653a16a04",
+          "test_stateful.py": "a405aaf534e8d0dbe7ddf188c9d1cdc172eb033133f0dc554e2b8aa796bba416",
+          "validate_generated.py": "74e584e60099f3b41346e60be3d6e7c6676d0446008a034f6a987ef2a16e0b98"
+        }
+      }
+    },
+    "arms": [
+      "reference",
+      "candidate"
+    ],
+    "targets": [
+      {
+        "name": "sin",
+        "api": "torch.sin",
+        "device": "cpu",
+        "panel": "development"
+      },
+      {
+        "name": "add",
+        "api": "torch.add",
+        "device": "cpu",
+        "panel": "development"
+      },
+      {
+        "name": "mm",
+        "api": "torch.mm",
+        "device": "cpu",
+        "panel": "locked-transfer"
+      },
+      {
+        "name": "linear",
+        "api": "torch.nn.functional.linear",
+        "device": "cpu",
+        "panel": "locked-transfer"
+      },
+      {
+        "name": "tanh",
+        "api": "torch.tanh",
+        "device": "cpu",
+        "panel": "locked-transfer"
+      },
+      {
+        "name": "bmm",
+        "api": "torch.bmm",
+        "device": "cpu",
+        "panel": "locked-transfer"
+      }
+    ],
+    "seed": 0,
+    "seconds_per_api": 120,
+    "paired_schedule": [
+      {
+        "index": 0,
+        "target": {
+          "name": "sin",
+          "api": "torch.sin",
+          "device": "cpu",
+          "panel": "development"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 1,
+        "target": {
+          "name": "sin",
+          "api": "torch.sin",
+          "device": "cpu",
+          "panel": "development"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 2,
+        "target": {
+          "name": "add",
+          "api": "torch.add",
+          "device": "cpu",
+          "panel": "development"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 3,
+        "target": {
+          "name": "add",
+          "api": "torch.add",
+          "device": "cpu",
+          "panel": "development"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 4,
+        "target": {
+          "name": "mm",
+          "api": "torch.mm",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 5,
+        "target": {
+          "name": "mm",
+          "api": "torch.mm",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 6,
+        "target": {
+          "name": "linear",
+          "api": "torch.nn.functional.linear",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 7,
+        "target": {
+          "name": "linear",
+          "api": "torch.nn.functional.linear",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 8,
+        "target": {
+          "name": "tanh",
+          "api": "torch.tanh",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "reference"
+      },
+      {
+        "index": 9,
+        "target": {
+          "name": "tanh",
+          "api": "torch.tanh",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 10,
+        "target": {
+          "name": "bmm",
+          "api": "torch.bmm",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "candidate"
+      },
+      {
+        "index": 11,
+        "target": {
+          "name": "bmm",
+          "api": "torch.bmm",
+          "device": "cpu",
+          "panel": "locked-transfer"
+        },
+        "arm": "reference"
+      }
+    ],
+    "expected_searches": 12,
+    "expected_steps": 13,
+    "regression_patterns": [
+      "test_optimizer_runtime.py",
+      "test_optimizer_inspection.py",
+      "test_optimizer_relation.py",
+      "test_capabilities.py",
+      "test_state_plan.py",
+      "test_program.py",
+      "test_stateful.py",
+      "test_corpus.py",
+      "test_adaptive.py",
+      "test_relation_catalog.py",
+      "test_oracle_routing.py",
+      "test_numerical_gradients.py",
+      "test_http_provider.py"
+    ],
+    "fixed_fixture_worker_timeout_seconds": 600,
+    "driver_sha256": "81dbbef4ea02b5b2e54863114a426d2ad2a1fba6e0770d72fb4cf53cc1668cf1",
+    "proposal_sha256": "d87f784a18b84e9f47a1935d0fb6393f3ff6c9efa7fca53f3964478be3941e8e",
+    "started_utc": "2026-11-15T06:21:22.867495+00:00",
+    "environment": {
+      "python": "3.14.10 (main, Oct 26 2026, 14:09:22) [Clang 23.1.3 ]",
+      "executable": "/home/asciibase64/Aubadia/Mirage/.venv/bin/python",
+      "torch": "2.15.0+cu132",
+      "cuda_runtime": "13.2",
+      "host": "25a-hgpn007",
+      "job": "779954",
+      "step": "4",
+      "cuda_visible_devices": "0",
+      "gpu": "NVIDIA H200",
+      "serving": {
+        "job_id": "779954",
+        "host": "25a-hgpn007",
+        "step_id": "0",
+        "python": "/work/asciibase64/Mirage/environments/vllm/qwen3-coder-next/bin/python",
+        "vllm": "0.33.0",
+        "torch": "2.14.0+cu132",
+        "transformers": "5.20.2",
+        "gpu_uuid": "4f5d5e10-dd6e-f302-ac73-0516eefd0f09",
+        "cuda_visible_devices": "0",
+        "model": "Qwen/Qwen3.8-27B",
+        "model_path": "/work/asciibase64/Mirage/models/Qwen3.8-27B/37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "declared_revision": "37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "config_sha256": "191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab",
+        "endpoint": "http://127.0.0.1:8000/v1",
+        "mtp_tokens": 3,
+        "prefix_caching": true,
+        "cuda_graph_policy": "vLLM automatic; verify startup logs",
+        "attention_backend": "vLLM automatic; verify startup logs",
+        "max_model_len": 16384,
+        "max_num_seqs": 2
+      },
+      "serving_evidence_sha256": "eed99807b74b2da47967062b0370d710ae62ba18221be424128afdb949f961b8",
+      "provider_settings": {
+        "MIRAGE_VLLM_MODEL": "Qwen/Qwen3.8-27B",
+        "MIRAGE_MAX_TOKENS": "4096",
+        "MIRAGE_TEMPERATURE": null,
+        "MIRAGE_TOP_P": null
+      },
+      "cache_paths": {
+        "TORCHINDUCTOR_CACHE_DIR": "/tmp/mirage-test-779954.JRh4QF/inductor",
+        "TRITON_CACHE_DIR": "/tmp/mirage-test-779954.JRh4QF/triton"
+      }
+    },
+    "fairness": {
+      "shared_files": {
+        "mirage/backends/__init__.py": "8590ec1582d3bbdb24056b915c1f5a8ad47c81ef2888c9f4801af58fb2a8206c",
+        "mirage/backends/base.py": "ad3055b246a367a841305abb69b0ce2084ba44627630f5c390310fab74e50d1c",
+        "mirage/backends/pytorch.py": "15af18243fd562c33ef43e8d2362d942e523226fdddfd4d1a4f0a50ba088c8ac",
+        "mirage/contracts/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/contracts/apis.py": "c12c5bb5fbfd2cb436288f666c46339700ad26b28443467e63b9265c44b05d1c",
+        "mirage/contracts/capabilities.py": "e60a62f137795e697a9e76ed64c4b9da42ced436a5f26581f6765c2ea58fca69",
+        "mirage/contracts/exploration.py": "663e07589e698441e8280e61af88558c2b68efab05a9c44df4525bafd36db775",
+        "mirage/contracts/programs.py": "9ae6074ea78029f153393dec47e6ff9341619f792f30df6223749a56d8090e34",
+        "mirage/inspector/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/inspector/comparison.py": "6bd27b7901a517556ac4d23f3a1447203f67b8f1cdcf0162a7fb4d1bc11d2f8f",
+        "mirage/inspector/numerical_gradients.py": "a0b81e00bd11f37e90c4427950ccfd5dfe245c37d9e9eaca45df5a35e90cf6b2",
+        "mirage/inspector/oracles.py": "ba8c3023db98fc033e3f69e4a21d70d01bc34f783647db75dc9eb0d10ed3f218",
+        "mirage/inspector/stateful.py": "766b3ee6c3f055bc321daa4721d62ce96ff8ee09311c2cdd8d579c23c5316080",
+        "mirage/rules/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/rules/catalog.py": "263fe4d4125d5689fff88f0a1a5ca9ff86e0bc0376c8cc2df050aadeb88a95be",
+        "mirage/rules/conditional.py": "aeeff14992feb55b56603e54065df82a8931e1439e08a7f6fe44d7bd6f70b4be",
+        "mirage/rules/properties.py": "f049f37ee7b1c1db303a75bb7991dfb645a57ecb093753669e7391a6ef57df63",
+        "mirage/runtime/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "mirage/runtime/api_metadata.py": "50d395c400c0c5e0aa5f5734230d330f91767cbfd5e1c31f146865d3dc9c021d",
+        "mirage/runtime/environment.py": "d560fc09538da021f8ceb199154c22f0b1ab0f79071f02c5d64cd13568afacbc",
+        "mirage/runtime/mr_actions.py": "ae179cd8491118b272e524b784f64d2578e61886e371dce5bc7f1a3e1499d135",
+        "mirage/runtime/operands.py": "b77680d469a31f117053976ee7caf1267444c5c2f3a32df7c3f32914c4904795",
+        "mirage/runtime/optimizer.py": "7f764b7eed84f9b736eda9ff1d1effae24b1ac026cbe7df02c404f4947bcaead",
+        "mirage/runtime/probes.py": "f0dc00a0b421b52aed05438db7b64a2b480f3260174060cfa7a67bba99a4f57d",
+        "mirage/runtime/process.py": "2e8f71aacdccb12fbf8e43c6b331b0cac0cae47e5427210f83d676e950aee99b",
+        "mirage/runtime/program.py": "7d51109284af07656fb82773ad46eb7b5c7a6e3050d753f55e225370da9e5357",
+        "mirage/runtime/representations.py": "6dfee5166bb8b64e4b82760a71e1c47f6212e35cdb596a8fa5fde0d6bd1f27ab",
+        "mirage/runtime/state.py": "2d7f35d92dbf6f8f8bd99d88b707c4a61ed9ea74cc1896c15ffe434c3de20f59",
+        "mirage/runtime/stateful.py": "698583260a6ee0f5d3aa6be4999f86bd707846391bf69abc6fb29811c9d44f8e",
+        "mirage/runtime/worker.py": "3ee089495789d8da4579c194f24afa1faee602b8b3381717b95b3f9e8dd644be"
+      },
+      "different_files": [
+        "mirage/generator/program.py",
+        "mirage/workflow.py",
+        "mirage/artifacts/corpus.py",
+        "mirage/artifacts/report.py",
+        "mirage/generator/state_plan.py"
+      ]
+    },
+    "reference_description": "Frozen phase009 generator/planner/workflow and sampler with identical final optimizer runtime, inspector, contracts and MR overlays; shared observations do not add phase010 goals or planner feedback to reference.",
+    "primary": "Common optimizer-chain-1 observer with original source validity/mutation obligations: target Node -> completed backward -> registered parameter post-accumulate -> consumed gradient layout -> completed native SGD. Source chain cases/unique units and planned gradient-representation+update goal attainment remain separate from followup attainment.",
+    "search_settings": {
+      "worker_timeout_seconds": 120,
+      "case_cap": 100000,
+      "path_policy": "backward",
+      "search_policy": "adaptive",
+      "generation_mode": "local",
+      "coverage_basis": "semantic",
+      "coverage_refinement": true
+    },
+    "pre_model_amendment": {
+      "id": "backward-required-before-model-1",
+      "previous_path_policy": "mixed",
+      "path_policy": "backward",
+      "scope": "Both reference and candidate development/final searches; all six locked targets are differentiable tensor APIs.",
+      "reason": "The endpoint requires attributable target backward and optimizer completion. Mixed attempt0 is forward-only and inherited parent obligations can consume the bounded campaign without exercising the endpoint.",
+      "timing": "Root must freeze this amendment in the protocol ledger before any model call; completed runtime-only validation remains separate.",
+      "unchanged": [
+        "six locked final APIs",
+        "two development APIs",
+        "seed0 per arm",
+        "120 seconds per final API",
+        "90 seconds per development API",
+        "shared runtime/inspector/MR",
+        "same provider/model options"
+      ],
+      "interpretation": "A deliberately backward-required capability-study denominator; not broad API coverage or general mixed-path throughput superiority."
+    },
+    "development_amendment": {
+      "after": "779954/development-01",
+      "before": "development-02 and all final searches",
+      "evidence": "All four 90-second searches stopped after one fresh case on whole-round reserve; candidate sin had a verified reusable chain; add lacked source-effects admission for indexed initialization/loop/computed parameter collections.",
+      "candidate_changes": [
+        "bounded library configuration candidates, with only actually selected goals consumed across proposal routes",
+        "same-parent completed-worker reserve for known configurations, unchanged factor1.5 plus5 floor10; quota first, unknown/general/repair retain whole-round reserve",
+        "generator communicates existing straight-line source-effects fragment; oracle domain unchanged"
+      ],
+      "scope": "Bundled system treatment; no isolated attribution. Final panel,seed0,time120 and symmetric oracle/runtime unchanged."
+    },
+    "numerical_audit_scope": {
+      "required_fields": [
+        "numerical_audit_statuses",
+        "numerical_unknown_reasons",
+        "numerical_audit_seconds",
+        "numerically_reported_cases"
+      ],
+      "status_denominator": "Saved source/followup member audit records, not unique programs or actual finite-difference executions. Unknown/not-selected entries remain distinguishable by reason.",
+      "tradeoff": "The existing local numerical-gradient audit admits pure/local-VJP source certificates, not the separate optimizer-update certificate. Source-owned optimizer.step may therefore make a selected audit unsupported despite complete target Node evidence.",
+      "interpretation": "Report this lost audit eligibility explicitly alongside optimizer MR applicability. Equal pre-update logical gradients plus equal post-update parameters/slots test gradient-representation consumption; they do not independently establish derivative correctness or confirm a framework defect.",
+      "policy": "Keep existing numerical oracle routing and thresholds unchanged in both arms."
+    },
+    "heldout_policy": "Only sin/add are development search targets. mm/linear/tanh/bmm locked before final; existing code/unit use does not make APIs implementation-unseen. No outcome-dependent replacement or post-final tuning.",
+    "timing": "Original detection timestamps preserved; exception reruns/automatic replay consume search wall budget. Metadata setup, controls/regression/fixtures, common raw-record scoring separate. Do not add overlapping cost components or call allocated GPU time utilization.",
+    "interpretation": "One seed descriptive feasibility study, no statistical superiority/component causality or confirmed-defect claim. Zero parameter change remains valid; nonzero update is a secondary informative subset. Layout transformation occurs after target backward, not before accumulation. Both arms require backward on this differentiable panel; results do not measure broad mixed-path API exploration.",
+    "fixed_gates": {
+      "reference": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/reference/fixed",
+        "summary_sha256": "16083d0b847fff3e1be0289c6834b4e3bc81fb3dc6d046e1b695b97efdb4e2bd",
+        "detected": 10,
+        "fixture_protocol": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/protocol.json",
+        "fixture_protocol_sha256": "7c8170a7d839fdcb1c9e0ff15f879c83fd454d8ffc33495d51975544efdfcd5b",
+        "benchmark_sha256": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "scope": "Supplied known triggers and controls, not autonomous discoveries"
+      },
+      "candidate": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/candidate/fixed",
+        "summary_sha256": "ccc05b5c6fde72388f7cf4445078a436197770a271fe2a86de6ba05049386e6d",
+        "detected": 10,
+        "fixture_protocol": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/protocol.json",
+        "fixture_protocol_sha256": "7c8170a7d839fdcb1c9e0ff15f879c83fd454d8ffc33495d51975544efdfcd5b",
+        "benchmark_sha256": {
+          "README.md": "2c0a28221e54838a815390dc786ae6b5a5d2d1ebfc75d0cbc9ce15de61d1b422",
+          "candidates.json": "03d4b006fdf4637fb744747cb1451d597db19fd9ece1a8b7b6fd4183a71e8e6b",
+          "cases.py": "9e9fc485dd1335b698bd3fe0d2c0893a9a5f71414699a11699558cf2d0dec421",
+          "evaluate.py": "744ce3d1a7fc830152f66a9dc86e1aad1b4c2244a96ff4b8d85fffa21a1b0440",
+          "run.py": "34a5fbf671dbc5f6a2f4b26c067486e75aebc8b1ed8751fd5c89f3e7e3fc6e3b"
+        },
+        "scope": "Supplied known triggers and controls, not autonomous discoveries"
+      }
+    },
+    "native_control_gates": {
+      "reference": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/controls-02/reference/controls/summary.json",
+        "sha256": "aefd1ac500aa309067888d647ee07e1fb6afe6ce817fd9475394691035eb40c9",
+        "controls_sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c"
+      },
+      "candidate": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/controls-02/candidate/controls/summary.json",
+        "sha256": "ad829b47ec1a5681e8b910d3c37b168bb6b4a0d2acca0952190bf20e038364d5",
+        "controls_sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c"
+      }
+    }
+  },
+  "control_test_hash_audit": {
+    "frozen_control_test": {
+      "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/frozen-new/tests/test_optimizer_relation.py",
+      "sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c"
+    },
+    "reference_engine_mismatches": [],
+    "reference_control": {
+      "summary": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/controls-02/reference/controls/summary.json",
+        "sha256": "aefd1ac500aa309067888d647ee07e1fb6afe6ce817fd9475394691035eb40c9",
+        "controls_sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c"
+      },
+      "reported_test_sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c",
+      "tests_run": 13
+    },
+    "candidate_engine_mismatches": [],
+    "candidate_control": {
+      "summary": {
+        "path": "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/controls-02/candidate/controls/summary.json",
+        "sha256": "ad829b47ec1a5681e8b910d3c37b168bb6b4a0d2acca0952190bf20e038364d5",
+        "controls_sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c"
+      },
+      "reported_test_sha256": "909d76d8fe49ce174bd985bd95275b1353b94a6e8b41d1d2bfce99f00a2a845c",
+      "tests_run": 13
+    }
+  },
+  "definitions": {
+    "source_valid": "Original completed execution/API/inspection validity and mutation obligations.",
+    "planned_conjunction": "A state_plan attempt requesting gradient representation and matching same-parameter completed-update companion; attainment additionally requires original source-valid chain and all predicates reached.",
+    "observed_count_partition": "Unmeasured is not zero. Verified-zero/nonzero and unknown count partition all measured observer records; *_valid reports the valid subset.",
+    "numerical_audit": "Auxiliary member-record statuses, including not-selected unknown; neither an independent defect confirmation nor number of finite-difference evaluations.",
+    "costs": "Recorded overlapping components; no sum interpreted as wall time. Replay is charged to search; original finished timestamp remains detection/initial attempt time.",
+    "raw_hashes": "Tensor hashes copied exactly from common-scorer input manifests; tensor files are not read or reverified by this stdlib reporter.",
+    "limitations": [
+      "one seed0 per arm",
+      "differentiable backward-required panel",
+      "post-backward consumed-gradient layout only",
+      "no theoretical denominator",
+      "no confirmed defects inferred"
+    ]
+  },
+  "provenance": {
+    "reporter_sha256": "76fea3b1c481a32e7f1c2ba4a22b60ecc4145e199ddf25ecb3479e9a6a1a8347",
+    "read_json_sha256": {
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/protocol.json": "fe870ce4fec05925b9012d1bbfa70a4fbd2e66101fe7a59d1531be09bece28ff",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/summary.json": "1f406e99e217cb105525d671deac43e3b875e091b40038cfae235baf10098f1a",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/driver-status.json": "2fcb8aee680ea982817d230a7493354694da7df483b18b1804c5e51fd378cea4",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/common-optimizer/summary.json": "3cd1a779c37563bb2d72809b4e5c7d9d5bff417fdbc732d9deb0a774ca10b787",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/controls-02/reference/controls/summary.json": "aefd1ac500aa309067888d647ee07e1fb6afe6ce817fd9475394691035eb40c9",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/reference/fixed/summary.json": "16083d0b847fff3e1be0289c6834b4e3bc81fb3dc6d046e1b695b97efdb4e2bd",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/protocol.json": "7c8170a7d839fdcb1c9e0ff15f879c83fd454d8ffc33495d51975544efdfcd5b",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/controls-02/candidate/controls/summary.json": "ad829b47ec1a5681e8b910d3c37b168bb6b4a0d2acca0952190bf20e038364d5",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/fixtures-03/candidate/fixed/summary.json": "ccc05b5c6fde72388f7cf4445078a436197770a271fe2a86de6ba05049386e6d",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/common-optimizer/reference/input-sha256.json": "7a289aebb02e662d3738b4a46bf95e5895280435f97812cd8f53dbcadbe580d4",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/sin/summary.json": "f7bed420f210115fa02df11396fe58765ad64573907e13e2501a0b2bc81ce675",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/sin/driver-metrics.json": "08cdb904bbba672e9e077d820fb3e7f19cd5683e9ebb66b9f1194f5ec62fca0f",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/add/summary.json": "55e3b9fb08ec8db7b43d4c6bc0265d7518d32dee8178b45e2f1659c904c1789a",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/add/driver-metrics.json": "44eef6e40a55ba6938debe21a928050b01503fe9f2ac8629528ebc46e38ea39d",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/mm/summary.json": "1659fce0795efd363bcff154238555ab2300eb0b6c6be5288468d79b42afd620",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/mm/driver-metrics.json": "2f66c09fdd4eed26a55c479aad38c9759e3f96999044c4bc7b5668047edd1a0e",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/linear/summary.json": "fdd003d7d3cbf843fc4de854d04c5e6448c7d6f82ba970252f86dec5206c6101",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/linear/driver-metrics.json": "cf917b7a792ab54fffe54e9225e4867a640527d63e22c04b4403f19441b8971c",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/tanh/summary.json": "d8eeeee03f982f90bc89c0bd5aaf6933e40324b23872f3f12d04bf6e1b747678",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/tanh/driver-metrics.json": "4c19f159c71f33dfe6d3eec0c4b4be354fb65a2b671a495cbfe9889c226fa675",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/bmm/summary.json": "90ad31963023c401adf065523d8d54499449bfe86c2d6eeff4489394429b7042",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/bmm/driver-metrics.json": "f82561e0d0881d35ad23d7c2a568738ca3f2148fec618f5497d4f1a462675ed5",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/common-optimizer/candidate/input-sha256.json": "c74eec0c345ba52995c32018e3af164d443ecf9e97f0668218e9d4634d402cfa",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/summary.json": "f33845c17009907d68ba1d78dd786bda51cd19ca3d5b67feb9457c254cf18464",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/driver-metrics.json": "8df3532405584a65d59779c50a8b007b54ed30d7dbe7133b4e31d9d3cda5e703",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/summary.json": "b1b791cfbb808bb2d14be88a788d88634bc2d903deb8a50deaee2ee271318c9d",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/driver-metrics.json": "4bcf31db940420064cff92f90bde0da40f56e8694461f8f5ba02b97fdb012846",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/summary.json": "0da1af71a30dea6613be983c3323eda8cd18fb22c0b1062306ccf5759463ae6c",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/driver-metrics.json": "71f42c8dbd1194f1d6cb3aa042813fc55f9f756631531c00a6213be9ea7d6113",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/linear/summary.json": "4d3aa0469f8cc72a7c874869977cd395bb0adbc6dfd47a80b35a6381d5947677",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/linear/driver-metrics.json": "b700223e31c6fc0669d428b186e4b39fef68dbc4ca6de6ddbc6f23298706ec9d",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/summary.json": "8ffc332e6ca4d55f3eff0359f7e1c84dc99c0616ada620bdf1bac5923d9d4c3f",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/driver-metrics.json": "17813a55296ed36b4b122b0bf2f1368d63154eafcaab56420acdc71f946893e3",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/summary.json": "d90448fff65f3dc2bc7fde7763a7b8f438c2f83bda93493ece5b603faa92e7a0",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/driver-metrics.json": "0f202c7e24ea1bdc02be1bece6391435551a748a1b5ad5ca8f6db7c9e739ec07"
+    },
+    "raw_hashes_recorded_by_common_scorer": {
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/sin/summary.json": "f7bed420f210115fa02df11396fe58765ad64573907e13e2501a0b2bc81ce675",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/sin/attempt-0000/execution/source.pt": "834b91b550606515b0d2c27938293cd566cfa8a37e93e7306f309484866dfaa4",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/sin/attempt-0000/execution/followup.pt": "b09451ff31d9e13177db135ba39996fa665fcdfe1c0f67910ae209553eddd1e5",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/sin/attempt-0001/execution/source.pt": "340afb425a75cc6cc5d0739a418ff168b400fd26d5a85c78a7b2626b2471e9ac",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/sin/attempt-0001/execution/followup.pt": "4eb40cd903a234c61b59cd81b1eb180efe24ae92dfc873837deb54775a04cd16",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/add/summary.json": "55e3b9fb08ec8db7b43d4c6bc0265d7518d32dee8178b45e2f1659c904c1789a",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/add/attempt-0000/execution/source.pt": "4d14fcaef74a8b41b33ce73971935952ce27658f8230331cabe4de1a0f82e39b",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/add/attempt-0000/execution/followup.pt": "51f96ed1405dde88340a6084e3a6e180ca3504a1cbfbc471f900e67c55b8164e",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/add/attempt-0001/execution/source.pt": "3093192e65cb9ee2b02c354ad7782e67fa15890838247bcf14e123484e45387a",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/add/attempt-0001/execution/followup.pt": "f401d5b6d1ee7a422a286a07fc1ca18581ab358700f3d1847a85cb4691fbfc06",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/mm/summary.json": "1659fce0795efd363bcff154238555ab2300eb0b6c6be5288468d79b42afd620",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/mm/attempt-0000/execution/source.pt": "ef353e89d9ff3d6b08709347d2e62d7b963be4dd5ce8ec6e7d794d6f0799c902",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/mm/attempt-0000/execution/followup.pt": "6ebeb8718a171d83902ed77466af44ac0e0829b00428fce1461fda1365040593",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/mm/attempt-0001/execution/source.pt": "e3b1307d766c34c6dc264e782a698d2ac5d9ce1dee6ee294e46132378f272f68",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/mm/attempt-0001/execution/followup.pt": "ab65cab4026a57756e3ac62643ffdbb5eef05e8836a2ad4a672aa727e04c1a37",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/linear/summary.json": "fdd003d7d3cbf843fc4de854d04c5e6448c7d6f82ba970252f86dec5206c6101",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/linear/attempt-0000/execution/source.pt": "db7d0d442c1e5bf4824f06b7434783ec88af7625973bf7736aa0164f34c1ed4a",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/tanh/summary.json": "d8eeeee03f982f90bc89c0bd5aaf6933e40324b23872f3f12d04bf6e1b747678",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/tanh/attempt-0000/execution/source.pt": "c5dd0a35ee851f139ffb89898c5f78d8139cf8dbb6e94dc24f3b16994d1968e0",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/tanh/attempt-0000/execution/followup.pt": "3507a3afee9a4f70d366a33f986a7fcd402d031c981de0655260d8dc597d5c81",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/tanh/attempt-0001/execution/source.pt": "70ec456c83122c512821ed9f4b652bb01e3afcfa131ad9cc5470dd2b9d8d6e93",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/tanh/attempt-0001/execution/followup.pt": "0b469421d01f991065da1487ee54d1947e9f2ac21a232eed405d13a6ae574fae",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/bmm/summary.json": "90ad31963023c401adf065523d8d54499449bfe86c2d6eeff4489394429b7042",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/bmm/attempt-0000/execution/source.pt": "467b0535b1fee6e0057dc7809b0ad9a1adcc41c8530d5e10f0fd2a0c171a864c",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/bmm/attempt-0000/execution/followup.pt": "714cec859a4ee46a743f46bec55b8ee8b6d8ae5592ef7d132f94098d4d663d47",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/bmm/attempt-0001/execution/source.pt": "6d8c53c76e27caf60846c4522fbb0ed379f377a6c0814b8cd98447c83c5f665b",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/reference/bmm/attempt-0001/execution/followup.pt": "af94b199c2df4331243781af4030cdd7324ec1852116637deb9da163a2783fd5",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/summary.json": "f33845c17009907d68ba1d78dd786bda51cd19ca3d5b67feb9457c254cf18464",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/attempt-0000/execution/source.pt": "05ed369b0637fd32653a9142983e9665963a95cb052c7192431ad399c5dfaac1",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/attempt-0000/execution/followup.pt": "e09f7e60cd47ef23da4c4f19174deccdefc7a817a22389547d1ab6d5fe14c213",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/attempt-0001/execution/source.pt": "b9e6a5499d41715e6baaf30b0dc564e8997c105a2f814c8fa2e0512b7eb3bbeb",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/attempt-0001/execution/followup.pt": "fb4dcc016d8c2ffd77c8f661ed825375668a3a32e8892c34a4a96b5c032b1801",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/attempt-0002/execution/source.pt": "f03179c85da4c477e6d3e4ddda3b6804cb88240f7b27261b0e2f2f9907834f37",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/sin/attempt-0002/execution/followup.pt": "c32ee7802726be379b15e9cf837476305c9431f72a6cd8797787ee49562bcc5c",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/summary.json": "b1b791cfbb808bb2d14be88a788d88634bc2d903deb8a50deaee2ee271318c9d",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/attempt-0000/execution/source.pt": "89426e7978eaf1801c0c453055baadd5deb8bcc2e2029e827087ea236f82fa37",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/attempt-0000/execution/followup.pt": "7ef583ac55c1f0e8828c4026897a0210fcd5f06cb6d47adc070e5b87b2b997cb",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/attempt-0001/execution/source.pt": "b640952b29e2872f787692e971bc2d8053bbea3c73246840ffebcb773f52f1b5",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/attempt-0001/execution/followup.pt": "45f73b416136e96d791a9fc9c328e1a11d8ef0d262a5b74b3e64f4f9253a26b1",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/attempt-0002/execution/source.pt": "d9aece9b893f47f49261e88e9b1107af8051bfc35fe1bd1cb398f495c5c9b822",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/add/attempt-0002/execution/followup.pt": "dc9886e4ee1c1a28e1ec21302b124b86f3661ed67709c1dae0585986b0372e77",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/summary.json": "0da1af71a30dea6613be983c3323eda8cd18fb22c0b1062306ccf5759463ae6c",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/attempt-0000/execution/source.pt": "47036ff26e82ab68c0ae2e3aa4061b5f0c4d43d724a52cc312edf5457c26bdd1",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/attempt-0000/execution/followup.pt": "799f7311630ba14c60ea172dc90cf12f4c28b6030820b54e6200a463078c8397",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/attempt-0001/execution/source.pt": "6d5b8e6c0320559f54ce99175c7ea60f259310fc598477a997e52db4198b2515",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/attempt-0001/execution/followup.pt": "865230a556407847cac05e193065b30e821e0adb22872902d1fe3ef6599653cb",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/attempt-0002/execution/source.pt": "50ce7ec43dce91f0e53f629680f95ea361bf459044fd820fe291a265c728bd23",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/mm/attempt-0002/execution/followup.pt": "4f86f2c4cf271d02ca193f0531021720d00108658a18fe6da2d9356e8049e0a4",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/linear/summary.json": "4d3aa0469f8cc72a7c874869977cd395bb0adbc6dfd47a80b35a6381d5947677",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/linear/attempt-0000/execution/source.pt": "66d5b2e689c465b023fd25a3de350a25d5a8a64821b4b85aaaa43fbbd88ffe8f",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/linear/attempt-0002/execution/source.pt": "a5ec6a31a2c98f1b3f460e23f562c25c5cfbed9b5f58425ad75c29456de84e6b",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/summary.json": "8ffc332e6ca4d55f3eff0359f7e1c84dc99c0616ada620bdf1bac5923d9d4c3f",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/attempt-0000/execution/source.pt": "1f993c4288ce73edd43c4d4b39ab3f0a56832858d00036ff00520f9d1204c7f8",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/attempt-0000/execution/followup.pt": "fc62a04a95cec3dfa6d614ed9003d7afb60520089065f7aa86d27d42139a0211",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/attempt-0001/execution/source.pt": "b15dfbd5ace5d8832f560b044bac62365d6e695f44c00d2143fd835f3ff53c6b",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/attempt-0001/execution/followup.pt": "bf1c97dce8c5db770843722ed8976f93c97e121d3ba10a2e4c0d622c283a9b75",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/attempt-0002/execution/source.pt": "f4bb3d974f0a36034aaed7c34a59ed6ab3f520c2b63432f3bac91474ddabb197",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/tanh/attempt-0002/execution/followup.pt": "f2ac6dd203af3ead279cfc30379bf5cb98a44b41c4b094361bfbe1c3f671228d",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/summary.json": "d90448fff65f3dc2bc7fde7763a7b8f438c2f83bda93493ece5b603faa92e7a0",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/attempt-0000/execution/source.pt": "48b7f45d6add11a2cd92e9fcc5920f6835acf8b641a903475178b6baf4f6f99e",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/attempt-0000/execution/followup.pt": "b79c552328ae61ed07eb3b911f2cfbf7eb27817e110cfafe44fb0733c20a7bcb",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/attempt-0001/execution/source.pt": "b32aa4ec7851d6b13df4e60f2c7d2dfef773f3b4e9bb6f659deaf838a27feefe",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/attempt-0001/execution/followup.pt": "45e46f418e245f0506eace1af99d47f13b289998aea27e1380a8d215bc2e2caf",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/attempt-0002/execution/source.pt": "7a2ac70b0230e9592efab6b64bcaa99a43f51db53d2a934c1f14394a9d953311",
+      "/home/asciibase64/Aubadia/Mirage/result/optimizer-gradient-chain/779954/final-seed0/candidate/bmm/attempt-0002/execution/followup.pt": "526017c0d2bda76c407baf9d7704db02042d9b8286ae277ddd92fa6f01eacc3a"
+    },
+    "missing_files": [],
+    "parse_errors": []
+  }
+}

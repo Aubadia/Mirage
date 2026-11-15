@@ -1,0 +1,203 @@
+{
+  "project": {
+    "title": "Mirage general state exploration",
+    "status": "completed_this_iteration",
+    "question": "Why did explicit joint goals reduce useful testing yield, and which general evidence-guided changes recover it without erasing state-space novelty?",
+    "outcome": "General fixes and diagnosis completed; frozen final comparison is mixed and does not establish improved planned memory/training exploration. Separate local-VJP effect-certificate fix restores automatic flag on the manually selected missed case."
+  },
+  "phase": "complete",
+  "hypotheses": [
+    {
+      "id": "H1",
+      "status": "mixed_training_supply_without_planned_memory_gain",
+      "claim": "Family allocation before planning prevents tensor relation proposals from crowding out training-state proposals."
+    },
+    {
+      "id": "H2",
+      "status": "specific_controls_and_duplicate_preexecution_stopping_supported",
+      "claim": "Static operand hints and bounded predicate feedback reduce wrong-binding and repeated no-progress repairs without becoming runtime proof."
+    },
+    {
+      "id": "H3",
+      "status": "reviewed_subset_compatibility_supported",
+      "claim": "Binding/effect-aware certificates safely admit pure initialization while rejecting formerly accepted metadata and write effects."
+    },
+    {
+      "id": "H4",
+      "status": "inconclusive_no_isolated_benefit",
+      "claim": "Family-level feedback transfers measured validity/cost across exact predicate identities and preserves explicit candidate denominators."
+    },
+    {
+      "id": "H5",
+      "status": "supported_for_reviewed_subset",
+      "claim": "Separate local-VJP source-effect certification admits native literalTrue gradient setup without weakening MR source certificate; correct multi-API controls and manually selected miss replay passed."
+    }
+  ],
+  "experiments": {
+    "final_seed": 0,
+    "final_seeds_per_treatment": 1,
+    "trajectory": [
+      {
+        "name": "regression-01",
+        "status": "completed_with_one_schema_test_failure",
+        "job": 778971,
+        "protocol_commit": "113b4ca",
+        "path": "result/general-state-research/778971/regression-01",
+        "tests": 263,
+        "passed": 262,
+        "seconds": 321.7354
+      },
+      {
+        "name": "targeted-revalidation-02",
+        "status": "passed",
+        "tests": 74,
+        "path": "result/general-state-research/778971/iteration-JPhpOq"
+      },
+      {
+        "name": "fixtures-01",
+        "status": "failed_soundness_subset_compatibility",
+        "observed_reference_detected": 4,
+        "denominator": 10
+      },
+      {
+        "name": "certificate-revalidation-03",
+        "status": "passed",
+        "tests": 134,
+        "path": "result/general-state-research/778971/iteration-xxs5ov",
+        "elapsed_seconds": 26
+      },
+      {
+        "name": "fixtures-02",
+        "status": "passed",
+        "reference_detected": 10,
+        "candidate_detected": 10,
+        "denominator_per_arm": 10,
+        "elapsed_seconds": 111.1275
+      },
+      {
+        "name": "controls-02",
+        "status": "passed",
+        "cases_per_arm": 4,
+        "elapsed_seconds": 36.06
+      },
+      {
+        "name": "certificate-audit-01",
+        "status": "completed",
+        "saved_programs": 445,
+        "note": "All10original-valid certificate removals are missing torch.long dtype alias; generic correction scheduled before formal."
+      },
+      {
+        "name": "development-01",
+        "status": "completed",
+        "seed": 0,
+        "seconds_per_api": 90,
+        "searches": 8,
+        "frozen_snapshot": "result/general-state-research/778971/fixtures-02/frozen-new",
+        "actual_seconds": 558.18,
+        "reference_valid": 22,
+        "candidate_valid": 18,
+        "reference_mr": 17,
+        "candidate_mr": 12
+      },
+      {
+        "name": "encoding-ablation-02",
+        "status": "passed_adopt_hint",
+        "calls": 15,
+        "differential_recoveries": 3,
+        "failure_denominator": 4,
+        "control_regressions": 0,
+        "controls": 3,
+        "schema_smoke": true,
+        "seconds": 21.03
+      },
+      {
+        "name": "protocol-repair-revalidation",
+        "status": "passed",
+        "tests": 114,
+        "path": "result/general-state-research/778971/iteration-pAdiNY",
+        "elapsed_seconds": 200
+      },
+      {
+        "name": "fixtures-03",
+        "status": "passed",
+        "reference_detected": 10,
+        "candidate_detected": 10,
+        "denominator_per_arm": 10,
+        "elapsed_seconds": 107.5124
+      },
+      {
+        "name": "development-02",
+        "status": "completed",
+        "seed": 0,
+        "seconds_per_api": 90,
+        "searches": 8,
+        "frozen_snapshot": "result/general-state-research/778971/fixtures-03/frozen-new",
+        "actual_seconds": 567.1311,
+        "reference_valid": 19,
+        "candidate_valid": 25,
+        "reference_mr": 12,
+        "candidate_mr": 18,
+        "reference_qualified_joint": 3,
+        "candidate_qualified_joint": 26
+      },
+      {
+        "name": "final-01",
+        "status": "completed",
+        "seed": 0,
+        "seconds_per_api": 120,
+        "searches": 32,
+        "frozen_snapshot": "result/general-state-research/778971/fixtures-03/frozen-new",
+        "elapsed_seconds": 3233.5181,
+        "steps": 35,
+        "all_steps_zero": true,
+        "reference_valid": 110,
+        "candidate_valid": 105,
+        "reference_mr": 70,
+        "candidate_mr": 78,
+        "reference_qualified_joint": 17,
+        "candidate_qualified_joint": 54,
+        "suspected_cases_both": 0
+      },
+      {
+        "name": "final-slogdet-manual-review",
+        "status": "known_local_mechanism_corroborated",
+        "saved_evidence_unchanged": true,
+        "autonomous_discovery": false
+      },
+      {
+        "name": "postformal-validation-01",
+        "status": "129_pass_1_stale_prompt_assertion_failure",
+        "tests": 130,
+        "production_failure": false
+      },
+      {
+        "name": "postformal-validation-02",
+        "status": "passed",
+        "tests": 130,
+        "fixed_detected": 10,
+        "fixed_total": 10,
+        "replay_verdict": "suspected_failure",
+        "replay_mr_verdict": "inapplicable",
+        "new_searches": 0,
+        "elapsed_seconds": 90.3235
+      }
+    ]
+  },
+  "owned_jobs": [],
+  "continuity": {
+    "interval_seconds": 1200,
+    "mode": "local durable heartbeat during active task; no chat wakeup capability",
+    "stop_file": "result/general-state-research/heartbeat.stop"
+  },
+  "workspace": {
+    "findings": "docs/research-009/findings.md",
+    "log": "docs/research-009/research-log.md",
+    "literature": "docs/research-009/literature",
+    "artifacts": "result/general-state-research"
+  },
+  "next_action": "Review report.md. Future priority: attributable gradient representation -> real optimizer update -> aligned parameter/slot MR; formal one-seed data must not be repurposed as untouched heldout data.",
+  "completed_owned_jobs": [
+    778971
+  ],
+  "cleanup": true
+}

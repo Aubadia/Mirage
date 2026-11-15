@@ -1,0 +1,23 @@
+{
+  "checks": {
+    "python_sources_parse": true,
+    "historical_evidence_hashes_preserved": 73,
+    "protected_files_unchanged": 146,
+    "concurrent_out_of_scope_document_changes": [
+      "docs/roadmap-011-exploration-oracle.md",
+      "docs/research-011/findings.md",
+      "docs/research-011/report.md",
+      "docs/research-011/research-state.yaml"
+    ],
+    "git_index_unchanged": true,
+    "all_citations_resolved": 9,
+    "all_cross_references_resolved": 5,
+    "IEEE_conference_class_without_geometry_override": true,
+    "no_placeholder_citations_or_template_text": true,
+    "metric_denominators_and_missingness": true,
+    "all_core_table_counts_match_dataset": true,
+    "markdown_code_indentation_preserved": true,
+    "all_report_figures_have_pdf_png": true
+  },
+  "scope": "Static/document checks only. Historical runtime checks were not rerun."
+}
