@@ -86,9 +86,24 @@ class IsolatedProvider:
         self.timeout = timeout
         self.calls = 0
         self.processes = []
+        self.request_timings = []
         self.cancel = cancel
 
     def generate(self, request: Request, *, deadline: float | None) -> Response:
+        import json
+        import time
+        started, before = time.time(), self.calls
+        try:
+            return self._generate(request, deadline=deadline)
+        finally:
+            finished = time.time()
+            path = self.directory / f"provider-{self.calls:03d}" / "provider-timing.json"
+            timing = (json.loads(path.read_text()) if self.calls > before and path.exists() else
+                      {'started_epoch': started, 'finished_epoch': finished,
+                       'elapsed_seconds': finished - started, 'basis': 'provider_process_upper_bound'})
+            self.request_timings.append(timing)
+
+    def _generate(self, request: Request, *, deadline: float | None) -> Response:
         from dataclasses import asdict
         import json
         import time

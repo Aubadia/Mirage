@@ -715,9 +715,59 @@ def replay_property(path, *, timeout, allow_environment_change=False, cancel=Non
 
 
 
-def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="backward", coverage_refinement=True,
+def run_stateful(options, apis, **kwargs):
+    """Run independent per-API model budgets, or the explicit legacy wall budget."""
+    if not options.generation_pipeline:
+        return _run_stateful(options, apis, **kwargs)
+    from dataclasses import replace
+    from mirage.runtime.pipeline import ExecutionPipeline
+    from mirage.artifacts.report import summarize_search
+    if not kwargs.get('representation_traversal', False):
+        raise ValueError('Generation pipeline requires representation traversal')
+    root = Path(options.output).resolve()
+    if len(apis) > 1:
+        root.mkdir(parents=True, exist_ok=False)
+    reports = []
+    for api_index, api in enumerate(apis):
+        directory = root if len(apis) == 1 else root / f'api-{api_index:03d}'
+        pipeline = ExecutionPipeline(directory, api, options.time_limit, options.worker_timeout,
+                                     replay_failures=options.replay_failures)
+        completed = False
+        old_handler = None
+        if threading.current_thread() is threading.main_thread():
+            old_handler = signal.getsignal(signal.SIGTERM)
+            def terminate(signum, frame):
+                raise KeyboardInterrupt('Pipeline termination requested; durable work can be resumed')
+            signal.signal(signal.SIGTERM, terminate)
+        try:
+            report = _run_stateful(replace(options, output=str(directory)), (api,), _pipeline=pipeline, **kwargs)
+            reports.append(report)
+            completed = True
+            if report.get('stop_reason') == 'provider_cancellation_unconfirmed':
+                break
+        finally:
+            try:
+                pipeline.close(interrupted=not completed)
+            finally:
+                if old_handler is not None:
+                    signal.signal(signal.SIGTERM, old_handler)
+    if len(apis) == 1:
+        return reports[0]
+    result = {'strategy': 'stateful', 'per_api': reports,
+              'records': [r for report in reports for r in report['records']],
+              'stop_reason': 'llm_time_limit' if len(reports) == len(apis) and all(r.get('pipeline_complete') for r in reports) else 'pipeline_incomplete',
+              'provider_calls': sum(r['provider_calls'] for r in reports),
+              'elapsed_seconds': sum(r['elapsed_seconds'] for r in reports),
+              'pipeline_complete': len(reports) == len(apis) and all(r.get('pipeline_complete') for r in reports),
+              'expected_apis': list(apis), 'completed_api_runs': len(reports)}
+    result['search_metrics'] = summarize_search(result)
+    write_json(root / 'summary.json', result)
+    return result
+
+
+def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="backward", coverage_refinement=True,
                  search_policy="adaptive", generation_mode="local", coverage_basis="semantic",
-                 representation_traversal=False, oracle_improvements=False):
+                 representation_traversal=False, oracle_improvements=False, _pipeline=None):
     """Corpus-guided local generation, runtime mutation and conditional MR assessment.
 
     API/issue benchmark data never enters this path. Every candidate and repair
@@ -738,7 +788,7 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
     from mirage.backends.pytorch import PyTorchBackend
     explain_certificate = PyTorchBackend().explain_certificate
     from mirage.sampler.representations import RepresentationTraversal, program_goal_catalog
-    traversal = RepresentationTraversal() if representation_traversal else None
+    traversal = (_pipeline.traversal if _pipeline else RepresentationTraversal()) if representation_traversal else None
     audit_seen_units = set()
     def planning_catalog(entry, explicit):
         catalog = goal_catalog(entry, explicit)
@@ -754,18 +804,22 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
     snapshot_engine(root / 'engine')
     write_json(root / 'engine-sha256.json', inventory(root / 'engine'))
     metadata, rows = {}, []
-    provider = IsolatedProvider(options.provider, root, options.worker_timeout)
+    provider = IsolatedProvider(options.provider, root, options.worker_timeout,
+                                cancel=_pipeline.cancel if _pipeline else None)
     metadata_started = time.monotonic()
     for index, api in enumerate(apis):
         directory = root / f'api-{index}'
-        process = run_worker({'mode':'api_metadata', 'api':api, 'contract':'stateful-1',
+        process = (_pipeline.worker if _pipeline else run_worker)({'mode':'api_metadata', 'api':api, 'contract':'stateful-1',
                               'engine':str(root/'engine')}, directory, options.worker_timeout)
         if process.outcome != 'completed':
             result = {'strategy':'stateful', 'records':[], 'stop_reason':'metadata_failed', 'error':process.error}
             write_json(root/'summary.json', result); return result
         metadata[api] = json.loads((directory/'summary.json').read_text())
     metadata_seconds = time.monotonic()-metadata_started
-    started = time.monotonic(); deadline = started+options.time_limit
+    started = time.monotonic()
+    # In pipeline mode only model calls spend the per-API budget. Each test
+    # retains its own timeout; allocation interruption is handled by the owner.
+    deadline = started + (1e9 if _pipeline else options.time_limit)
     pending = None; repair_count = 0; stop = 'case_limit'
     corpus = Corpus(root, coverage_basis=coverage_basis)
     feedback = FeedbackSampler(seed=options.seed, epsilon=options.epsilon, coverage_basis=coverage_basis)
@@ -783,7 +837,38 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
     dispatch_stop = None
     input_index = 0
     exception_reruns = Counter()
+    def consume_representations():
+        if not _pipeline:
+            return
+        import queue
+        while True:
+            try:
+                child = _pipeline.completed.get_nowait()
+            except queue.Empty:
+                break
+            feedback_row = dict(child, verdict=child.get('mr_verdict', child.get('verdict')))
+            if child.get('representation_candidate_attained') is True:
+                feedback_row['inspection'] = child.get('followup_inspection', {})
+            child['search_feedback'] = feedback.observe(child['candidate'], feedback_row)
+            _pipeline.observe(child)
+            audit_seen_units.update(child.get('audit_candidate_units', []))
+            write_json(Path(child['directory']) / 'outcome.json', child)
+            rows.append(child)
+    if _pipeline:
+        from mirage.runtime.pipeline import BudgetedProvider
+        _pipeline.consume = consume_representations
+        provider = BudgetedProvider(provider, _pipeline)
+        _pipeline.start()
+        execute_worker = _pipeline.worker
+    else:
+        execute_worker = run_worker
     for index in range(options.cases):
+        if _pipeline:
+            _pipeline.wait_capacity()
+            consume_representations()
+            if _pipeline.model_seconds >= options.time_limit - .01:
+                stop = 'llm_time_limit'
+                break
         if rows:
             dispatch_reserve = max(10., 1.5*max(r['finished_seconds']-r['started_seconds'] for r in rows)+5.)
         early_reserve = dispatch_reserve if pending or search_policy != 'adaptive' else 10.
@@ -792,7 +877,7 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                              'remaining_seconds': deadline-time.monotonic()}
             stop = 'time_limit'; break
         representation_work = (traversal.choose(deadline-time.monotonic(), dispatch_reserve)
-                               if traversal and not pending and (input_index % 2 == 1
+                               if traversal and not _pipeline and not pending and (input_index % 2 == 1
                                    or deadline-time.monotonic() <= dispatch_reserve) else None)
         if representation_work:
             origin, candidate, parent_source, reserve = representation_work
@@ -1128,13 +1213,19 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
             phase = 'initialization'
             remaining = deadline-time.monotonic()
             if remaining <= 0: raise TimeoutError('Budget exhausted before execution')
-            process = run_worker({'mode':'execute_stateful_pair', 'source':source, 'config':config,
+            worker_request = {'mode':'execute_stateful_pair', 'source':source, 'config':config,
                                   'engine':str(root/'engine'),
                                   **({'initial_reference': request.context['traversal_initial_reference'],
                                       'reference_scope': 'initialization'}
                                      if request.context.get('traversal_initial_reference') else {}),
-                                  'audit_budget_seconds':min(10, max(0.1, min(options.worker_timeout, remaining) / 8))}, directory/'execution',
-                                 min(options.worker_timeout, remaining))
+                                  'audit_budget_seconds':min(10, max(0.1, min(options.worker_timeout, remaining) / 8))}
+            if _pipeline:
+                from mirage.runtime.pipeline import save
+                save(root/'pipeline-pending-source.json', {'source': source, 'row': row,
+                    'request': worker_request,
+                    'obligations': mutation or request.context.get('configuration_reuse_obligations')})
+            process = execute_worker(worker_request, directory/'execution',
+                                     min(options.worker_timeout, remaining))
             row['process'] = asdict(process)
             write_json(directory/'execution-sha256.json', inventory(directory/'execution'))
             outcome_path = directory/'execution/summary.json'
@@ -1185,7 +1276,7 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                         remaining = deadline-time.monotonic()-5
                         if remaining > 5:
                             exception_reruns[api] += 1
-                            row['exception_rerun'] = rerun_stateful_exception(process, directory/'exception-rerun',
+                            row['exception_rerun'] = (_pipeline.operation if _pipeline else lambda fn, *args: fn(*args))(rerun_stateful_exception, process, directory/'exception-rerun',
                                 min(options.worker_timeout, max(5, 2*process.elapsed_seconds+2), remaining))
         except (ContractError, SyntaxError, json.JSONDecodeError) as error:
             status = 'invalid_program'
@@ -1256,15 +1347,17 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
         if row.get('representation_traversal'):
             item = row['representation_traversal']
             item['status'] = traversal.complete(item['source_id'], item['candidate_id'], row)
-        if traversal and row.get('executable'):
+        if traversal and not _pipeline and row.get('executable'):
             row['representation_source_id'] = traversal.register(source, row)
-        if traversal:
+        if traversal and not _pipeline:
             write_json(root/'representation-traversal.json', traversal.summary())
         # MR novelty must retain its own applicability when numerical evidence raises suspicion.
         feedback_row = dict(row, verdict=row.get('mr_verdict', row.get('verdict')))
         if row.get('proposal_origin') == 'framework_representation' and row.get('representation_candidate_attained') is True:
             feedback_row['inspection'] = row.get('followup_inspection', {})
         row['search_feedback'] = feedback.observe(choice, feedback_row)
+        if _pipeline:
+            _pipeline.observe(row)
         write_json(directory/'outcome.json', row);rows.append(row)
         if (directory/'execution/source.pt').exists():
             write_json(directory/'stateful-manifest.json', {
@@ -1284,8 +1377,8 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                         row['automatic_replay_stop'] = 'search_budget_exhausted'
                         break
                     try:
-                        repeated = replay_stateful(directory/'stateful-manifest.json',
-                                                   timeout=min(options.worker_timeout, remaining))
+                        repeated = (_pipeline.operation if _pipeline else lambda fn, *args, **kw: fn(*args, **kw))(
+                            replay_stateful, directory/'stateful-manifest.json', timeout=min(options.worker_timeout, remaining))
                     except (OSError, ValueError, RuntimeError) as error:
                         repeated = {'replay_valid': False, 'provider_calls': 0,
                                     'reason': f'{type(error).__name__}: {error}'}
@@ -1308,6 +1401,13 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                                            coverage_feedback=coverage_feedback, generation_parent_id=refinement['parent_id'])
                     pending_selection = ({'api':api, 'parent':refinement['parent_id'], 'kind':'initialization'},
                                          {'policy':'input_refinement', 'candidate_count':1, 'selected_probability':1.})
+        if _pipeline:
+            if row.get('executable'):
+                _pipeline.register(source, row)
+            else:
+                _pipeline.register('', row)
+            (root/'pipeline-pending-source.json').unlink(missing_ok=True)
+            consume_representations()
         result = {'strategy':'stateful', 'records':rows, 'stop_reason':stop, 'provider_calls':provider.calls,
                   'elapsed_seconds':time.monotonic()-started, 'metadata_seconds':metadata_seconds,
                   'dispatch_reserve_seconds':dispatch_reserve,
@@ -1320,11 +1420,14 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                       'rejected_proposals': sum(len(p['rejected']) for p in library_cache.values()),
                       'metadata_seconds': sum(p['metadata_planning_seconds'] for p in library_cache.values()),
                       'scope': 'Cached bounded proposals, not proven reachable states'}}
-        result['representation_traversal'] = traversal.summary() if traversal else {'enabled': False}
+        result['representation_traversal'] = (_pipeline.summary() if _pipeline else traversal.summary()) if traversal else {'enabled': False}
         result['oracle_improvements'] = oracle_improvements
         result['search_metrics'] = summarize_search(result)
         write_json(root/'summary.json', result)
         if stop == 'provider_cancellation_unconfirmed': break
+    if _pipeline:
+        _pipeline.finish()
+
     result = {'strategy':'stateful', 'records':rows, 'stop_reason':stop, 'provider_calls':provider.calls,
               'elapsed_seconds':time.monotonic()-started, 'metadata_seconds':metadata_seconds,
               'dispatch_reserve_seconds':dispatch_reserve,
@@ -1337,8 +1440,17 @@ def run_stateful(options, apis, *, edges=True, predicates=None, path_policy="bac
                       'rejected_proposals': sum(len(p['rejected']) for p in library_cache.values()),
                       'metadata_seconds': sum(p['metadata_planning_seconds'] for p in library_cache.values()),
                       'scope': 'Cached bounded proposals, not proven reachable states'}}
-    result['representation_traversal'] = traversal.summary() if traversal else {'enabled': False}
+    result['representation_traversal'] = (_pipeline.summary() if _pipeline else traversal.summary()) if traversal else {'enabled': False}
     result['oracle_improvements'] = oracle_improvements
+    if _pipeline:
+        result['dispatch_reserve_seconds'] = None
+        result['dispatch_admission'] = {'policy': 'model_budget_only_then_full_drain'}
+        result['pipeline_timing'] = _pipeline.timing()
+        result['pipeline_complete'] = _pipeline.summary()['dispatch_complete']
+        result['generation_stop_reason'] = stop
+        if not result['pipeline_complete']:
+            result['stop_reason'] = 'pipeline_incomplete'
+        result['budget_scope'] = 'Cumulative model request seconds per API; framework drain is independent'
     result['search_metrics'] = summarize_search(result)
     write_json(root/'summary.json', result)
     return result

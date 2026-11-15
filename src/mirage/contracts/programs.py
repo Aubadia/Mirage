@@ -31,11 +31,12 @@ class RunOptions:
     paths_per_target: int = 2
     forward_only: bool = False
     strategy: str = "training"
+    generation_pipeline: bool = False
     representation_traversal: bool = False
     oracle_improvements: bool = False
 
     def __post_init__(self) -> None:
-        for name in ("representation_traversal", "oracle_improvements"):
+        for name in ("generation_pipeline", "representation_traversal", "oracle_improvements"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be boolean")
         if self.strategy not in ("training","properties","stateful"):

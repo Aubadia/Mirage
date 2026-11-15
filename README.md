@@ -116,3 +116,40 @@ restoration is a failed replay, not an inferred pass. Property exploration is
 currently serial; training-strategy concurrency and canonical/path budgets do not
 control it. The property report does not invent ground-truth detection or false
 positive rates from oracle outputs alone.
+
+
+## Stateful generation pipeline
+
+For `--strategy stateful`, the CLI enables `--generation-pipeline`, representation
+traversal and scoped numerical checking by default. `--time-limit` then means
+cumulative **model-request seconds per API**, including state planning, program
+generation and repair requests. Model service startup, framework execution and
+backpressure waiting do not consume that budget. `--cases` limits source proposals;
+it does not truncate their representation children. Direct Python callers enable
+`RunOptions(generation_pipeline=True)` and pass `representation_traversal=True`.
+`--no-generation-pipeline` explicitly retains the legacy shared wall-time budget.
+
+One model request can overlap one testing worker. A bounded backlog admits at most
+one additional generated source while prior representations drain. Requests record
+a versioned snapshot of completed feedback; later results affect subsequent
+requests. No pending result establishes coverage, applicability or a defect.
+
+After generation stops, every observed eligible call/operand/action is executed or
+linked to exact prior runtime evidence. Ineligible actions retain their reasons;
+`not_verified` means execution did not establish the required state. The report
+separates `dispatch_complete` from `all_eligible_attained`; neither means all MRs
+passed or all theoretical representations were explored.
+
+`pipeline_timing` reports `llm_request_seconds`, `framework_worker_seconds`,
+`overlap_seconds`, `wall_seconds`, provider-process overhead and backpressure.
+Request time includes server/network waiting and is not pure GPU inference time.
+Worker time includes process initialization, execution, oracle and artifact work.
+Overlapping durations must not be added and called wall time.
+
+Interrupted execution retains the source and candidate inventory. Inside a Slurm
+allocation, `mirage resume PATH_TO_SINGLE_API_RUN` drains saved work without more
+LLM calls. It verifies the frozen engine and source/initialization checksums and
+retains interrupted attempts separately. Run it with the saved engine on
+`PYTHONPATH` for the same controller version. Model generation is not restarted;
+a partial generation budget remains explicitly partial. Slurm/worker timeouts
+remain independent resource bounds, and unresolved work is never labeled complete.

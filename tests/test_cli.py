@@ -67,3 +67,15 @@ class CLITests(unittest.TestCase):
             self.assertEqual(main(['run','--provider','vllm','--strategy','properties']), 0)
         self.assertFalse(execute.call_args.args[0].representation_traversal)
         self.assertFalse(execute.call_args.args[0].oracle_improvements)
+
+
+    def test_pipeline_defaults_and_explicit_legacy_opt_out(self):
+        for switches, expected in (([], True), (["--no-generation-pipeline"], False)):
+            with patch('mirage.workflow.run', return_value={'stop_reason':'case_limit','records':[]}) as execute, redirect_stdout(StringIO()):
+                self.assertEqual(main(['run','--provider','vllm','--strategy','stateful', *switches]), 0)
+            self.assertIs(execute.call_args.args[0].generation_pipeline, expected)
+
+    def test_resume_incomplete_is_nonzero(self):
+        with patch('mirage.runtime.pipeline.resume_pipeline', return_value={
+                'stop_reason': 'pipeline_incomplete', 'records': []}), redirect_stdout(StringIO()):
+            self.assertEqual(main(['resume', '/unused']), 1)

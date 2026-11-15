@@ -42,13 +42,28 @@ def previously_reached(plan, row):
 
 class RepresentationTraversal:
     """Round-robin source queues; planned eligibility never establishes attainment."""
-    def __init__(self):
+    def __init__(self, *, include_suspects=False):
+        self.include_suspects = include_suspects
         self.sources = []
         self.waiting_sources = deque()
 
+    @classmethod
+    def restore(cls, saved):
+        if saved.get('version') != VERSION:
+            raise ValueError('Unsupported representation inventory version')
+        instance = cls(include_suspects=True)
+        instance.sources = deepcopy(saved['sources'])
+        for index, source in enumerate(instance.sources):
+            for candidate in source['candidates']:
+                if candidate['status'] == 'dispatched':
+                    candidate['status'] = 'pending'
+            if any(c['status'] == 'pending' for c in source['candidates']):
+                instance.waiting_sources.append(index)
+        return instance
+
     def register(self, source, row):
         if (row.get('proposal_origin') == 'framework_representation'
-                or row.get('verdict') == 'suspected_failure'
+                or (not self.include_suspects and row.get('verdict') == 'suspected_failure')
                 or row.get('inspection', {}).get('valid') is not True
                 or row.get('mutation_obligations_valid') is not True):
             return None
@@ -59,12 +74,15 @@ class RepresentationTraversal:
                   if k not in ('attempt', 'proposal_index', 'canonical_reference', 'oracle_seen_units')}
         source_hash = hashlib.sha256(source.encode()).hexdigest()
         identity = hashlib.sha256(_key([source_hash, config]).encode()).hexdigest()[:24]
-        if any(s['source_id'] == identity for s in self.sources):
-            return identity
         directory = Path(row['directory']).resolve()
         initial = directory / 'execution/source.pt'
         if not initial.is_file():
             return None
+        if self.include_suspects:
+            # Equal code/configuration does not prove equal sampled initial state.
+            identity = hashlib.sha256(_key([source_hash, config, digest(initial)]).encode()).hexdigest()[:24]
+        if any(s['source_id'] == identity for s in self.sources):
+            return identity
         plans, seen = [], set()
         for candidate in candidates:
             plan = {k: deepcopy(candidate[k]) for k in ('path', 'action', 'call_index')}

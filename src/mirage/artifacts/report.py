@@ -252,6 +252,8 @@ def summarize_search(report):
     tokens_complete = bool(rows) and all(u.get('input_tokens') is not None and u.get('output_tokens') is not None for u in usage)
     audits = [a for r in rows for a in r.get('gradient_audits', {}).values()]
     return {'attempts':len(rows), 'runtime_valid':len(valid),
+            'pipeline_timing': report.get('pipeline_timing'),
+            'pipeline_complete': report.get('pipeline_complete'),
             'optimizer_chain': summarize_optimizer_search(rows, elapsed),
             'exploration_oracle': summarize_exploration_oracle(report, elapsed, known_tokens, tokens_complete),
             'numerical_audit_statuses':dict(Counter(a.get('status', 'unknown') for a in audits)),

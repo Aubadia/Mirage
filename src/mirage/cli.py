@@ -34,6 +34,8 @@ def parser() -> argparse.ArgumentParser:
                      help="Traverse applicable target input representations in stateful mode (default: enabled)")
     run.add_argument("--oracle-improvements", action=argparse.BooleanOptionalAction, default=True,
                      help="Use scoped local gradient evidence and audit scheduling in stateful mode (default: enabled)")
+    run.add_argument("--generation-pipeline", action=argparse.BooleanOptionalAction, default=True,
+                     help="Overlap generation and full traversal; time-limit is model seconds per API in stateful mode")
     run.add_argument("--cases", type=positive_integer, default=100)
     run.add_argument("--time-limit", type=positive_integer, default=14400)
     run.add_argument("--worker-timeout", type=positive_integer, default=600)
@@ -57,6 +59,8 @@ def parser() -> argparse.ArgumentParser:
     replay.add_argument("manifest", type=Path)
     replay.add_argument("--worker-timeout", type=positive_integer, default=600)
     replay.add_argument("--allow-environment-change", action="store_true")
+    resume = commands.add_parser("resume", help="Drain saved stateful pipeline work without further model calls")
+    resume.add_argument("directory", type=Path)
     return result
 
 
@@ -74,10 +78,13 @@ def main(argv: list[str] | None = None) -> int:
             for key in ("command", "apis"):
                 values.pop(key)
             if values["strategy"] != "stateful":
-                values["representation_traversal"] = values["oracle_improvements"] = False
+                values["generation_pipeline"] = values["representation_traversal"] = values["oracle_improvements"] = False
             values["output"] = str(values["output"])
             values["contract_version"] = 4 if values["strategy"] == "stateful" else 3
             output = run(RunOptions(**values), apis)
+        elif args.command == "resume":
+            from mirage.runtime.pipeline import resume_pipeline
+            output = resume_pipeline(args.directory)
         elif args.command == "replay":
             from mirage.workflow import replay
 
@@ -104,8 +111,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.command == "replay" and output.get("replay_valid") is False:
             return 1
-        if args.command == "run":
-            if output["stop_reason"] in ("interrupted", "controller_error", "provider_cancellation_unconfirmed",
+        if args.command in ("run", "resume"):
+            if output["stop_reason"] in ("interrupted", "controller_error", "pipeline_incomplete", "provider_cancellation_unconfirmed",
                                        "interrupted_or_provider_cancellation_unconfirmed"):
                 return 1
             if any(item["status"] != "validated" for item in output.get("canonicals", [])):

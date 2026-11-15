@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import resource
 import sys
+import time
 import traceback
 
 
@@ -67,8 +68,15 @@ def dispatch(request: dict, directory: Path) -> None:
 
         value = dict(request["request"])
         value["stage"] = Stage(value["stage"])
-        response = load_provider(request["provider"], directory=directory).generate(
-            Request(**value), deadline=request["deadline"])
+        provider = load_provider(request["provider"], directory=directory)
+        started_epoch, started_clock = time.time(), time.monotonic()
+        try:
+            response = provider.generate(Request(**value), deadline=request["deadline"])
+        finally:
+            (directory / "provider-timing.json").write_text(json.dumps({
+                "started_epoch": started_epoch, "finished_epoch": time.time(),
+                "elapsed_seconds": time.monotonic() - started_clock,
+                "basis": "provider_request_end_to_end"}))
         from mirage.generator.provider import Response
         if not isinstance(response, Response):
             raise TypeError("Provider must return Response")
