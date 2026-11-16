@@ -74,6 +74,34 @@ class CLITests(unittest.TestCase):
             with patch('mirage.workflow.run', return_value={'stop_reason':'case_limit','records':[]}) as execute, redirect_stdout(StringIO()):
                 self.assertEqual(main(['run','--provider','vllm','--strategy','stateful', *switches]), 0)
             self.assertIs(execute.call_args.args[0].generation_pipeline, expected)
+            self.assertEqual(execute.call_args.args[0].workers, 8 if expected else 1)
+
+    def test_worker_default_depends_on_strategy_and_explicit_value_wins(self):
+        from mirage.contracts.programs import RunOptions
+        self.assertEqual(RunOptions('output', 'provider').workers, 1)
+        self.assertEqual(RunOptions('output', 'provider', strategy='stateful',
+            contract_version=4, generation_pipeline=True).workers, 8)
+        for switches, expected in ((['--strategy', 'stateful', '--workers', '1'], 1),
+                                    (['--strategy', 'properties'], 1)):
+            with patch('mirage.workflow.run', return_value={'stop_reason':'case_limit','records':[]}) as execute, redirect_stdout(StringIO()):
+                self.assertEqual(main(['run','--provider','vllm', *switches]), 0)
+            self.assertEqual(execute.call_args.args[0].workers, expected)
+
+    def test_alternating_mode_keeps_pipeline_budget_and_worker_default(self):
+        with patch('mirage.workflow.run', return_value={'stop_reason':'case_limit','records':[]}) as execute, redirect_stdout(StringIO()):
+            self.assertEqual(main(['run','--provider','vllm','--strategy','stateful',
+                                   '--no-generation-overlap','--time-limit','180']), 0)
+        options = execute.call_args.args[0]
+        self.assertTrue(options.generation_pipeline)
+        self.assertFalse(options.generation_overlap)
+        self.assertEqual(options.workers, 8)
+        self.assertEqual(options.time_limit, 180)
+        for switches in ([], ['--strategy','stateful','--no-generation-pipeline']):
+            with redirect_stderr(StringIO()):
+                self.assertEqual(main(['run','--provider','vllm','--no-generation-overlap',*switches]), 2)
+        from mirage.contracts.programs import RunOptions
+        with self.assertRaisesRegex(ValueError, 'boolean'):
+            RunOptions('output', 'provider', generation_overlap=0)
 
     def test_resume_incomplete_is_nonzero(self):
         with patch('mirage.runtime.pipeline.resume_pipeline', return_value={

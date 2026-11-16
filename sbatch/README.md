@@ -126,3 +126,67 @@ selection and must be verified from startup logs. Do not claim an acceleration
 from flags alone. Compare identical structured-output requests, record speculative
 acceptance, latency, tokens and JSON validity, then compare valid cases/second.
 Changing MTP requires restarting the service; preserve per-configuration artifacts.
+
+## Ten-API E2E latency session
+
+`experiments/e2e_latency.sbatch` starts the prepared Qwen3.8-27B BF16/MTP3 service
+and waits for an attached testing step. It runs frozen lightweight regressions
+before loading the model. The explicit allocation is 36 CPUs, three GPUs and
+192 GiB: four CPUs/one GPU for serving and 32 CPUs/one GPU for tests. The extra
+allocated GPU satisfies Nano4's CPU/GPU ratio; allocation is not utilization.
+Prepare `result/e2e-latency/logs`, check `bash -n`, and use `sbatch --test-only`
+with the same partition/time overrides as the actual submission. Defaults are
+8gpus and four hours; a dev submission is an explicit resource choice, subject
+to its scheduler limits and account quota.
+
+Set `MIRAGE_PREFLIGHT_ENGINE` to a prepared arm's absolute `engine` directory to
+validate experimental code before model loading; otherwise preflight uses `src`.
+An experimental candidate can remain outside production until live quality review.
+
+Prepare a new frozen arm before execution (this only copies code and metadata):
+
+```bash
+python benchmarks/e2e_latency.py prepare --engine src \
+  --output result/e2e-latency/MY_BASELINE --label baseline --workers 8
+```
+
+After the job's `ready` file appears, attach a separate testing step with the
+recorded memory limit (98304 MiB for this allocation), then source its environment:
+
+```bash
+srun --jobid=JOB_ID --exclusive --exact --ntasks=1 --cpus-per-task=32 \
+  --gpus-per-node=1 --gpus-per-task=1 --mem=98304M --pty bash --noprofile --norc
+source result/e2e-latency/JOB_ID/session.env
+"$MIRAGE_PYTHON" result/e2e-latency/MY_BASELINE/driver.py campaign \
+  --protocol "$MIRAGE_PROJECT_ROOT/result/e2e-latency/MY_BASELINE/protocol.json"
+```
+
+The driver verifies frozen source hashes, records each API launch-to-exit E2E,
+keeps failed requests and incomplete attempts explicit, and confirms empty serving
+running/waiting gauges before proceeding between APIs. A model-budget timeout
+can retain `provider_cancellation_unconfirmed` and a nonzero child status even
+when the external monitor subsequently observes an idle service. This does not
+turn the failed request into successful generation. Inspect each API's
+`metrics.json`, process logs, final traversal and raw serving metrics; a complete
+campaign must account for all ten API attempts. The current driver refuses an
+automatic campaign rerun; interrupted generation budgets remain partial.
+
+Use the same healthy service for fixed-case diagnostics and a separately frozen
+candidate arm. Keep heavy diagnostics outside live latency intervals. Record
+prefix-cache warmth when comparing real generation, and compare saved identical
+work before claiming an optimization speedup. At task completion, finish testing,
+exit the attached terminal, touch the session `stop` file, and verify the owned
+job/steps have exited with `squeue` and `sacct`.
+
+The launcher records `cache-path.txt` and writes `cache-removed` only after
+verifying removal of that job's scratch directory. Preserve final idle samples,
+terminal-step status and `sacct` allocation accounting. A successful batch exit
+does not imply that the experiment's acceptance gates passed.
+
+Roadmap 015 completed baseline job 785068 and candidate job 785647, with zero
+in-session service restarts. Intermediate job 785575 failed service readiness
+before candidate work; its cost remains included. All owned jobs and steps are
+terminal. The [results](../result/e2e-latency/report.md) retain the candidate
+`batch_norm` budget-gate failure and keep 32 workers experimental; eight remains
+the product default. Resource accounting includes all startup/diagnostic/idle
+time and must not be interpreted as GPU utilization.

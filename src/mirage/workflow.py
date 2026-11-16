@@ -23,8 +23,43 @@ from mirage.runtime.process import run_worker
 from mirage.sampler.policy import Sampler
 
 
+_JSON_SCALAR_TYPES = (str, int, float, bool, type(None))
+
+
+def _report_json_value(value):
+    # Most reports already contain builtin JSON values. Walk each call afresh,
+    # copying only containers whose special values actually need conversion.
+    kind = type(value)
+    if kind in _JSON_SCALAR_TYPES:
+        return value
+    if kind is dict:
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("JSON object keys must be strings")
+        converted = None
+        for key, item in value.items():
+            child = item if type(item) in _JSON_SCALAR_TYPES else _report_json_value(item)
+            if child is not item:
+                if converted is None:
+                    converted = dict(value)
+                converted[key] = child
+        return value if converted is None else converted
+    if kind is list:
+        converted = None
+        for index, item in enumerate(value):
+            child = item if type(item) in _JSON_SCALAR_TYPES else _report_json_value(item)
+            if child is not item:
+                if converted is None:
+                    converted = list(value)
+                converted[index] = child
+        return value if converted is None else converted
+    if kind in (tuple, list):
+        return [item if type(item) in _JSON_SCALAR_TYPES else _report_json_value(item)
+                for item in value]
+    return json_value(value)
+
+
 def write_json(path, value):
-    path.write_text(json.dumps(json_value(value), indent=2, allow_nan=False), encoding="utf-8")
+    path.write_text(json.dumps(_report_json_value(value), indent=2, allow_nan=False), encoding="utf-8")
 
 
 def state_repair_progress(inspection):
@@ -731,7 +766,8 @@ def run_stateful(options, apis, **kwargs):
     for api_index, api in enumerate(apis):
         directory = root if len(apis) == 1 else root / f'api-{api_index:03d}'
         pipeline = ExecutionPipeline(directory, api, options.time_limit, options.worker_timeout,
-                                     replay_failures=options.replay_failures)
+                                     replay_failures=options.replay_failures, workers=options.workers,
+                                     generation_overlap=options.generation_overlap)
         completed = False
         old_handler = None
         if threading.current_thread() is threading.main_thread():

@@ -18,7 +18,10 @@ mirage_finish() {
 }
 
 mirage_setup() {
-    : "${SLURM_JOB_ID:?Submit this script with sbatch}"
+    if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+        echo "Submit this script with sbatch." >&2
+        return 2
+    fi
     : "${SLURM_CPUS_PER_TASK:?Missing Slurm CPU allocation}"
 
     MIRAGE_STARTED_AT="$(date +%s)"

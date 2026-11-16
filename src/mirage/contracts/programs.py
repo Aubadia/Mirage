@@ -23,7 +23,7 @@ class RunOptions:
     size: int = 4
     epsilon: float = 0.1
     replay_failures: int = 1
-    workers: int = 1
+    workers: int | None = None
     generation_concurrency: int = 2
     contract_version: int = 3
     canonicals_per_api: int = 3
@@ -32,20 +32,25 @@ class RunOptions:
     forward_only: bool = False
     strategy: str = "training"
     generation_pipeline: bool = False
+    generation_overlap: bool = True
     representation_traversal: bool = False
     oracle_improvements: bool = False
 
     def __post_init__(self) -> None:
-        for name in ("generation_pipeline", "representation_traversal", "oracle_improvements"):
+        for name in ("generation_pipeline", "generation_overlap", "representation_traversal", "oracle_improvements"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be boolean")
         if self.strategy not in ("training","properties","stateful"):
             raise ValueError("Unknown execution strategy")
+        if not self.generation_overlap and (self.strategy != 'stateful' or not self.generation_pipeline):
+            raise ValueError("Alternating generation requires the stateful generation pipeline")
         if self.contract_version != (4 if self.strategy == "stateful" else 3):
             raise ValueError("Unknown generation contract")
         for name in ("canonicals_per_api", "targets_per_canonical", "paths_per_target"):
             positive(getattr(self, name), name)
         positive(self.cases, "cases")
+        if self.workers is None:
+            object.__setattr__(self, 'workers', 8 if self.strategy == 'stateful' and self.generation_pipeline else 1)
         positive(self.workers, "workers")
         positive(self.generation_concurrency, "generation_concurrency")
         for name in ("time_limit", "worker_timeout"):

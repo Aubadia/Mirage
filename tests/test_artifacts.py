@@ -76,6 +76,45 @@ class ArtifactTests(unittest.TestCase):
         with redirect_stderr(StringIO()):
             self.assertEqual(main(["inspect", str(path)]), 2)
 
+    def test_workflow_report_serialization_preserves_bytes_and_rejections(self):
+        from dataclasses import dataclass
+        from enum import Enum, IntEnum
+        from mirage.artifacts.store import json_value
+        from mirage.workflow import write_json
+
+        class Text(str, Enum):
+            LABEL = '測試'
+        class Count(IntEnum):
+            ONE = 1
+        @dataclass
+        class Evidence:
+            values: tuple
+        class Mapping(dict):
+            pass
+        shared = {'score': 1.25, 'zero': -0.0, 'enabled': True, 'missing': None}
+        value = {'rows': [shared, shared], 'special': Evidence((Text.LABEL, Count.ONE)),
+                 'subclass': Mapping(nested=[Text.LABEL]), 'empty': (), 'large': 2**80,
+                 'nested_mixed': [shared, (Text.LABEL, Count.ONE), {'flag': Text.LABEL}]}
+        path = Path(self.directory.name) / 'report.json'
+        for score in (1.25, 9.5):
+            shared['score'] = score
+            write_json(path, value)
+            expected = json.dumps(json_value(value), indent=2, allow_nan=False).encode('utf-8')
+            self.assertEqual(path.read_bytes(), expected)
+            self.assertIs(value['nested_mixed'][0], shared)
+            self.assertIsInstance(value['nested_mixed'][1], tuple)
+            self.assertIs(value['nested_mixed'][2]['flag'], Text.LABEL)
+        before = path.read_bytes()
+        cyclic = []; cyclic.append(cyclic)
+        for bad, error in (({'nested': {1: 'bad'}}, ValueError),
+                           ({'nested': float('nan')}, ValueError),
+                           ({'nested': float('inf')}, ValueError),
+                           ({'nested': object()}, TypeError), (cyclic, RecursionError),
+                           ({'cycle': cyclic, 1: 'bad key'}, ValueError)):
+            with self.assertRaises(error):
+                write_json(path, bad)
+            self.assertEqual(path.read_bytes(), before)
+
 
 class ExplorationMetricsTests(unittest.TestCase):
     def test_separate_operand_and_optimizer_coverage_and_missing_followup(self):
@@ -124,6 +163,107 @@ class ExplorationMetricsTests(unittest.TestCase):
         self.assertEqual(traversal['reached_candidates'], 1)
         self.assertEqual(traversal['dispatch_fraction'], 1/2)
         self.assertEqual(traversal['attainment_fraction'], 1/2)
+
+
+class E2EMeasurementTests(unittest.TestCase):
+    def setUp(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1]/'benchmarks/e2e_latency.py'
+        spec = importlib.util.spec_from_file_location('e2e_measurement_test', path)
+        self.driver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.driver)
+
+    def test_roster_contains_only_api_device_and_identifier(self):
+        catalog = {'selected': [str(i) for i in range(10)], 'candidates': [
+            {'id': str(i), 'api': 'torch.sin', 'device': 'cpu', 'conditions': 'private fixture trigger'}
+            for i in range(10)]}
+        rows = self.driver.targets(catalog)
+        self.assertEqual([r['id'] for r in rows], catalog['selected'])
+        self.assertTrue(all(set(r) == {'id','api','device'} for r in rows))
+        catalog['selected'][-1] = '0'
+        with self.assertRaises(ValueError): self.driver.targets(catalog)
+
+    def test_missing_idle_metrics_is_unknown_and_histogram_labels_survive(self):
+        from unittest.mock import patch
+        metrics = ('# HELP ignored\n'
+            'vllm:num_requests_running{engine="0",model_name="test"} 0\n'
+            'vllm:num_requests_waiting{engine="0",model_name="test"} 0\n'
+            'vllm:request_decode_time_seconds_bucket{le="+Inf"} 2\n')
+        self.assertEqual(len(self.driver.metric_values(metrics)), 3)
+        with patch.object(self.driver, 'service_metrics', return_value=metrics):
+            self.assertTrue(self.driver.confirmed_idle())
+        with patch.object(self.driver, 'service_metrics', return_value=''):
+            self.assertFalse(self.driver.confirmed_idle())
+
+    def test_protocol_detects_engine_or_driver_changes(self):
+        from argparse import Namespace
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source = root/'source'; source.mkdir()
+            (source/'sample.py').write_text('VALUE = 1\n')
+            args = Namespace(output=root/'run',engine=source,label='fixture',budget=180,workers=8)
+            with redirect_stdout(StringIO()): self.driver.prepare(args)
+            protocol = args.output/'protocol.json'
+            self.driver.verify(protocol)
+            (args.output/'engine/sample.py').write_text('VALUE = 2\n')
+            with self.assertRaises(ValueError): self.driver.verify(protocol)
+            (args.output/'engine/sample.py').write_text('VALUE = 1\n')
+            (args.output/'driver.py').write_text('# altered\n')
+            with self.assertRaises(ValueError): self.driver.verify(protocol)
+
+    def test_protocol_preserves_alternating_mode_and_legacy_overlap_default(self):
+        from argparse import Namespace
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source = root/'source'; source.mkdir()
+            (source/'sample.py').write_text('VALUE = 1\n')
+            args = Namespace(output=root/'run',engine=source,label='alternating',budget=180,
+                             workers=32,generation_overlap=False)
+            with redirect_stdout(StringIO()): self.driver.prepare(args)
+            path = args.output/'protocol.json'
+            protocol = self.driver.verify(path)
+            self.assertFalse(protocol['generation_overlap'])
+            self.assertEqual(protocol['model_budget_seconds'], 180)
+            report = {'search_metrics':{},'pipeline_timing':{},'pipeline_complete':True,'stop_reason':'llm_time_limit'}
+            for index, expected in ((0, False), (1, True)):
+                if expected:
+                    protocol.pop('generation_overlap')
+                    path.write_text(json.dumps(protocol))
+                with patch.object(self.driver, 'require_allocation'), \
+                     patch.object(self.driver, 'model_environment', return_value={}), \
+                     patch.dict('os.environ', {'SLURM_JOB_ID':'fixture','SLURM_STEP_ID':'fixture'}), \
+                     patch('mirage.workflow.run_stateful', return_value=report) as run:
+                    self.assertEqual(self.driver.one(Namespace(protocol=path,index=index)), 0)
+                options = run.call_args.args[0]
+                self.assertIs(options.generation_overlap, expected)
+                self.assertTrue(options.generation_pipeline)
+                self.assertEqual(options.workers, 32)
+
+    def test_ordinary_api_failure_keeps_other_targets_and_is_not_complete_success(self):
+        from argparse import Namespace
+        from unittest.mock import patch, Mock
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); path = root/'protocol.json'; path.write_text('{}')
+            protocol = {'engine':str(root), 'driver':'frozen.py', 'targets':[
+                {'id':str(i),'api':'torch.sin','device':'cpu'} for i in range(10)]}
+            calls = []
+            def spawn(command, **kwargs):
+                index = int(command[-1]); calls.append(index)
+                code = 1 if index == 2 else 0
+                return Mock(returncode=code, poll=Mock(return_value=code))
+            with patch.object(self.driver, 'require_allocation'), \
+                 patch.object(self.driver, 'verify', return_value=protocol), \
+                 patch.object(self.driver, 'model_environment'), \
+                 patch.object(self.driver, 'confirmed_idle', return_value=True), \
+                 patch.object(self.driver, 'remaining', return_value=10000), \
+                 patch.object(self.driver, 'service_metrics', return_value=''), \
+                 patch.object(self.driver.signal, 'signal'), \
+                 patch.object(self.driver.subprocess, 'Popen', side_effect=spawn), \
+                 redirect_stdout(StringIO()):
+                self.assertEqual(self.driver.campaign(Namespace(protocol=path)), 1)
+            report = json.loads((root/'campaign.json').read_text())
+            self.assertEqual(calls, list(range(10)))
+            self.assertEqual(report['state'], 'complete_with_failures')
+            self.assertEqual(report['remaining_unattempted'], 0)
 
 
 class ExperimentResumeTests(unittest.TestCase):

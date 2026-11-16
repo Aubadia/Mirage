@@ -129,19 +129,47 @@ it does not truncate their representation children. Direct Python callers enable
 `RunOptions(generation_pipeline=True)` and pass `representation_traversal=True`.
 `--no-generation-pipeline` explicitly retains the legacy shared wall-time budget.
 
-One model request can overlap one testing worker. A bounded backlog admits at most
+For alternating model/framework rounds, use `--no-generation-overlap` while
+keeping the generation pipeline enabled. Each round completes source testing,
+representation traversal and required replay, and publishes their feedback before
+the next proposal is selected and its prompt constructed. Framework workers remain
+parallel, and the per-API model budget and full traversal rules are unchanged.
+Planning or failed generation need not produce an executable framework case.
+
+One model request can overlap up to eight testing workers by default. `--workers`
+sets the shared execution limit for sources, representations, replay and triage;
+other strategies retain their existing default of one. Independent worker
+processes isolate tensor/RNG state. A bounded backlog admits at most
 one additional generated source while prior representations drain. Requests record
 a versioned snapshot of completed feedback; later results affect subsequent
 requests. No pending result establishes coverage, applicability or a defect.
+
+On the measured 32-CPU allocation, `--workers 32` completed the fixed 128-case CPU
+screen in 30.38 seconds versus 76.05 seconds at eight workers (2.50× throughput;
+two measurements per setting). Sixteen workers took 42.30 seconds. Higher
+concurrency increased individual worker latency and memory demand; the default
+remains eight, and a larger limit requires matching Slurm CPU/memory resources.
+The complete 1,887-case candidate validation matched saved classifications,
+including representation and replay obligations. See
+[roadmap 014](docs/roadmap-014-worker-overhead.md) for scope, evidence and limits.
+
+Report conversion avoids repeated special-type checks for builtin JSON data;
+both durable pipeline ledgers share one traversal snapshot. Reporting frequency, JSON format, worker
+isolation, normal process exit and recovery checks remain unchanged.
 
 After generation stops, every observed eligible call/operand/action is executed or
 linked to exact prior runtime evidence. Ineligible actions retain their reasons;
 `not_verified` means execution did not establish the required state. The report
 separates `dispatch_complete` from `all_eligible_attained`; neither means all MRs
 passed or all theoretical representations were explored.
+Finding a defect does not blacklist that API/representation: later inputs, states
+and paths can expose different failures. Suspected cases are not distinct bugs.
 
 `pipeline_timing` reports `llm_request_seconds`, `framework_worker_seconds`,
-`overlap_seconds`, `wall_seconds`, provider-process overhead and backpressure.
+`framework_busy_seconds` (the union of worker intervals), `overlap_seconds`,
+`wall_seconds`, peak/mean active workers, execution queue time, provider-process
+overhead and backpressure. Worker seconds are cumulative across concurrent slots;
+overlap is the intersection of model and framework interval unions.
 Request time includes server/network waiting and is not pure GPU inference time.
 Worker time includes process initialization, execution, oracle and artifact work.
 Overlapping durations must not be added and called wall time.
@@ -153,3 +181,28 @@ retains interrupted attempts separately. Run it with the saved engine on
 `PYTHONPATH` for the same controller version. Model generation is not restarted;
 a partial generation budget remains explicitly partial. Slurm/worker timeouts
 remain independent resource bounds, and unresolved work is never labeled complete.
+Resume restores the saved worker limit and backpressure measurement. Older ledgers
+default to their original one-worker limit and explicitly mark missing historical
+backpressure as unknown.
+The saved generation-overlap setting is also restored; ledgers without that field
+retain the original overlapping behavior.
+
+The ten-API latency driver, `benchmarks/e2e_latency.py`, freezes the selected
+benchmark API/device roster and engine, measures 180 model-request seconds per
+API, and records process E2E alongside framework/model overlap and vLLM metrics.
+Its `prepare` command creates a new immutable protocol directory; `campaign`
+runs inside a Slurm testing step against the prepared service. Issue fixtures do
+not enter generation. Equal-budget live campaigns and fixed-case throughput are
+reported separately; a changed adaptive trajectory is not byte-for-byte LLM
+equivalence. See [roadmap 015](docs/roadmap-015-e2e-latency.md) and the
+[Slurm instructions](sbatch/README.md) for the protocol and executed results.
+
+The completed ten-API study retained the byte-identical JSON report conversion
+optimization (about 2.66x throughput for the measured 406 MB report). Its bounded
+359-pair screen took 250.566 s at eight workers and 145.940 s at 32 workers,
+with higher per-worker latency and memory at 32. The default remains eight.
+Live campaign makespans were 8106.480 s and 7653.745 s, but workloads and quality
+differed; candidate `batch_norm` also failed the original request-budget tolerance
+(179.851 s versus nominal 180 s). These observations do not establish equal-quality
+E2E acceleration. See the [full results](result/e2e-latency/report.md), including
+the preserved failures, attribution limits, and completed resource cleanup.

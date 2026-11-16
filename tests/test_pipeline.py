@@ -49,7 +49,127 @@ class FakeProvider:
 
 class PipelineTests(unittest.TestCase):
     def pipeline(self, root, budget=1):
-        return ExecutionPipeline(root, 'torch.linalg.slogdet', budget, 120, replay_failures=0)
+        return ExecutionPipeline(root, 'torch.linalg.slogdet', budget, 120, replay_failures=0, workers=1)
+
+    def test_eight_and_32_slots_shared_by_sources_representations_and_replays(self):
+        for workers in (8, 32):
+            with self.subTest(workers=workers):
+                self._check_shared_slots(workers)
+
+    def _check_shared_slots(self, workers):
+        from concurrent.futures import ThreadPoolExecutor
+        entered, release = threading.Event(), threading.Event()
+        lock = threading.Lock()
+        active = peak = 0
+        modes = []
+        def work(mode):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                modes.append(mode)
+                if active == workers:
+                    entered.set()
+            try:
+                if not release.wait(10):
+                    raise TimeoutError('parallel dispatch did not fill configured slots')
+                time.sleep(.01)
+            finally:
+                with lock:
+                    active -= 1
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            p = ExecutionPipeline(root, 'torch.linalg.slogdet', 1, 10, workers=workers)
+            sources = (workers + 4) // 5
+            for i in range(sources):
+                source, row = parent(root, i)
+                row['verdict'] = 'suspected_failure'
+                p.register(source, row)
+            def execute(origin, candidate, source):
+                directory = root / origin['source_id'] / candidate['id']
+                p.worker({'mode': 'representation'}, directory, 10)
+                p.operation(work, 'replay')
+                return {'directory': str(directory), 'started_seconds': 0, 'finished_seconds': 1,
+                    'verdict': 'suspected_failure', 'representation_candidate_attained': True,
+                    'mutation_obligations_valid': True, 'representation_traversal': {}}
+            p.execute_representation = execute
+            with patch('mirage.runtime.pipeline.run_worker', side_effect=lambda request, *a, **kw: work(request['mode'])):
+                p.start()
+                try:
+                    self.assertTrue(entered.wait(10))
+                    with ThreadPoolExecutor(2) as callers:
+                        source = callers.submit(p.worker, {'mode': 'source'}, root/'source', 10)
+                        replay = callers.submit(p.operation, work, 'source_replay')
+                        self.assertFalse(source.done())
+                        self.assertFalse(replay.done())
+                        release.set()
+                        source.result(timeout=10)
+                        replay.result(timeout=10)
+                    p.finish()
+                finally:
+                    release.set()
+                    p.close(interrupted=True)
+            self.assertEqual(peak, workers)
+            self.assertEqual(modes.count('representation'), sources * 5)
+            self.assertEqual(modes.count('replay'), sources * 5)
+            self.assertIn('source', modes)
+            self.assertIn('source_replay', modes)
+            self.assertEqual(len(p.rows), sources * 5)
+            self.assertTrue(p.summary()['all_eligible_attained'])
+            self.assertEqual(p.timing()['framework_peak_workers'], workers)
+
+    def test_parallel_interval_union_does_not_double_count_overlap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self.pipeline(Path(tmp))
+            p.session_started = 1
+            p.model_events = [{'request_started': 2, 'request_finished': 7,
+                               'started': 2, 'finished': 7, 'seconds': 5}]
+            p.worker_events = [{'started': a, 'finished': b, 'seconds': b-a}
+                               for a,b in ((1,5), (3,8), (9,10))]
+            with patch('mirage.runtime.pipeline.time.time', return_value=11):
+                timing = p.timing()
+            self.assertEqual(timing['framework_worker_seconds'], 10)
+            self.assertEqual(timing['framework_busy_seconds'], 8)
+            self.assertEqual(timing['overlap_seconds'], 5)
+            self.assertEqual(timing['controller_and_unattributed_seconds'], 2)
+            self.assertEqual(timing['framework_peak_workers'], 2)
+            p.close()
+
+    def test_cancel_all_inflight_then_resume_preserves_limit_and_backpressure(self):
+        entered = threading.Barrier(4)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            p = ExecutionPipeline(root, 'torch.linalg.slogdet', 1, 10, workers=3,
+                                  generation_overlap=False)
+            p.register(*parent(root))
+            p.queue_seconds = 7.5
+            def execute(*args):
+                entered.wait(timeout=10)
+                p.cancel.wait(10)
+                return {}
+            p.execute_representation = execute
+            p.start()
+            entered.wait(timeout=10)
+            p.close(interrupted=True)
+            self.assertFalse(p.thread.is_alive())
+            self.assertEqual(p.summary()['status_counts']['dispatched'], 3)
+            resumed = ExecutionPipeline(root, p.api, 1, 10, resume=True)
+            self.assertEqual(resumed.workers, 3)
+            self.assertFalse(resumed.generation_overlap)
+            self.assertEqual(resumed.timing()['generation_backpressure_seconds'], 7.5)
+            self.assertEqual(resumed.summary()['status_counts'], {'pending': 5})
+            resumed.close()
+            state = json.loads((root/'pipeline-state.json').read_text())
+            self.assertEqual(state['traversal'], json.loads((root/'representation-traversal.json').read_text()))
+            for key in ('workers', 'generation_overlap', 'queue_seconds', 'backpressure_measurement_complete'):
+                state.pop(key)
+            (root/'pipeline-state.json').write_text(json.dumps(state))
+            legacy = ExecutionPipeline(root, p.api, 1, 10, resume=True)
+            self.assertEqual(legacy.workers, 1)
+            self.assertTrue(legacy.generation_overlap)
+            self.assertIsNone(legacy.timing()['generation_backpressure_seconds'])
+            self.assertFalse(legacy.timing()['backpressure_measurement_complete'])
+            legacy.close()
 
     def test_only_model_requests_spend_budget(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -117,6 +237,96 @@ class PipelineTests(unittest.TestCase):
                 self.assertFalse(thread.is_alive())
             self.assertGreater(p.timing()['overlap_seconds'], 0)
             p.close()
+
+    def test_alternating_provider_waits_for_full_parallel_drain_and_feedback(self):
+        from concurrent.futures import ThreadPoolExecutor
+        import queue
+        entered = threading.Barrier(3)
+        release = threading.Event()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            p = ExecutionPipeline(root, 'torch.linalg.slogdet', 1, 10, workers=2,
+                                  generation_overlap=False)
+            p.register(*parent(root))
+            count = 0
+            lock = threading.Lock()
+            def work(mode):
+                nonlocal count
+                with lock:
+                    count += 1
+                    first = count <= 2
+                if first:
+                    entered.wait(timeout=5)
+                if not release.wait(5):
+                    raise TimeoutError('test did not release framework work')
+                time.sleep(.01)
+            def execute(origin, candidate, source):
+                directory = root/candidate['id']
+                p.operation(work, 'representation')
+                p.operation(work, 'replay')
+                return {'directory': str(directory), 'started_seconds': 0, 'finished_seconds': 1,
+                        'representation_candidate_attained': True, 'mutation_obligations_valid': True,
+                        'representation_traversal': {}}
+            def consume():
+                while True:
+                    try:
+                        row = p.completed.get_nowait()
+                    except queue.Empty:
+                        return
+                    p.observe(row)
+            p.execute_representation = execute
+            p.consume = consume
+            provider = FakeProvider(lambda: time.sleep(.01))
+            p.start()
+            try:
+                entered.wait(timeout=5)
+                with ThreadPoolExecutor(1) as callers:
+                    call = callers.submit(BudgetedProvider(provider, p).generate,
+                                          Request(Stage.CANONICAL, 'generate'))
+                    try:
+                        time.sleep(.03)
+                        self.assertFalse(call.done())
+                        self.assertEqual(provider.calls, 0)
+                    finally:
+                        release.set()
+                    call.result(timeout=10)
+                p.finish()
+                self.assertEqual(count, 10)
+                self.assertEqual(p.pending_sources(), 0)
+                self.assertEqual(provider.requests[0].context['feedback_snapshot']['version'], 5)
+                self.assertEqual(p.timing()['overlap_seconds'], 0)
+                self.assertEqual(p.timing()['framework_peak_workers'], 2)
+                self.assertEqual(p.model_seconds, .25)
+                self.assertFalse(p.timing()['generation_overlap'])
+            finally:
+                release.set()
+                p.close(interrupted=True)
+
+    def test_alternating_wait_cancellation_does_not_start_or_charge_model(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            p = ExecutionPipeline(root, 'torch.linalg.slogdet', 1, 10, generation_overlap=False)
+            p.register(*parent(root))
+            provider = FakeProvider()
+            try:
+                with ThreadPoolExecutor(1) as callers:
+                    call = callers.submit(BudgetedProvider(provider, p).generate,
+                                          Request(Stage.CANONICAL, 'generate'))
+                    try:
+                        time.sleep(.03)
+                        self.assertFalse(call.done())
+                    finally:
+                        with p.condition:
+                            p.cancel.set()
+                            p.condition.notify_all()
+                    with self.assertRaises(InterruptedError):
+                        call.result(timeout=5)
+                self.assertEqual(provider.calls, 0)
+                self.assertEqual(p.model_events, [])
+                self.assertEqual(p.model_seconds, 0)
+            finally:
+                p.close(interrupted=True)
 
     def test_exhausted_model_budget_still_drains_negative_and_other_actions(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -230,6 +440,34 @@ def create():
 
 
 class PipelineRuntimeTests(unittest.TestCase):
+    def test_alternating_controller_publishes_first_drain_before_second_prompt(self):
+        from mirage.contracts.programs import RunOptions
+        from mirage.workflow import run_stateful
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)/'run'
+            options = RunOptions(str(root), 'test_pipeline:create', cases=2,
+                time_limit=120, worker_timeout=120, strategy='stateful', contract_version=4,
+                generation_pipeline=True, generation_overlap=False, workers=2, replay_failures=0)
+            with patch.dict(os.environ, {'PYTHONPATH': str(Path(__file__).parent) + os.pathsep + os.environ.get('PYTHONPATH', '')}):
+                report = run_stateful(options, ('torch.linalg.slogdet',), predicates=[],
+                    search_policy='round_robin', generation_mode='full', coverage_refinement=False,
+                    representation_traversal=True, oracle_improvements=True)
+            self.assertEqual(report['provider_calls'], 2)
+            self.assertTrue(report['pipeline_complete'])
+            state = json.loads((root/'pipeline-state.json').read_text())
+            second = json.loads((root/'provider-002/request.json').read_text())['request']
+            snapshot = second['context']['feedback_snapshot']
+            self.assertTrue(any('representations' in r['directory'] for r in snapshot['completed_cases']))
+            first_source = state['source_registrations'][0]['source_id']
+            first_events = [event for event in state['worker_events']
+                            if f'/representations/{first_source}/' in event['directory']]
+            self.assertTrue(first_events)
+            second_model_start = state['model_events'][1]['started']
+            self.assertTrue(all(event['finished'] <= second_model_start for event in first_events))
+            self.assertEqual(report['pipeline_timing']['overlap_seconds'], 0)
+            self.assertFalse(report['pipeline_timing']['generation_overlap'])
+            self.assertEqual(report['pipeline_timing']['framework_worker_limit'], 2)
+
     def test_controller_drains_after_source_case_limit(self):
         from mirage.contracts.programs import RunOptions
         from mirage.workflow import run_stateful
@@ -250,6 +488,9 @@ class PipelineRuntimeTests(unittest.TestCase):
             self.assertEqual(negative[0]['status'], 'reached')
             self.assertGreater(report['pipeline_timing']['framework_worker_seconds'],
                                report['pipeline_timing']['llm_request_seconds'])
+            self.assertEqual(report['pipeline_timing']['framework_worker_limit'], 8)
+            self.assertGreater(report['pipeline_timing']['framework_peak_workers'], 1)
+            self.assertLessEqual(report['pipeline_timing']['framework_peak_workers'], 8)
 
             from mirage.runtime.pipeline import resume_pipeline
             with patch('mirage.generator.provider.IsolatedProvider.generate', side_effect=AssertionError('resume called model')):

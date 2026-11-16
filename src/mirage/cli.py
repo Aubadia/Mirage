@@ -36,6 +36,8 @@ def parser() -> argparse.ArgumentParser:
                      help="Use scoped local gradient evidence and audit scheduling in stateful mode (default: enabled)")
     run.add_argument("--generation-pipeline", action=argparse.BooleanOptionalAction, default=True,
                      help="Overlap generation and full traversal; time-limit is model seconds per API in stateful mode")
+    run.add_argument("--generation-overlap", action=argparse.BooleanOptionalAction, default=True,
+                     help="Allow model/framework overlap; disabling waits for framework feedback before the next proposal")
     run.add_argument("--cases", type=positive_integer, default=100)
     run.add_argument("--time-limit", type=positive_integer, default=14400)
     run.add_argument("--worker-timeout", type=positive_integer, default=600)
@@ -44,7 +46,8 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--precision", choices=("fp32", "fp16", "bf16"), default="fp32")
     run.add_argument("--provider", help="vllm or Python module:factory")
     run.add_argument("--output", type=Path, default=Path("result/experiments"))
-    run.add_argument("--workers", type=positive_integer, default=1)
+    run.add_argument("--workers", type=positive_integer, default=None,
+                     help="Execution workers (default: 8 for the stateful pipeline, 1 otherwise)")
     run.add_argument("--generation-concurrency", type=positive_integer, default=2)
     run.add_argument("--canonicals-per-api", type=positive_integer, default=3)
     run.add_argument("--targets-per-canonical", type=positive_integer, default=12)
