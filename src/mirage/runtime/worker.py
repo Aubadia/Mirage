@@ -35,7 +35,8 @@ def stateful_replay_evidence(record):
     if 'gradient_evidence' in record:
         result['gradient_evidence'] = record['gradient_evidence']
     result['target_calls']=[{key:call.get(key) for key in
-        ('index','inputs','output','metadata','write_effects','writable_paths','kind','evidence','schema_read_only','entry_context',
+        ('index','inputs','output','metadata','write_effects','writable_paths','destination_values','alias_partner_values',
+         'guard_preserved','returned_alias_observations','kind','evidence','schema_read_only','entry_context',
          'factory_target','factory_id','callable_id','invocation_index','callable_identity_verified')}
         for call in record.get('target_calls',[])]
     return result
@@ -63,6 +64,16 @@ def optimizer_followup_config(record, candidate):
 
 def dispatch(request: dict, directory: Path) -> None:
     mode = request["mode"]
+    if mode == "provider_preflight":
+        from mirage.generator.provider import load_provider
+        load_provider(request["provider"], directory=directory)
+        (directory / "summary.json").write_text(json.dumps({"configured": True}))
+        return
+    if mode == "api_spec":
+        from mirage.runtime.api_metadata import specification
+        result = specification(request["api"])
+        (directory / "summary.json").write_text(json.dumps(result, indent=2, allow_nan=False))
+        return
     if mode == "provider":
         from mirage.generator.provider import Request, Stage, load_provider
 
@@ -84,6 +95,11 @@ def dispatch(request: dict, directory: Path) -> None:
         return
 
     import torch
+    if mode in ("device_member", "compare_devices"):
+        from mirage.inspector.comparison import compare_saved_devices, differential_worker
+        result = differential_worker(request, directory) if mode == "device_member" else compare_saved_devices(request)
+        (directory / "summary.json").write_text(json.dumps(result, indent=2, allow_nan=False))
+        return
     if mode == "execute_stateful_pair":
         from mirage.runtime.stateful import execute
         from mirage.runtime.probes import Recorder

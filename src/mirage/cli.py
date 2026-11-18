@@ -27,9 +27,14 @@ def parser() -> argparse.ArgumentParser:
     report = commands.add_parser("report", help="Show validated batch coverage and saved outcomes")
     report.add_argument("directory", type=Path)
 
+    check = commands.add_parser("check", help="Check one public API using the prepared environment")
+    check.add_argument("api")
+    check.add_argument("--output", type=Path, help="Fresh artifact directory; default is a unique result/check run")
+
     run = commands.add_parser("run", help="Generate, execute and inspect a batch of candidates", allow_abbrev=False)
     run.add_argument("--apis", nargs="+")
-    run.add_argument("--strategy", choices=("training","properties","stateful"), default="training")
+    run.add_argument("--strategy", choices=("training","properties","stateful"), default="training",
+                     help="properties is deprecated and retained for historical reference")
     run.add_argument("--representation-traversal", action=argparse.BooleanOptionalAction, default=True,
                      help="Traverse applicable target input representations in stateful mode (default: enabled)")
     run.add_argument("--oracle-improvements", action=argparse.BooleanOptionalAction, default=True,
@@ -74,6 +79,22 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "check":
+            from mirage.workflow import check_api
+            import signal
+            import threading
+            previous = None
+            if threading.current_thread() is threading.main_thread():
+                def stop_check(signum, frame):
+                    raise KeyboardInterrupt
+                previous = signal.signal(signal.SIGTERM, stop_check)
+            try:
+                output = check_api(args.api, output=args.output)
+            finally:
+                if previous is not None:
+                    signal.signal(signal.SIGTERM, previous)
+            print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+            return output["exit_status"]
         if args.command == "run":
             from mirage.contracts.programs import RunOptions
             from mirage.workflow import run
@@ -88,9 +109,17 @@ def main(argv: list[str] | None = None) -> int:
                 values["generation_pipeline"] = values["representation_traversal"] = values["oracle_improvements"] = False
             values["output"] = str(values["output"])
             values["contract_version"] = 4 if values["strategy"] == "stateful" else 3
+            if values['strategy'] == 'properties':
+                print("mirage: properties is deprecated; historical reference only", file=sys.stderr)
             output = run(RunOptions(**values), apis)
         elif args.command == "resume":
             from mirage.runtime.pipeline import resume_pipeline
+            summary = args.directory / "summary.json"
+            if summary.exists() and json.loads(summary.read_text()).get('version') == 'api-check-1':
+                from mirage.artifacts.replay import resume_check
+                output = resume_check(args.directory)
+                print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+                return output['exit_status']
             output = resume_pipeline(args.directory)
         elif args.command == "replay":
             from mirage.workflow import replay
@@ -108,11 +137,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             property_summary=args.directory/"summary.json"
             saved = json.loads(property_summary.read_text()) if property_summary.exists() else {}
-            if saved.get('multi_api') is True:
+            if saved.get('version') == 'api-check-1' or saved.get('multi_api') is True:
                 output = saved
+            elif saved.get('strategy') == 'stateful':
+                from mirage.artifacts.report import summarize_search
+                output = saved.get('search_metrics') or summarize_search(saved)
             elif "records" in saved:
                 from mirage.artifacts.report import summarize_properties
                 output=summarize_properties(saved)
+                if saved.get('strategy') == 'properties' or any(
+                        row.get('configuration', {}).get('family') for row in saved['records']):
+                    output['strategy_status'] = 'deprecated_reference_only'
             else:
                 manifests = ArtifactStore(args.directory).list_manifests()
                 output = summarize(manifests)

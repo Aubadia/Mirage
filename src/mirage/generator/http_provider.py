@@ -124,10 +124,28 @@ class HTTPProvider:
         if expires <= started:
             raise TimeoutError("HTTP deadline expired before dispatch")
         payload = self._payload(request)
+        token_budget = None
+        if request.context.get("api_context", {}).get("spec_version") == "api-spec-1":
+            from urllib.request import Request as URLRequest, urlopen
+            endpoint = self.config.base_url.rstrip("/").removesuffix("/v1") + "/tokenize"
+            query = {"model": self.config.model, "messages": payload["messages"]}
+            try:
+                with urlopen(URLRequest(endpoint, data=json.dumps(query).encode(),
+                                        headers={"Content-Type": "application/json"}),
+                             timeout=min(5., max(.01, expires-time.monotonic()))) as response:
+                    counts = json.load(response)
+                available = int(counts["max_model_len"]) - int(counts["count"])
+                if available < 256:
+                    raise ValueError("Insufficient output context for a program")
+                payload["max_tokens"] = min(self.config.max_tokens, available)
+                token_budget = dict(prompt_tokens=counts["count"], context_limit=counts["max_model_len"],
+                                    output_cap=payload["max_tokens"])
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                raise ProviderFailure("context_budget", str(error)) from error
         request_id = uuid.uuid4().hex
         evidence = {
             "request_id": request_id, "endpoint": self.config.base_url,
-            "request": payload, "response": None, "http_status": None,
+            "request": payload, "token_budget": token_budget, "response": None, "http_status": None,
             "cancellation": "not_requested",
         }
         artifact = self.directory / f"http-{request_id}.json" if self.directory else None

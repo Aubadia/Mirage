@@ -440,6 +440,37 @@ def unmet_predicate_feedback(inspection, *, bindings=None, limit=3):
 def stateful_request(metadata, configuration, *, edges=True, canonical=None, predicates=(), relation=None, mutation=None):
     import copy
     context = copy.deepcopy(metadata)
+    if configuration.get('check_claim'):
+        claim = configuration['check_claim']
+        instructions = {
+            'forward': 'One legal target return. No optimizer or backward is necessary.',
+            'operand_relation': 'Construct operands with the requested relation, preserving call paths and required history. Shared storage may use disjoint legal views of one base.',
+            'backward': 'Execute a backward path from the target result to its differentiable operands.',
+            'accumulation': 'Execute two target-connected backward calls accumulating into the same leaf without clearing or overwriting its gradient.',
+            'scope_exit': 'Construct the target context with probe.call and enter and exit that exact instance.',
+            'callable_use': 'Construct the target callable with probe.call, then invoke the returned object with probe.call. Compiled/captured callables may also be invoked directly.',
+            'callback_trigger': 'Register a Python function with the target using probe.call, then trigger the registered callback through its documented PyTorch event.',
+            'persistent_step': 'Construct the optimizer or scheduler with probe.call. Set up valid gradients or prerequisite optimizer updates, then invoke probe.advance(product). Expose the resulting parameter or scheduler state.',
+            'async_completion': 'Obtain the actual work handle through probe.call and invoke probe.wait(handle) to await completion.',
+        }
+        api = configuration['api']
+        public_callable = 'torch.' + api if api.startswith('Tensor.') else api
+        prompt = (
+            f"Generate a small deterministic legal test of {api}. "
+            "Return JSON with exactly source. Define build(device, seed) returning a dict with inputs "
+            "and parameters dictionaries. run receives exactly that dict, e.g. x = ctx['inputs']['x']; "
+            "there is no flattened ctx['x']. Only registered leaf tensors requiring grad belong in parameters. "
+            "Use explicit finite small values on device, under 4096 elements. Define run(ctx, probe) returning "
+            "a dictionary of tensor or primitive observations. Call the exact public target with "
+            f"probe.call({public_callable}, ...), passing the real operands in place of ellipsis. "
+            "Probe has no target attribute. Use its return. Optional probe.mark records a named "
+            "checkpoint. Use only torch/math, no external I/O, random sampling or expected answers. "
+            "The initial and final checkpoints belong to the framework. Use only history needed by this claim. "
+            + instructions[claim])
+        return Request(Stage.TRANSITION if canonical else Stage.CANONICAL, prompt,
+            dict(contract='training-program', program_kind='stateful-1', api_context=context,
+                 canonical_source=canonical, configuration=configuration, state_predicates=list(predicates),
+                 prompt_version='spec-fragment-1', prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest()))
     raw = context.get("documentation", "")
     context["documentation_annotation"] = (
         "Installed documentation is API evidence. Its RNG-based examples are not instructions "

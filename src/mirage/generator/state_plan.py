@@ -528,3 +528,51 @@ def validate_plans(content, catalog, *, planning_family=None):
         except (ValueError, TypeError) as error:
             rejected.append({'plan': raw, 'reason': str(error), 'status': 'rejected', 'examined_goal_ids': []})
     return accepted, rejected
+
+
+def check_context(spec):
+    """A bounded generation view. The complete version-bound Spec remains on disk."""
+    meta = dict(spec.get('metadata', {}))
+    meta['documentation'] = meta.get('documentation', '')[:3500]
+    external = spec.get('external_documentation', {})
+    if not meta['documentation'] and external.get('status') == 'available':
+        meta['release_documentation'] = external['text'][:3500]
+    meta.update(spec_version=spec['version'], framework_version=spec['framework_version'],
+                sources=spec['sources'], unknown_fields=spec['unknown_fields'],
+                callable_capabilities=spec['capabilities'],
+                schemas=[row['schema'][:400] for row in spec['operator_schemas'][:8]])
+    meta.pop('documentation_references', None)
+    return meta
+
+
+def fragment_claims(spec):
+    """Text suggests a use protocol. Only the runtime inspector can establish it."""
+    doc = spec.get('metadata', {}).get('documentation', '').lower()
+    signature = str(spec.get('metadata', {}).get('signature', '')).lower()
+    hints = doc + ' ' + signature
+    if spec['capabilities'].get('steppable_product'):
+        return ['persistent_step']
+    if spec['capabilities'].get('context_manager_factory'):
+        return ['scope_exit']
+    if 'hook' in signature and 'hook' in doc:
+        return ['callback_trigger']
+    if spec['capabilities'].get('future_product') or any(term in hints for term in ('future[', 'async_op', 'work handle', 'asynchronous work')):
+        return ['async_completion', 'forward']
+    if spec['capabilities'].get('callable_product') or any(term in hints for term in ('returns a callable', 'returns a function', '-> callable',
+                                      'returns a graphed', 'optimized function', 'compiled function')):
+        return ['callable_use', 'forward']
+    return ['forward', 'backward', 'accumulation']
+
+
+def offer_relations(row, ledger):
+    """Offer only explicit two-operand goals from verified evidence, once per source."""
+    inspection = row.get('inspection', {})
+    if not inspection.get('valid') or row.get('configuration', {}).get('predicates'):
+        return
+    entry = dict(configuration=row['configuration'], evidence=inspection.get('semantic_coverage', {}))
+    for goal in goal_catalog(entry):
+        if goal['predicate']['dimension'] != 'tensor_relation':
+            continue
+        key = hashlib.sha256(json.dumps([row['api'], row['fingerprint'], row['configuration']['device'],
+                                         row['configuration']['seed'], goal['id']]).encode()).hexdigest()
+        ledger.setdefault(key, dict(goal, source=row['directory'], status='proposed', history=['proposed'], attempts=[]))

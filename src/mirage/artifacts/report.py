@@ -351,3 +351,30 @@ def summarize_multi_api(sessions, scheduling, limits, wall_seconds):
                 scheduling=scheduling, resource_limits=limits,
                 coverage_scope='Per-session verified denominators; no synthesized global coverage or MR Pass',
                 orchestration_scope='Completed sessions describe controller completion, not framework correctness')
+
+
+def summarize_api_check(report):
+    """Expose native evidence without promoting completion to correctness Pass."""
+    metrics = report.get("search_metrics") or summarize_search(report)
+    rows = report.get("records", [])
+    resources = [r['process']['resources'] for r in rows if r.get('process', {}).get('resources')]
+    return {"attempts": metrics["attempts"], "runtime_valid": metrics["runtime_valid"],
+            "verified_apis": metrics["verified_apis"],
+            "mr_verdicts": dict(Counter(row.get("mr_verdict") or "unassessed"
+                                       for row in report.get("records", []))),
+            "applicable_comparisons": metrics["applicable_comparisons"],
+            "numerical_audit_statuses": metrics["numerical_audit_statuses"],
+            "numerically_reported_cases": metrics["numerically_reported_cases"],
+            "provider_calls": report.get("provider_calls"),
+            "relation_candidates": report.get("relation_goal_candidates"),
+            "relation_statuses": report.get("relation_goal_counts"),
+            "worker_outcomes": dict(Counter(r['process']['outcome'] for r in rows if r.get('process'))),
+            "blocking_stages": metrics.get("blocking_stages"),
+            "replay_seconds": sum(r.get("automatic_replay_seconds", 0.) for r in rows),
+            "worker_user_cpu_seconds": sum(r.get("user_cpu_seconds", 0.) for r in resources) if resources else None,
+            "largest_worker_peak_rss_bytes": max((r.get("peak_rss_bytes", 0) for r in resources), default=None),
+            "model_request_seconds": sum(p["elapsed_seconds"] for p in report.get("model_request_timings", [])) if "model_request_timings" in report else None,
+            "known_tokens": metrics.get("known_tokens"), "token_usage_complete": metrics.get("token_usage_complete"),
+            "worker_seconds": sum(row.get("process", {}).get("elapsed_seconds", 0.) for row in report.get("records", [])),
+            "claims": dict(Counter(row.get("configuration", {}).get("check_claim", "unmeasured") for row in report.get("records", []))),
+            "scope": "Verified stateful cases; separate MR, local numerical and device comparison ledgers"}

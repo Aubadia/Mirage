@@ -17,11 +17,11 @@ RELATIONS = {
         ('same_initial_state', 'same_program', 'same_target_inputs', 'aligned_checkpoints'),
         ('target_outputs', 'gradients'), ('representation',), 'comparison', 'dtype_scaled_v1'),
     'materialized_value_effect': RelationSpec(
-        'materialized_value_effect', 1,
+        'materialized_value_effect', 2,
         ('valid_executions', 'logical_value_semantics', 'deterministic', 'matching_write_roles',
          'preserved_coordinates', 'finite_observations', 'numerical_domain'),
         ('same_initial_state', 'same_program', 'same_target_inputs', 'aligned_checkpoints'),
-        ('target_outputs',), ('representation', 'output_storage_identity'), 'comparison', 'dtype_scaled_v1'),
+        ('target_outputs', 'destinations', 'preserved_guard'), ('representation', 'output_storage_identity'), 'comparison', 'dtype_scaled_v1'),
     'context_restore': RelationSpec(
         'context_restore', 1, ('valid_executions', 'context_restore_contract', 'balanced_scopes'),
         ('aligned_checkpoints',), ('context_state',), ('nested_contexts',), 'comparison', 'exact'),
@@ -220,12 +220,24 @@ def representation_pair(left, right, backend):
     write_paths = [[c.get('writable_paths',[]) for c in r.get('target_calls',())] for r in (left,right)]
     if any(write_paths[0]) or any(write_paths[1]):
         matched = bool(write_paths[0]) and write_paths[0] == write_paths[1]
+        matched = matched and all(
+            isinstance(c.get('destination_values'), list) and len(c['destination_values']) == len(c.get('writable_paths', []))
+            for record in (left, right) for c in record['target_calls'])
+        partner_paths = [[[v['path'] for v in c.get('alias_partner_values', [])]
+                          for c in record['target_calls']] for record in (left, right)]
+        matched = matched and partner_paths[0] == partner_paths[1]
         evidence['matching_write_roles'] = Evidence(EvidenceStatus.VERIFIED if matched else EvidenceStatus.UNKNOWN,
-            'schema-derived write roles; comparison observes returned logical values only', True if matched else None,
+            'matching schema write roles and observed destinations', True if matched else None,
             'comparison','adapter')
-        return evaluate('materialized_value_effect', evidence,
-                        {'target_outputs':observations[0]['target_outputs']},
-                        {'target_outputs':observations[1]['target_outputs']}, backend.compare)
+        for observed, record in zip(observations, (left, right)):
+            observed['destinations'] = [c.get('destination_values') for c in record['target_calls']]
+            observed['partners'] = [c.get('alias_partner_values', []) for c in record['target_calls']]
+        outcome = evaluate('materialized_value_effect', evidence,
+            *[{k: item[k] for k in ('target_outputs', 'destinations', 'partners')} for item in observations], backend.compare)
+        if outcome['verdict'] in ('pass', 'suspected_failure') and any(
+                c.get('guard_preserved') is False for record in (left, right) for c in record['target_calls']):
+            outcome.update(verdict='suspected_failure', reason='write changed an initialized position outside the destination')
+        return outcome
     return evaluate('representation', evidence, *observations, backend.compare)
 
 

@@ -84,14 +84,39 @@ def inspect_state(record, predicates=()):
             indices={c['index'] for c in record.get('target_calls',()) if c.get('evidence')==kind or c.get('kind')==kind}
             backward=backward and (not backward_required or any(e.get('call') in indices for e in nodes))
             required_path=field+('_callable' if factory_target else '_target')
-    valid = bool(record.get('completed') and api and backward and all(p['attained'] for p in attained))
-    return {'valid': valid,
+    claim = record.get('config', {}).get('check_claim')
+    history = claim_history(record, claim, callable_calls, completed)
+    valid = bool(record.get('completed') and api and backward and history['attained'] and all(p['attained'] for p in attained))
+    return {'valid': valid, 'claim_history': history,
             'api_executed': api, 'required_backward_executed': backward, 'required_backward_path':required_path,
             'callable_execution_required': factory_target, 'required_callable_executed': not factory_target or bool(callable_calls),
             'predicates': attained, 'target_state_reached': all(p['attained'] for p in attained),
             'transition_signature': record.get('transition_signature', []),
             'correctness': 'unassessed', 'semantic_coverage': semantic_coverage(record, valid=valid),
             'optimizer_coverage': inspect_optimizer(record, valid=valid)}
+
+
+def claim_history(record, claim, callable_calls, completed):
+    calls = {c['index'] for c in record.get('target_calls', ())}
+    events = [e for e in record.get('product_events', ()) if e['call'] in calls]
+    if claim == 'scope_exit':
+        events = [e for e in record.get('context_events', ()) if e.get('balanced') and e.get('factory_call') in calls]
+    elif claim == 'callable_use':
+        events = [e for e in events if e['event'] == 'callable_return'] + sorted(callable_calls)
+    elif claim in ('callback_trigger', 'async_completion', 'persistent_step'):
+        kind = {'callback_trigger':'callback_return', 'async_completion':'wait_completed',
+                'persistent_step':'persistent_step_effect'}[claim]
+        events = [e for e in events if e['event'] == kind]
+    elif claim == 'accumulation':
+        contributions = {(e['invocation'], e['call'], tuple(e['path'])) for e in record.get('target_operand_gradients', ())}
+        events = [e for e in record.get('accumulations', ())
+                  if {e['first'], e['second']} <= completed and e['second'] == e['first'] + 1
+                  and all(any((inv, call, tuple(path)) in contributions for call, path in e['leaf_calls'])
+                          for inv in (e['first'], e['second']))]
+    else:
+        return dict(claim=claim, attained=True, reason='target, backward and predicates validated separately')
+    return dict(claim=claim, attained=bool(events), events=events, checkpoint='final',
+                reason='linked runtime history observed' if events else 'required linked runtime history missing')
 
 
 def _optimizer_path(value):

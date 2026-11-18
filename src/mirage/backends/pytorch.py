@@ -1018,8 +1018,8 @@ class ContextObserver:
         self.instances = []
         self.on_action = on_action
         self.supported = target in (torch.autocast, torch.no_grad, torch.enable_grad)
-        self.codes = ({target.__enter__.__code__: 'enter', target.__exit__.__code__: 'exit'}
-                      if self.supported else {})
+        methods = [getattr(getattr(target, name, None), '__code__', None) for name in ('__enter__', '__exit__')]
+        self.codes = dict(zip(methods, ('enter', 'exit'))) if isinstance(target, type) and all(methods) else {}
 
     def __enter__(self):
         import sys
@@ -1028,7 +1028,7 @@ class ContextObserver:
         self.restore = {'grad':torch.is_grad_enabled(), 'cache':torch.is_autocast_cache_enabled(),
                         'cpu':(torch.is_autocast_enabled('cpu'), torch.get_autocast_dtype('cpu')),
                         'cuda':(torch.is_autocast_enabled('cuda'), torch.get_autocast_dtype('cuda'))}
-        if self.supported: sys.setprofile(self.profile)
+        if self.codes: sys.setprofile(self.profile)
         return self
 
     def profile(self, frame, event, arg):
@@ -1059,7 +1059,7 @@ class ContextObserver:
     def __exit__(self, kind, value, traceback):
         import sys
         import torch
-        if self.supported: sys.setprofile(self.previous)
+        if self.codes: sys.setprofile(self.previous)
         if self.stack: self.records.append({'balanced':False, 'reason':'unclosed observed context'})
         # Cleanup happens after observations, including failures; it is not a
         # transition credited to the generated program or an oracle control.

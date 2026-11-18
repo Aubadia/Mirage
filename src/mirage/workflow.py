@@ -292,6 +292,132 @@ def execute(source, config, initial, directory, budget, engine=None, cancel=None
     return process, record
 
 
+def check_api(api, *, output=None):
+    """Run a name-only check using prepared environment settings and isolated probes."""
+    from mirage.contracts.apis import validate_api_name
+    from mirage.contracts.programs import RunOptions
+    from mirage.artifacts.report import summarize_api_check
+
+    started = time.monotonic()
+    root = Path(output) if output is not None else Path(os.environ.get(
+        "MIRAGE_CHECK_OUTPUT_ROOT", "result/check")) / ("run-" + uuid.uuid4().hex)
+    root = root.resolve()
+    root.mkdir(parents=True, exist_ok=False)
+    from fcntl import flock, LOCK_EX
+    run_lock = (root/'resume.lock').open('a')
+    flock(run_lock, LOCK_EX)
+    report = {"version": "api-check-1", "api": api, "directory": str(root),
+              "status": "running", "stage": "configuration", "terminal": False,
+              "correctness": "unassessed", "processes": [], "metrics": None,
+              "implementation_stage": "spec-fragments-1", "differential": {"status": "not_evaluated"}}
+    write_json(root / "summary.json", report)
+
+    def finish(status, reason, exit_status):
+        report.update(status=status, reason=reason, terminal=True,
+                      exit_status=exit_status, elapsed_seconds=time.monotonic() - started)
+        write_json(root / "summary.json", report)
+        return report
+
+    try:
+        validate_api_name(api)
+        limit = float(os.environ.get("MIRAGE_CHECK_TIME_LIMIT", "300"))
+        worker_timeout = float(os.environ.get("MIRAGE_CHECK_WORKER_TIMEOUT", "60"))
+        device = os.environ.get("MIRAGE_CHECK_DEVICE", "auto")
+        if device not in ("auto", "cpu", "cuda"):
+            raise ValueError("MIRAGE_CHECK_DEVICE must be auto, cpu or cuda")
+        provider = os.environ.get("MIRAGE_PROVIDER", "vllm")
+        # Configuration is frozen before any worker starts. Auto begins on CPU;
+        # claim-specific device exploration is implemented by later milestones.
+        options = RunOptions(output=str(root / "execution"), provider=provider,
+            cases=int(os.environ.get("MIRAGE_CHECK_CASES", "4")), time_limit=limit,
+            worker_timeout=worker_timeout, seed=int(os.environ.get("MIRAGE_CHECK_SEED", "0")),
+            strategy="stateful", contract_version=4, forward_only=True,
+            device="cpu" if device == "auto" else device,
+            representation_traversal=True, oracle_improvements=True)
+        toggle = os.environ.get("MIRAGE_CHECK_DIFFERENTIAL", "1")
+        if toggle not in ("0", "1"):
+            raise ValueError("MIRAGE_CHECK_DIFFERENTIAL must be 0 or 1")
+        report["configuration"] = dict(asdict(options), differential=toggle == "1")
+        report["configuration"]["budget_scope"] = "whole-check wall time, including preflight and metadata"
+        deadline = started + limit
+        if time.monotonic() >= deadline:
+            return finish("skipped", "budget_exhausted", 0)
+        report["stage"] = "specification"
+        write_json(root / "summary.json", report)
+        process = run_worker({"mode": "api_spec", "api": api}, root / "specification",
+                             min(worker_timeout, deadline - time.monotonic()))
+        report["processes"].append(asdict(process))
+        if process.outcome != "completed":
+            if process.outcome == "timeout" and time.monotonic() >= deadline:
+                return finish("skipped", "budget_exhausted", 0)
+            return finish("failed", "specification_worker_" + process.outcome, 1)
+        spec = json.loads((root / "specification/summary.json").read_text())
+        write_json(root / "api-spec.json", spec)
+        report["specification"] = "api-spec.json"
+        if spec["status"] != "resolved":
+            return finish("skipped", "api_unavailable", 0)
+        if device == "auto" and api.startswith("torch.cuda."):
+            from dataclasses import replace
+            options = replace(options, device="cuda")
+            report["configuration"]["device"] = "cuda"
+        if options.device == "cuda" and not spec["environment"]["cuda_available"]:
+            return finish("skipped", "requested_device_unavailable", 0)
+        if time.monotonic() >= deadline:
+            return finish("skipped", "budget_exhausted", 0)
+        report["stage"] = "provider_preflight"
+        write_json(root / "summary.json", report)
+        process = run_worker({"mode": "provider_preflight", "provider": provider},
+            root / "provider-preflight", min(worker_timeout, deadline - time.monotonic()))
+        report["processes"].append(asdict(process))
+        if process.outcome != "completed":
+            if process.outcome == "timeout" and time.monotonic() >= deadline:
+                return finish("skipped", "budget_exhausted", 0)
+            return finish("failed", "provider_preflight_" + process.outcome, 1)
+        if time.monotonic() >= deadline:
+            return finish("skipped", "budget_exhausted", 0)
+        report["stage"] = "execution"
+        write_json(root / "summary.json", report)
+        # Reserve a bounded slice for real-device comparison. Both experimental arms
+        # use the same generation budget to preserve paired-seed attribution.
+        generation_deadline = deadline - min(45., limit / 5) if spec["environment"]["cuda_available"] else deadline
+        result = run_stateful(options, (api,), path_policy="mixed", predicates=[],
+            representation_traversal=True, oracle_improvements=True, wall_deadline=generation_deadline, api_spec=spec)
+        report["execution_summary"] = "execution/summary.json"
+        report["metrics"] = summarize_api_check(result)
+        stop = result.get("stop_reason")
+        report["native_stop_reason"] = stop
+        write_json(root/"execution-complete.json", {"stop_reason": stop, "records": len(result.get("records", []))})
+        report["stage"] = "differential"
+        write_json(root/"summary.json", report)
+        from mirage.artifacts.replay import assess_devices
+        report["differential"] = assess_devices(root, result, spec, enabled=toggle == "1",
+                                                timeout=worker_timeout, deadline=deadline)
+        failures = [row for row in result.get("records", [])
+                    if row.get("status") == "provider_failed"]
+        worker_failures = [row for row in result.get("records", [])
+                           if row.get("process", {}).get("outcome") in ("crash", "timeout")]
+        if failures or worker_failures or stop in ("metadata_failed", "controller_error", "provider_cancellation_unconfirmed"):
+            return finish("failed", "execution_incomplete", 1)
+        if report["metrics"]["runtime_valid"] == 0:
+            reason = "budget_exhausted" if stop == "time_limit" else "no_verified_execution"
+            return finish("skipped", reason, 0)
+        if report["differential"]["incomplete"]:
+            return finish("partial", "differential_incomplete", 1)
+        return finish("completed", "bounded_execution_finished", 0)
+    except KeyboardInterrupt:
+        if report['stage'] == 'differential':
+            report['differential']['incomplete'] = True
+        return finish("interrupted", "interrupted", 130)
+    except Exception as error:
+        import traceback
+        (root / "error.txt").write_text(traceback.format_exc())
+        report["error"] = f"{type(error).__name__}: {error}"
+        reason = "configuration_error" if report["stage"] == "configuration" else "controller_error"
+        return finish("failed", reason, 2 if reason == "configuration_error" else 1)
+    finally:
+        run_lock.close()
+
+
 def run(options, apis):
     from mirage.runtime.scheduler import current_scope
     if options.active_api_limit > 1 and current_scope() is None:
@@ -633,6 +759,10 @@ def _run(options, apis):
 
 def replay(manifest_path, *, timeout=600, allow_environment_change=False, deadline=None, cancel=None):
     candidate = json.loads(Path(manifest_path).read_text())
+    if candidate.get('format') == 'device-differential-1':
+        from mirage.artifacts.replay import replay_devices
+        result = replay_devices(manifest_path, timeout=timeout, deadline=deadline or time.monotonic()+timeout)
+        return dict(result, replay_valid=result['status'] != 'incomplete')
     if candidate.get('format') == 'stateful-1-replay':
         return replay_stateful(Path(manifest_path), timeout=timeout,
                                allow_environment_change=allow_environment_change, cancel=cancel)
@@ -770,11 +900,11 @@ def run_properties(options, apis):
         row['repair_index']=repair_count
         row['finished_seconds']=time.monotonic()-started
         write_json(attempt/'outcome.json',row); results.append(row)
-        write_json(root/'summary.json',dict(stop_reason=stop,records=results,elapsed_seconds=time.monotonic()-started,
+        write_json(root/'summary.json',dict(strategy='properties',strategy_status='deprecated_reference_only',stop_reason=stop,records=results,elapsed_seconds=time.monotonic()-started,
                                           provider_calls=provider.calls))
         if stop=='provider_cancellation_unconfirmed': break
     if len(results)>=options.cases and stop=='time_limit': stop='case_limit'
-    output=dict(stop_reason=stop,records=results,elapsed_seconds=time.monotonic()-started,provider_calls=provider.calls,metadata_seconds=metadata_seconds,dispatch_reserve_seconds=45)
+    output=dict(strategy='properties',strategy_status='deprecated_reference_only',stop_reason=stop,records=results,elapsed_seconds=time.monotonic()-started,provider_calls=provider.calls,metadata_seconds=metadata_seconds,dispatch_reserve_seconds=45)
     write_json(root/'summary.json',output)
     return output
 
@@ -859,7 +989,7 @@ def run_stateful(options, apis, **kwargs):
 
 def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="backward", coverage_refinement=True,
                  search_policy="adaptive", generation_mode="local", coverage_basis="semantic",
-                 representation_traversal=False, oracle_improvements=False, _pipeline=None):
+                 representation_traversal=False, oracle_improvements=False, _pipeline=None, wall_deadline=None, api_spec=None):
     """Corpus-guided local generation, runtime mutation and conditional MR assessment.
 
     API/issue benchmark data never enters this path. Every candidate and repair
@@ -903,8 +1033,19 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     metadata_started = time.monotonic()
     for index, api in enumerate(apis):
         directory = root / f'api-{index}'
+        if api_spec is not None:
+            from mirage.generator.state_plan import check_context, fragment_claims
+            if api_spec['api'] != api or api_spec['status'] != 'resolved':
+                raise ValueError('Acquired Spec does not identify the requested API')
+            metadata[api] = check_context(api_spec)
+            directory.mkdir()
+            write_json(directory/'summary.json', metadata[api])
+            continue
+        metadata_timeout = options.worker_timeout
+        if wall_deadline is not None:
+            metadata_timeout = min(metadata_timeout, wall_deadline - time.monotonic())
         process = (_pipeline.worker if _pipeline else run_worker)({'mode':'api_metadata', 'api':api, 'contract':'stateful-1',
-                              'engine':str(root/'engine')}, directory, options.worker_timeout)
+                              'engine':str(root/'engine')}, directory, metadata_timeout)
         if process.outcome != 'completed':
             result = {'strategy':'stateful', 'records':[], 'stop_reason':'metadata_failed', 'error':process.error}
             write_json(root/'summary.json', result); return result
@@ -914,6 +1055,8 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     # In pipeline mode only model calls spend the per-API budget. Each test
     # retains its own timeout; allocation interruption is handled by the owner.
     deadline = started + (1e9 if _pipeline else options.time_limit)
+    if wall_deadline is not None:
+        deadline = min(deadline, wall_deadline)
     scope = current_scope()
     if scope is not None and not _pipeline:
         scope.deadline = deadline if scope.deadline is None else min(scope.deadline, deadline)
@@ -932,6 +1075,8 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     signatures, proposal_counts = {}, Counter()
     dispatch_reserve = 10.
     dispatch_stop = None
+    relation_ledger = {}
+    claim_index = 0
     input_index = 0
     exception_reruns = Counter()
     def consume_representations():
@@ -976,8 +1121,10 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
             dispatch_stop = {'reason': 'pending_or_minimum_reserve', 'reserve_seconds': early_reserve,
                              'remaining_seconds': deadline-time.monotonic()}
             stop = 'time_limit'; break
+        relation_id = next((key for key, item in relation_ledger.items()
+                            if item['status'] == 'proposed'), None) if index % 4 == 1 and not pending else None
         representation_work = (traversal.choose(deadline-time.monotonic(), dispatch_reserve)
-                               if traversal and not _pipeline and not pending and (input_index % 2 == 1
+                               if traversal and not _pipeline and not pending and not relation_id and (input_index % 2 == 1
                                    or deadline-time.monotonic() <= dispatch_reserve) else None)
         if representation_work:
             origin, candidate, parent_source, reserve = representation_work
@@ -1003,6 +1150,33 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
             config = dict(request.context['configuration'])
             api = config['api']
             pending = None
+        elif api_spec is not None:
+            api = api_spec['api']
+            protocol = fragment_claims(api_spec)
+            claim = protocol[claim_index % len(protocol)]
+            parent_source = None
+            requested = []
+            if relation_id:
+                candidate = relation_ledger[relation_id]
+                candidate['status'] = 'dispatched'
+                candidate['history'].append('dispatched')
+                write_json(root/'relation-ledger.json', relation_ledger)
+                parent_source = (Path(candidate['source'])/'program.py').read_text()
+                requested = [candidate['predicate']]
+                claim = 'operand_relation'
+            else:
+                claim_index += 1
+            config = dict(api=api, device=options.device, seed=options.seed, attempt=index,
+                          proposal_index=input_index, predicates=requested, check_claim=claim,
+                          requires_backward=claim in ('backward', 'accumulation') or any(
+                              p.get('relation') or p.get('peer_relation') for p in requested),
+                          input_categories=['ordinary'], representation_traversal=True)
+            request = stateful_request(metadata[api], config, predicates=requested, canonical=parent_source)
+            if relation_id:
+                request.context['relation_id'] = relation_id
+            choice = dict(api=api, parent=None, kind='fresh', goal=claim)
+            selection = dict(policy='spec_and_observed_relations', candidate_count=len(protocol))
+            input_index += 1
         else:
             mutation = None
             if search_policy == 'adaptive':
@@ -1459,6 +1633,19 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
         if row.get('representation_traversal'):
             item = row['representation_traversal']
             item['status'] = traversal.complete(item['source_id'], item['candidate_id'], row)
+        if api_spec is not None:
+            from mirage.generator.state_plan import offer_relations
+            key = request.context.get('relation_id')
+            if key:
+                item = relation_ledger[key]
+                item['attempts'].append(index)
+                item.update(status='reached' if row.get('inspection', {}).get('valid') else 'not_reached',
+                            checkpoint=row.get('inspection', {}).get('predicates', []),
+                            reason=row.get('reason'), directory=str(directory))
+                item['history'].append(item['status'])
+            if row.get('proposal_origin') != 'framework_representation':
+                offer_relations(row, relation_ledger)
+            write_json(root/'relation-ledger.json', relation_ledger)
         if traversal and not _pipeline and row.get('executable'):
             row['representation_source_id'] = traversal.register(source, row)
         if traversal and not _pipeline:
@@ -1499,7 +1686,7 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                 # overall search deadline includes this separately reported cost.
                 row['automatic_replay_seconds'] = time.monotonic()-replay_started
                 write_json(directory/'automatic-replays.json', row['automatic_replays'])
-            if (predicates == [] and generation_mode == 'local' and coverage_feedback and row['corpus_admission'].get('admitted') and not repairable
+            if (api_spec is None and predicates == [] and generation_mode == 'local' and coverage_feedback and row['corpus_admission'].get('admitted') and not repairable
                     and row.get('verdict') != 'suspected_failure' and request.context.get('refinement_kind') != 'input_coverage'):
                 refinement = plan_mutation(source, row['corpus_admission']['seed_id'], input_index, kind='initialization')
                 if refinement is not None:
@@ -1563,6 +1750,10 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
         if not result['pipeline_complete']:
             result['stop_reason'] = 'pipeline_incomplete'
         result['budget_scope'] = 'Cumulative model request seconds per API; framework drain is independent'
+    if api_spec is not None:
+        result['model_request_timings'] = provider.request_timings
+        result['relation_goal_counts'] = dict(Counter(item['status'] for item in relation_ledger.values()))
+        result['relation_goal_candidates'] = len(relation_ledger)
     result['search_metrics'] = summarize_search(result)
     write_json(root/'summary.json', result)
     return result
