@@ -2,6 +2,7 @@
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from dataclasses import asdict
 import json
 import os
@@ -10,6 +11,7 @@ import shutil
 import signal
 import threading
 import time
+import tempfile
 import uuid
 
 from mirage.artifacts.bundle import inventory, load_tensor_record, snapshot_engine, verify
@@ -21,6 +23,8 @@ from mirage.generator.repair import generate, Diagnostic, DiagnosticKind
 from mirage.rules.conditional import inspect, RULE_VERSION
 from mirage.runtime.process import run_worker
 from mirage.sampler.policy import Sampler
+from mirage.contracts.candidates import CANDIDATE_VERSION, CapabilitySnapshot
+from mirage.sampler.candidates import registry, legal_paths, unmet_requirements
 
 
 _JSON_SCALAR_TYPES = (str, int, float, bool, type(None))
@@ -59,7 +63,18 @@ def _report_json_value(value):
 
 
 def write_json(path, value):
-    path.write_text(json.dumps(_report_json_value(value), indent=2, allow_nan=False), encoding="utf-8")
+    payload = json.dumps(_report_json_value(value), indent=2, allow_nan=False)
+    pending = None
+    try:
+        # Publish only a complete write; interrupted/full-storage writes keep the old report.
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                prefix=f'.{path.name}.', suffix='.pending', delete=False) as stream:
+            pending = Path(stream.name)
+            stream.write(payload)
+        pending.replace(path)
+    finally:
+        if pending is not None:
+            pending.unlink(missing_ok=True)
 
 
 def state_repair_progress(inspection):
@@ -278,6 +293,14 @@ def execute(source, config, initial, directory, budget, engine=None, cancel=None
 
 
 def run(options, apis):
+    from mirage.runtime.scheduler import current_scope
+    if options.active_api_limit > 1 and current_scope() is None:
+        from mirage.runtime.multi_api import run_multi_api
+        return run_multi_api(options, apis)
+    return _run(options, apis)
+
+
+def _run(options, apis):
     if options.strategy == "stateful":
         return run_stateful(options, apis, representation_traversal=options.representation_traversal,
                             oracle_improvements=options.oracle_improvements)
@@ -288,7 +311,11 @@ def run(options, apis):
     batch_id = f"batch-{uuid.uuid4().hex[:16]}"
     started = time.monotonic()
     deadline = started + options.time_limit
-    cancel = threading.Event()
+    from mirage.runtime.scheduler import cancellation_event, current_scope
+    scope = current_scope()
+    if scope is not None:
+        scope.deadline = deadline if scope.deadline is None else min(scope.deadline, deadline)
+    cancel = cancellation_event()
     gate = threading.BoundedSemaphore(options.generation_concurrency)
     resources = []
     generations = []
@@ -298,6 +325,7 @@ def run(options, apis):
     api_locks = {api: threading.Lock() for api in apis}
     metadata_cache = {}
     target_attempts = Counter()
+    unmet_by_api = {}
     stop_reason = "completed"
     reserved_cases = 0
     old_signals = {}
@@ -404,8 +432,10 @@ def run(options, apis):
                 saved_attempts.append(attempt)
                 write_json(directory / f"attempt-{len(saved_attempts):02d}.json", asdict(attempt))
 
+            with lock:
+                requirements = tuple(unmet_by_api.get(api, ()))
             generation = generate(provider, request(metadata, config["seed"], options.device, options.size,
-                                                    config["requires_backward"]),
+                                                    config["requires_backward"], requirements),
                                   validate, deadline=deadline, record=save_attempt)
             write_json(directory / "generation.json", asdict(generation))
             with lock:
@@ -416,17 +446,23 @@ def run(options, apis):
             entry.update(status="validated", graph=selected["graph"],
                          canonical_api_verified=True,
                          canonical_backward_verified=selected["record"]["backward_executed"])
-            consumed = set().union(*(set(call.get("input_names", []))
-                                     for call in selected["record"]["target_calls"]))
-            operand_metadata = {name: value for name, value in selected["metadata"]["metadata"].items()
-                                if name.removeprefix(".0.") in consumed}
-            choices = targets(config, operand_metadata, None)
-            if not selected["graph"]["sample_loss"] or not selected["metadata"]["batch_axes"]:
-                choices = [(rule, target) for rule, target in choices if rule != "accumulation"]
+            snapshot = CapabilitySnapshot.read(selected["record"]["capabilities"])
+            candidates = registry(config, snapshot)
+            entry["candidate_contract_version"] = CANDIDATE_VERSION
+            entry["capabilities"] = snapshot.payload()
+            entry["candidates"] = [candidate.payload() for candidate in candidates]
+            requirements = unmet_requirements(candidates)
+            entry["unmet_capability_requirements"] = requirements
+            with lock:
+                unmet_by_api[api] = requirements
+            admitted = [candidate for candidate in candidates if candidate.status == "admitted"]
+            choices = [(candidate.rule, dict(candidate.configuration, candidate_id=candidate.identifier,
+                        candidate_prerequisites=list(candidate.prerequisites))) for candidate in admitted]
             entry["declared_targets"] = len(choices)
             remaining_targets = list(range(len(choices)))
             for target_index in range(min(options.targets_per_canonical, len(choices))):
-                keys = {i: json.dumps({k: v for k, v in choices[i][1].items() if k != "seed"}, sort_keys=True)
+                keys = {i: json.dumps({k: v for k, v in choices[i][1].items()
+                                      if k not in ("seed", "candidate_id", "candidate_prerequisites")}, sort_keys=True)
                         for i in remaining_targets}
                 with lock:
                     sampler = Sampler(tuple(remaining_targets), seed=config["seed"] + target_index, epsilon=options.epsilon)
@@ -434,6 +470,12 @@ def run(options, apis):
                     target_attempts[keys[chosen]] += 1
                 remaining_targets.remove(chosen)
                 rule, followup = choices[chosen]
+                candidate_id = followup["candidate_id"]
+                offered = legal_paths(followup, backward=snapshot.facts["backward"].established,
+                                      optimizer=snapshot.facts["optimizer"].established)
+                if not offered:
+                    entry.setdefault("unresolved_paths", []).append(candidate_id)
+                    continue
                 if (rule in ("layout", "storage", "checkpoint", "saved_tensor")
                         and not selected["record"]["pure"]
                         or rule in ("layout", "storage", "saved_tensor") and selected["record"]["stochastic"]):
@@ -457,17 +499,20 @@ def run(options, apis):
                             if not isinstance(value, dict) or set(value) != {"actions"}:
                                 raise ContractError("Return exactly actions")
                             plan["history"] = list(validate_history(value["actions"], followup))
+                            if tuple(plan["history"]) not in offered:
+                                raise ContractError("Select exactly one offered complete legal path")
                         except (ValueError, TypeError) as error:
                             return Diagnostic(DiagnosticKind.CONTRACT, str(error))
                         return Diagnostic(DiagnosticKind.ACCEPTED)
 
-                    planned = generate(provider, history_request(followup, selected["source"], path_index),
+                    planned = generate(provider, history_request(followup, selected["source"], path_index, offered),
                                        validate_plan, deadline=deadline)
                     write_json(bundle / "generation.json", asdict(planned))
                     with lock:
                         generations.append(planned)
                     if planned.status != "accepted":
-                        item = {"id": case_id, "api": api, "status": f"plan_{planned.status}"}
+                        item = {"id": case_id, "api": api, "candidate_id": candidate_id,
+                                "status": f"plan_{planned.status}"}
                         entry["cases"].append(item)
                         with lock:
                             cases.append(item)
@@ -491,15 +536,19 @@ def run(options, apis):
                     verified = all(r and r["api_executed"] and (not config["requires_backward"] or r["backward_executed"])
                                    and r["target_state_reached"] for r in records)
                     payload = {"generation_contract_version": 3, "bundle": case_id,
+                               "candidate_contract_version": CANDIDATE_VERSION,
+                               "candidate": admitted[chosen].payload(),
                                "status": "executed", "api": api, "canonical": identifier,
                                "rule": rule, "rule_version": RULE_VERSION, "configs": configs,
                                "results": [asdict(p) for p in results], "inspection": inspection,
                                "verified": verified, "files": inventory(bundle)}
                     manifest = ArtifactStore(root).write(case_id, "experiment", payload)
                     item = {"id": case_id, "api": api, "status": "executed", "rule": rule,
+                            "candidate_id": candidate_id,
                             "verified": verified, "verdict": inspection.get("verdict"),
                             "outcomes": [result.outcome for result in results],
-                            "state": {k: v for k, v in followup.items() if k not in ("seed", "history")},
+                            "state": {k: v for k, v in followup.items()
+                                      if k not in ("seed", "history", "candidate_id", "candidate_prerequisites")},
                             "path": plan["history"], "manifest": str(manifest)}
                     item["transition"] = records[-1].get("transition", []) if records[-1] else []
                     if inspection.get("verdict") == "suspected_failure":
@@ -532,14 +581,14 @@ def run(options, apis):
             for _ in range(options.workers):
                 item = next(iterator, None)
                 if item:
-                    futures[executor.submit(canonical, *item)] = item
+                    futures[executor.submit(copy_context().run, canonical, *item)] = item
             while futures:
                 done = next(as_completed(futures))
                 futures.pop(done)
                 canonical_results.append(done.result())
                 item = next(iterator, None)
                 if item and not cancel.is_set() and budget() > 0:
-                    futures[executor.submit(canonical, *item)] = item
+                    futures[executor.submit(copy_context().run, canonical, *item)] = item
     finally:
         for number, handler in old_signals.items():
             signal.signal(number, handler)
@@ -551,6 +600,7 @@ def run(options, apis):
     verified_cases = [case for case in cases if case.get("verified")]
     report = {
         "batch_id": batch_id, "generation_contract_version": 3, "stop_reason": stop_reason,
+        "candidate_contract_version": CANDIDATE_VERSION,
         "wall_seconds": time.monotonic() - started, "options": asdict(options),
         "canonicals": canonical_results, "experiments": cases,
         "case_statuses": dict(Counter(case["status"] for case in cases)),
@@ -572,9 +622,11 @@ def run(options, apis):
                      "api_mr": {"applicable": len({(c["api"], c["rule"]) for c in cases
                                                      if c.get("verdict") in ("pass", "suspected_failure")}),
                                 "declared": len(apis) * 6},
-                     "candidate_basis": "bounded declared targets; feasibility is established only by execution"},
+                     "candidate_basis": "bounded evidence-admitted candidates; attainment requires execution"},
         "resources": resources,
     }
+    from mirage.artifacts.report import summarize_training_candidates
+    report["candidate_metrics"] = summarize_training_candidates(canonical_results, cases)
     ArtifactStore(root).write(f"{batch_id}-report", "report", report)
     return report
 
@@ -752,6 +804,10 @@ def replay_property(path, *, timeout, allow_environment_change=False, cancel=Non
 
 def run_stateful(options, apis, **kwargs):
     """Run independent per-API model budgets, or the explicit legacy wall budget."""
+    from mirage.runtime.scheduler import current_scope
+    if options.active_api_limit > 1 and current_scope() is None:
+        from mirage.runtime.multi_api import run_multi_api
+        return run_multi_api(options, apis, stateful_options=kwargs)
     if not options.generation_pipeline:
         return _run_stateful(options, apis, **kwargs)
     from dataclasses import replace
@@ -810,6 +866,7 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     retains its request, response and execution evidence under one bounded run.
     """
     from dataclasses import replace
+    from mirage.runtime.pipeline import GenerationBudgetExhausted
     from mirage.generator.program import (stateful_request, analyze_stateful, unmet_predicate_feedback,
                                           source_operand_bindings)
     from mirage.contracts.exploration import stateful_input_profile, stateful_state_predicates, stateful_diversity_predicates
@@ -840,8 +897,9 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     snapshot_engine(root / 'engine')
     write_json(root / 'engine-sha256.json', inventory(root / 'engine'))
     metadata, rows = {}, []
+    from mirage.runtime.scheduler import current_scope
     provider = IsolatedProvider(options.provider, root, options.worker_timeout,
-                                cancel=_pipeline.cancel if _pipeline else None)
+                                cancel=_pipeline.cancel if _pipeline else (current_scope().cancel if current_scope() else None))
     metadata_started = time.monotonic()
     for index, api in enumerate(apis):
         directory = root / f'api-{index}'
@@ -856,6 +914,9 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     # In pipeline mode only model calls spend the per-API budget. Each test
     # retains its own timeout; allocation interruption is handled by the owner.
     deadline = started + (1e9 if _pipeline else options.time_limit)
+    scope = current_scope()
+    if scope is not None and not _pipeline:
+        scope.deadline = deadline if scope.deadline is None else min(scope.deadline, deadline)
     pending = None; repair_count = 0; stop = 'case_limit'
     corpus = Corpus(root, coverage_basis=coverage_basis)
     feedback = FeedbackSampler(seed=options.seed, epsilon=options.epsilon, coverage_basis=coverage_basis)
@@ -899,6 +960,9 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     else:
         execute_worker = run_worker
     for index in range(options.cases):
+        if scope is not None and scope.cancel.is_set():
+            stop = 'interrupted'
+            break
         if _pipeline:
             _pipeline.wait_capacity()
             consume_representations()
@@ -1314,6 +1378,18 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                             exception_reruns[api] += 1
                             row['exception_rerun'] = (_pipeline.operation if _pipeline else lambda fn, *args: fn(*args))(rerun_stateful_exception, process, directory/'exception-rerun',
                                 min(options.worker_timeout, max(5, 2*process.elapsed_seconds+2), remaining))
+        except GenerationBudgetExhausted as error:
+            # No request was sent; retain prior planning evidence and drain existing work.
+            stop = 'llm_time_limit'
+            if phase == 'state_plan':
+                row['planning_dispatched'] = False
+            row.update(status='budget_before_generation', reason=str(error),
+                       program_generation_dispatched=False, budget_rejected_request_dispatched=False,
+                       generation_budget_stop=_pipeline.generation_budget_stop,
+                       finished_seconds=time.monotonic()-started)
+            write_json(directory/'outcome.json', row)
+            rows.append(row)
+            break
         except (ContractError, SyntaxError, json.JSONDecodeError) as error:
             status = 'invalid_program'
             if phase == 'state_plan':

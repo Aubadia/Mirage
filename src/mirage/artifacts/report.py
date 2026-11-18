@@ -3,6 +3,26 @@
 from collections import Counter
 
 
+def summarize_training_candidates(canonicals, cases):
+    """Counts have explicit units; admission never supplies verified coverage."""
+    candidates = [c for row in canonicals for c in row.get("candidates", ())]
+    executed = [c for c in cases if c.get("status") == "executed"]
+    return {
+        "basis": "finite candidate instances per canonical; attempts per sampled path",
+        "registry": dict(Counter(c["status"] for c in candidates)),
+        "reasons": dict(Counter(reason for c in candidates for reason in c["reasons"])),
+        "registered_instances": len(candidates),
+        "sampled_candidate_instances": len({(c["id"].rsplit("-t", 1)[0], c["candidate_id"])
+                                            for c in cases if c.get("candidate_id")}),
+        "sampled_path_attempts": len(cases), "executed_path_attempts": len(executed),
+        "attained_path_attempts": sum(c.get("verified") is True for c in executed),
+        "mr_applicable_path_attempts": sum(c.get("verdict") in ("pass", "suspected_failure") for c in executed),
+        "verdicts": dict(Counter(c.get("verdict") or "unassessed" for c in executed)),
+        "unmet_capability_requirements": sorted({key for row in canonicals
+                                                 for key in row.get("unmet_capability_requirements", ())}),
+    }
+
+
 def summarize(manifests: list[dict]) -> dict:
     reports = [item for item in manifests if item["kind"] == "report" and "coverage" in item["payload"]]
     latest = {}
@@ -247,7 +267,9 @@ def summarize_search(report):
                        for unit in verified_search_units(r, include_optimizer=False)}
     elapsed = report.get('elapsed_seconds', 0)
     usage = [r.get(key) or {} for r in rows for key in ('planning_usage', 'generation_usage')
-             if key in r or key == 'generation_usage' and r.get('first_blocking_stage') != 'state_plan']
+             if (key in r or key == 'generation_usage' and r.get('first_blocking_stage') != 'state_plan')
+             and r.get('planning_dispatched' if key == 'planning_usage' else 'program_generation_dispatched') is not False]
+    planning_rows = [r for r in rows if r.get('planning_dispatched', 'planning_usage' in r) is True]
     known_tokens = sum(u.get('input_tokens') or 0 for u in usage) + sum(u.get('output_tokens') or 0 for u in usage)
     tokens_complete = bool(rows) and all(u.get('input_tokens') is not None and u.get('output_tokens') is not None for u in usage)
     audits = [a for r in rows for a in r.get('gradient_audits', {}).values()]
@@ -260,8 +282,8 @@ def summarize_search(report):
             'numerical_audit_seconds':sum(a.get('cost', {}).get('seconds', 0) for a in audits),
             'numerical_unknown_reasons':dict(Counter(a.get('reason', 'unspecified') for a in audits if a.get('status') in ('unknown','unsupported'))),
             'numerically_reported_cases':sum(bool(r.get('numerical_violation_members')) for r in rows),
-            'planning_calls':sum('planning_usage' in r for r in rows),
-            'planning_family_calls':dict(Counter(r['planning_family_selection']['family'] for r in rows
+            'planning_calls':len(planning_rows),
+            'planning_family_calls':dict(Counter(r['planning_family_selection']['family'] for r in planning_rows
                                                 if 'planning_family_selection' in r)),
             'planning_unresolved_proposals':sum(len(r.get('planning_unresolved', [])) for r in rows),
             'planning_outcomes':dict(Counter(r['planning_outcome'] for r in rows if r.get('planning_outcome'))),
@@ -308,3 +330,24 @@ def summarize_search(report):
             'semantic_units_per_1000_tokens':1000*len(semantic)/known_tokens if tokens_complete and known_tokens else None,
             'candidate_denominator':'per-decision known candidates after history and budget filters; feasibility unproven, no theoretical coverage fraction',
             'confirmed_defects':None, 'stop_reason':report.get('stop_reason')}
+
+
+def summarize_multi_api(sessions, scheduling, limits, wall_seconds):
+    """Keep per-session oracle/coverage denominators; aggregate orchestration only."""
+    from copy import deepcopy
+    sessions = deepcopy(sessions)
+    reports = [row['report'] for row in sessions if row.get('report') is not None]
+    complete = all(row['state'] == 'completed' for row in sessions)
+    pending = any(row['state'] in ('queued', 'running') for row in sessions)
+    reason = ('interrupted' if scheduling['cancelled'] else 'running' if pending else
+              'completed' if complete else 'completed_with_failures')
+    strategies = {row['strategy'] for row in sessions}
+    return dict(strategy=next(iter(strategies)) if len(strategies) == 1 else 'multi_api',
+                multi_api=True, stop_reason=reason, sessions=sessions, per_api=reports,
+                expected_apis=[row['api'] for row in sessions],
+                completed_api_runs=sum(row['state'] == 'completed' for row in sessions),
+                elapsed_seconds=wall_seconds,
+                per_api_elapsed_seconds_sum=sum(row.get('session_wall_seconds', 0.) for row in sessions),
+                scheduling=scheduling, resource_limits=limits,
+                coverage_scope='Per-session verified denominators; no synthesized global coverage or MR Pass',
+                orchestration_scope='Completed sessions describe controller completion, not framework correctness')

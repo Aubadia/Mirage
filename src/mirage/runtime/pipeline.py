@@ -2,6 +2,7 @@
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from copy import deepcopy
+from contextvars import copy_context
 from dataclasses import asdict, replace
 import json
 import math
@@ -34,12 +35,34 @@ class BudgetedProvider:
         return self.provider.calls
 
     def generate(self, request, *, deadline=None):
+        from mirage.runtime.scheduler import generation_slot
+        # Queue for shared generation capacity before starting the model timer.
+        # Capacity/feedback waits must not hold a scarce generation lease.
+        self.pipeline.wait_capacity()
+        with generation_slot(label=self.pipeline.root / f'provider-{self.calls + 1:03d}'):
+            return self._generate(request, deadline=deadline)
+
+    def _generate(self, request, *, deadline=None):
         p = self.pipeline
-        p.wait_capacity()
         p.consume()
         remaining = p.budget - p.model_seconds
-        if remaining <= 0.01:
-            raise GenerationBudgetExhausted('Per-API model request budget exhausted')
+        with p.condition:
+            history = [event for event in p.model_events
+                if event.get('outcome') == 'completed' and event.get('finished') is not None
+                and event.get('stage') == request.stage.value
+                and event.get('contract') == request.context.get('contract')]
+            # Avoid dispatching a request that cannot fit its already observed cost.
+            # This estimate is not a guarantee; real timeout uncertainty stays unchanged.
+            reserve = max((max(event.get('seconds', 0.), event['finished'] - event['started'])
+                           for event in history), default=0.)
+            if remaining <= 0.01 or remaining < reserve:
+                p.generation_budget_stop = {
+                    'stage': request.stage.value, 'contract': request.context.get('contract'),
+                    'remaining_model_seconds': max(0., remaining), 'estimated_request_seconds': reserve,
+                    'history_samples': len(history), 'request_dispatched': False,
+                    'basis': 'maximum observed completed same-stage/contract request plus wrapper cost'}
+                p.persist()
+                raise GenerationBudgetExhausted('Remaining model budget cannot admit the next request')
         context = deepcopy(request.context)
         context['feedback_snapshot'] = p.feedback_snapshot()
         request = replace(request, context=context)
@@ -79,13 +102,15 @@ class ExecutionPipeline:
         self.budget, self.worker_timeout = budget, worker_timeout
         self.replay_failures = replay_failures
         self.condition = threading.Condition(threading.RLock())
-        self.cancel = threading.Event()
+        from mirage.runtime.scheduler import cancellation_event
+        self.cancel = cancellation_event()
         self.workers = workers
         self.generation_overlap = generation_overlap
         self.completed = queue.Queue()
         self.traversal = RepresentationTraversal(include_suspects=True)
         self.model_events, self.worker_events, self.rows = [], [], []
         self.model_seconds = self.queue_seconds = 0.
+        self.generation_budget_stop = None
         self.backpressure_measurement_complete = True
         self.feedback_version, self.feedback_rows = 0, []
         self.consume = lambda: None
@@ -101,6 +126,7 @@ class ExecutionPipeline:
             self.model_events = state['model_events']
             self.worker_events = state['worker_events']
             self.model_seconds = state['model_seconds']
+            self.generation_budget_stop = state.get('generation_budget_stop')
             # Old ledgers used one slot and did not persist backpressure time.
             self.workers = state.get('workers', 1)
             self.generation_overlap = state.get('generation_overlap', True)
@@ -123,7 +149,7 @@ class ExecutionPipeline:
         # Wrappers may wait for source/replay subprocesses. They must not occupy
         # the execution slots they submit to, which would deadlock a full pool.
         self.representations = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix='mirage-representation')
-        self.thread = threading.Thread(target=self._drain, name='mirage-representations', daemon=False)
+        self.thread = threading.Thread(target=copy_context().run, args=(self._drain,), name='mirage-representations', daemon=False)
 
     def start(self):
         self.thread.start()
@@ -194,7 +220,7 @@ class ExecutionPipeline:
                     event['seconds'] = event['finished'] - start
                     self.persist()
                     self.condition.notify_all()
-        return self.executor.submit(execute).result()
+        return self.executor.submit(copy_context().run, execute).result()
 
     def worker(self, request, directory, timeout):
         return self._execute(lambda: run_worker(request, directory, timeout, cancel=self.cancel),
@@ -215,7 +241,7 @@ class ExecutionPipeline:
                         origin, candidate, source, _ = work
                         self.persist()
                         active[self.representations.submit(
-                            self.execute_representation, origin, candidate, source)] = (origin, candidate)
+                            copy_context().run, self.execute_representation, origin, candidate, source)] = (origin, candidate)
                     if not active:
                         if self.closed or self.cancel.is_set():
                             return
@@ -350,6 +376,7 @@ class ExecutionPipeline:
         return {'version': 'generation-pipeline-timing-2', 'llm_budget_seconds': self.budget,
             'generation_overlap': self.generation_overlap,
             'llm_request_seconds': self.model_seconds,
+            'generation_budget_stop': deepcopy(self.generation_budget_stop),
             'framework_worker_seconds': cumulative, 'framework_busy_seconds': busy,
             'framework_worker_limit': self.workers, 'framework_peak_workers': peak,
             'framework_mean_active_workers': cumulative / busy if busy else 0.,
@@ -365,7 +392,7 @@ class ExecutionPipeline:
                 sum(b-a for a,b in model_union) - busy + overlap),
             'provider_process_overhead_seconds': sum(max(0., x['finished']-x['started']-x['seconds'])
                 for x in self.model_events if x.get('finished')),
-            'scope': 'Request end-to-end time includes service wait; worker wall includes startup and evidence. Overlap is not additive wall time.'}
+            'scope': 'Request end-to-end time includes service wait; worker wrapper wall includes startup, evidence and any shared dispatch wait. Use the shared scheduling ledger for subprocess slot time. Overlap is not additive wall time.'}
 
     def summary(self):
         with self.condition:
@@ -392,7 +419,7 @@ class ExecutionPipeline:
             'backpressure_measurement_complete': self.backpressure_measurement_complete,
             'started_epoch': self.started, 'session_started_epoch': self.session_started,
             'saved_epoch': time.time(), 'prior_session_seconds': self.prior_session_seconds,
-            'model_seconds': self.model_seconds,
+            'model_seconds': self.model_seconds, 'generation_budget_stop': self.generation_budget_stop,
             'model_events': self.model_events, 'worker_events': self.worker_events,
             'feedback_version': self.feedback_version, 'feedback_rows': self.feedback_rows,
             'representation_rows': [{'directory': r['directory']} for r in self.rows],

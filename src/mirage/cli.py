@@ -49,6 +49,10 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--workers", type=positive_integer, default=None,
                      help="Execution workers (default: 8 for the stateful pipeline, 1 otherwise)")
     run.add_argument("--generation-concurrency", type=positive_integer, default=2)
+    run.add_argument("--active-apis", dest="active_api_limit", type=positive_integer, default=1,
+                     help="Concurrent independent API sessions; workers/generation limits are shared")
+    run.add_argument("--workers-per-api", dest="per_api_worker_limit", type=positive_integer)
+    run.add_argument("--generation-per-api", dest="per_api_generation_limit", type=positive_integer)
     run.add_argument("--canonicals-per-api", type=positive_integer, default=3)
     run.add_argument("--targets-per-canonical", type=positive_integer, default=12)
     run.add_argument("--paths-per-target", type=positive_integer, default=2)
@@ -103,9 +107,12 @@ def main(argv: list[str] | None = None) -> int:
                 verify(args.manifest.parent / output["payload"]["bundle"], output["payload"]["files"])
         else:
             property_summary=args.directory/"summary.json"
-            if property_summary.exists() and "records" in json.loads(property_summary.read_text()):
+            saved = json.loads(property_summary.read_text()) if property_summary.exists() else {}
+            if saved.get('multi_api') is True:
+                output = saved
+            elif "records" in saved:
                 from mirage.artifacts.report import summarize_properties
-                output=summarize_properties(json.loads(property_summary.read_text()))
+                output=summarize_properties(saved)
             else:
                 manifests = ArtifactStore(args.directory).list_manifests()
                 output = summarize(manifests)
@@ -115,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "replay" and output.get("replay_valid") is False:
             return 1
         if args.command in ("run", "resume"):
-            if output["stop_reason"] in ("interrupted", "controller_error", "pipeline_incomplete", "provider_cancellation_unconfirmed",
+            if output["stop_reason"] in ("completed_with_failures", "interrupted", "controller_error", "pipeline_incomplete", "provider_cancellation_unconfirmed",
                                        "interrupted_or_provider_cancellation_unconfirmed"):
                 return 1
             if any(item["status"] != "validated" for item in output.get("canonicals", [])):

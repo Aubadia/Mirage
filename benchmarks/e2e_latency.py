@@ -47,7 +47,7 @@ def targets(catalog):
 
 
 def prepare(args):
-    if args.budget <= 0 or args.workers < 1:
+    if args.budget <= 0 or min(args.workers, getattr(args, 'active_apis', 1), getattr(args, 'generation_concurrency', 2)) < 1:
         raise ValueError('Positive model budget and worker limit required')
     args.output.mkdir(parents=True, exist_ok=False)
     engine = args.output / 'engine'
@@ -56,7 +56,7 @@ def prepare(args):
     driver = args.output / 'driver.py'
     shutil.copy2(__file__, driver)
     roster = targets(read(Path(__file__).parent/'pytorch_correctness/candidates.json'))
-    protocol = {'version': 'e2e-latency-1', 'label': args.label, 'targets': roster,
+    protocol = {'version': 'e2e-latency-2', 'shared_scheduling': True, 'label': args.label, 'targets': roster,
         'engine': str(engine.resolve()), 'engine_sha256': inventory(engine),
         'driver': str(driver.resolve()), 'driver_sha256': digest(driver),
         'model_budget_seconds': args.budget, 'workers': args.workers,
@@ -68,7 +68,8 @@ def prepare(args):
         'model': 'Qwen/Qwen3.8-27B',
         'model_revision': '37561816e66b5b9153b1b64c10968c18c1e6f4a0',
         'max_tokens': 4096, 'max_model_len': 16384, 'mtp_tokens': 3,
-        'temperature': 0.0, 'top_p': 1.0, 'api_concurrency': 1,
+        'temperature': 0.0, 'top_p': 1.0, 'api_concurrency': getattr(args, 'active_apis', 1),
+        'generation_concurrency': getattr(args, 'generation_concurrency', 2),
         'created_epoch': time.time(),
         'budget_scope': 'Cumulative provider request wall seconds per API; framework/backpressure separate.',
         'e2e_scope': 'Per-API child process launch to exit, including metadata, generation, all representation drain and durable report; scoring/validation and service startup separate.',
@@ -182,6 +183,32 @@ def remaining():
     return int(days)*86400+parts[0]*3600+parts[1]*60+parts[2]
 
 
+def parallel_campaign(protocol, root):
+    sys.path.insert(0, protocol['engine'])
+    from mirage.contracts.programs import RunOptions
+    from mirage.contracts.scheduling import APIJob, SchedulingOptions
+    from mirage.runtime.multi_api import run_sessions
+    jobs = []
+    for index, target in enumerate(protocol['targets']):
+        directory = root / f"api-{index:02d}-{target['api'].replace('.', '-')}"
+        options = RunOptions(str(directory / 'search'), 'vllm', strategy='stateful', contract_version=4,
+            device=target['device'], time_limit=protocol['model_budget_seconds'],
+            workers=protocol['workers'], generation_concurrency=protocol.get('generation_concurrency', 2),
+            worker_timeout=protocol['worker_timeout'], cases=protocol['cases'], seed=protocol['seed'],
+            replay_failures=protocol['replay_failures'], generation_pipeline=True,
+            generation_overlap=protocol.get('generation_overlap', True))
+        treatment = {key: protocol[key] for key in ('path_policy', 'search_policy', 'generation_mode',
+            'coverage_basis', 'coverage_refinement', 'representation_traversal', 'oracle_improvements')}
+        jobs.append(APIJob(f'api-{index:03d}', target['api'], options, treatment))
+    limits = SchedulingOptions(protocol['workers'], protocol.get('generation_concurrency', 2), protocol['api_concurrency'])
+    result = run_sessions(jobs, limits, root / 'parallel', deadline=time.monotonic() + max(0, remaining() - 300))
+    for row in result['sessions']:
+        directory = Path(row['directory']).parent
+        write(directory / 'metrics.json', {'session': {k: v for k, v in row.items() if k != 'report'},
+                                           'report': row.get('report')})
+    return result
+
+
 def campaign(args):
     require_allocation()
     protocol = verify(args.protocol)
@@ -201,8 +228,18 @@ def campaign(args):
                 stop.wait(2)
     thread = threading.Thread(target=sample, daemon=True);thread.start()
     started = time.monotonic(); rows=[]; state='running'
-    write(root/'campaign.json', {'state':state,'completed':rows,'expected':10})
+    write(root/'campaign.json', {'state':state,'completed':rows,'expected':len(protocol['targets'])})
     try:
+        if protocol.get('shared_scheduling') or protocol.get('api_concurrency', 1) > 1:
+            if not confirmed_idle():
+                state='service_not_idle'
+                return 1
+            result=parallel_campaign(protocol, root)
+            rows.extend(result['sessions'])
+            service_idle=confirmed_idle()
+            state='complete' if result['stop_reason']=='completed' and service_idle else 'failed_or_incomplete'
+            verify(args.protocol)
+            return 0 if state=='complete' else 1
         for i,target in enumerate(protocol['targets']):
             if cancelled.is_set() or remaining() < 1200:
                 state='interrupted';break
@@ -235,7 +272,7 @@ def campaign(args):
                  'started_epoch':begin_epoch,'finished_epoch':time.time(),'e2e_seconds':e2e,
                  'service_idle_after':service_idle}
             rows.append(row)
-            write(root/'campaign.json',{'state':'running','completed':rows,'expected':10,
+            write(root/'campaign.json',{'state':'running','completed':rows,'expected':len(protocol['targets']),
                 'elapsed_seconds':time.monotonic()-started})
             print(json.dumps(row),flush=True)
             if not service_idle or cancelled.is_set():
@@ -246,8 +283,8 @@ def campaign(args):
         raise
     finally:
         stop.set();thread.join(timeout=10)
-        write(root/'campaign.json',{'state':state,'completed':rows,'expected':10,
-            'elapsed_seconds':time.monotonic()-started,'remaining_unattempted':10-len(rows)})
+        write(root/'campaign.json',{'state':state,'completed':rows,'expected':len(protocol['targets']),
+            'elapsed_seconds':time.monotonic()-started,'remaining_unattempted':len(protocol['targets'])-len(rows)})
     verify(args.protocol)
     return 0 if state=='complete' else 1
 
@@ -259,6 +296,8 @@ def main():
     p.add_argument('--engine',type=Path,required=True);p.add_argument('--label',required=True)
     p.add_argument('--budget',type=float,default=180);p.add_argument('--workers',type=int,default=8)
     p.add_argument('--generation-overlap',action=argparse.BooleanOptionalAction,default=True)
+    p.add_argument('--active-apis',type=int,default=1)
+    p.add_argument('--generation-concurrency',type=int,default=2)
     for name in ('campaign','one'):
         p=sub.add_parser(name);p.add_argument('--protocol',type=Path,required=True)
         if name=='one':p.add_argument('--index',type=int,required=True)

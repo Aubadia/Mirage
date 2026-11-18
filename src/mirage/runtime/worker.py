@@ -260,7 +260,8 @@ def dispatch(request: dict, directory: Path) -> None:
             result = run(request["source"], request["config"], request["initial"],
                          Recorder(directory / "trace.jsonl"))
             torch.save(result, directory / "result.pt")
-            result = {key: result[key] for key in ("api_executed", "backward_executed", "target_state_reached")}
+            result = {key: result[key] for key in ("api_executed", "backward_executed", "target_state_reached",
+                                                 "capabilities", "checkpoint_capabilities", "mr_evidence")}
         (directory / "summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         return
     raise ValueError(f"Unknown worker mode: {mode}")

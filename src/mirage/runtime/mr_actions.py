@@ -4,6 +4,26 @@ import ast
 from contextlib import nullcontext
 
 
+def semantic_evidence(value_certificate, separability_certificate, mutations):
+    """Failure to obtain a conservative certificate is unknown, not false.
+
+    Observed writes can refute purity for this execution. Absence of writes or
+    a read-only operator schema cannot establish representation independence.
+    """
+    return {
+        "representation_independence": {
+            "status": "verified" if value_certificate else "rejected" if mutations else "unknown",
+            "issuer": "training-value-operations-v3",
+            "reason": "conservative source/operation certificate" if value_certificate else
+                      "observed writes" if mutations else "semantic certificate unavailable"},
+        "batch_separability": {
+            "status": "verified" if separability_certificate else "unknown",
+            "issuer": "training-accumulation-v3",
+            "reason": "conservative source/axis certificate" if separability_certificate else
+                      "sample independence has not been established"},
+    }
+
+
 def value_operations(names):
     """Conservative MR capability catalog, separate from the open API resolver."""
     known = {

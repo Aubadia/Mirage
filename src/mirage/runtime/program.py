@@ -6,6 +6,20 @@ import weakref
 from mirage.generator.program import ContractError, analyze, load
 from mirage.runtime.api_metadata import resolve
 from mirage.runtime.state import rng_state, restore_rng
+from mirage.contracts.candidates import path_key, path_value, replace_path, tensor_paths
+
+
+def capability_snapshot(source, config, ctx, checkpoint, observed=None, environment=None):
+    from hashlib import sha256
+    import json
+    from mirage.backends.pytorch import PyTorchBackend
+    from mirage.runtime.environment import describe
+    return PyTorchBackend().training_capabilities(ctx, checkpoint=checkpoint,
+        provenance={"program_sha256": sha256(source.encode()).hexdigest(),
+                    "configuration_sha256": sha256(json.dumps(config, sort_keys=True).encode()).hexdigest(),
+                    "environment": environment if environment is not None else describe(config["device"]),
+                    "precision": config.get("precision", "fp32")},
+        observed=observed)
 
 
 def leaves(value, prefix=""):
@@ -90,7 +104,7 @@ def initialize(source, config, path):
              "optimizer": optimizer.state_dict() if optimizer else None,
              "modules": {name: module.state_dict() for name, module in ctx["modules"].items()},
              "gradients": {name: tensor.grad for name, tensor in ctx["parameters"].items()},
-             "input_gradients": {name: tensor.grad for name, tensor in leaves(ctx["inputs"])
+             "input_gradients": {path_key(path): tensor.grad for path, tensor in tensor_paths(ctx["inputs"], lambda v: isinstance(v, torch.Tensor))
                                  if tensor.is_leaf and tensor.requires_grad},
              "extras": {name: item for name, item in ctx.items()
                         if name not in ("inputs", "parameters", "optimizer", "modules", "batch_axes")},
@@ -98,7 +112,8 @@ def initialize(source, config, path):
     snapshot(value["extras"])
     torch.save(value, path)
     return {"metadata": tensor_metadata((ctx["inputs"], ctx["parameters"])),
-            "parameter_names": list(ctx["parameters"]), "batch_axes": ctx["batch_axes"]}
+            "parameter_names": list(ctx["parameters"]), "batch_axes": ctx["batch_axes"],
+            "capabilities": capability_snapshot(source, config, ctx, "initial").payload()}
 
 
 def restore(namespace, config, path):
@@ -127,9 +142,11 @@ def restore(namespace, config, path):
     ctx.update(initial.get("extras", {}))
     for name, parameter in ctx["parameters"].items():
         parameter.grad = initial.get("gradients", {}).get(name)
-    for name, tensor in leaves(ctx["inputs"]):
+    for path, tensor in tensor_paths(ctx["inputs"], lambda v: isinstance(v, torch.Tensor)):
         if tensor.is_leaf and tensor.requires_grad:
-            tensor.grad = initial.get("input_gradients", {}).get(name)
+            saved_gradients = initial.get("input_gradients", {})
+            legacy_name = "".join(f".{key}" for key in path)
+            tensor.grad = saved_gradients.get(path_key(path), saved_gradients.get(legacy_name))
     restored_rng = initial["rng"]
     restored_rng["cpu"] = restored_rng["cpu"].cpu()
     if restored_rng["cuda"] is not None:
@@ -139,10 +156,11 @@ def restore(namespace, config, path):
 
 
 def state(ctx, scaler=None):
+    import torch
     return {"parameters": snapshot(ctx["parameters"]),
             "modules": {name: snapshot(module.state_dict()) for name, module in ctx.get("modules", {}).items()},
             "gradients": {k: snapshot(p.grad) for k, p in ctx["parameters"].items()},
-            "input_gradients": {name: snapshot(tensor.grad) for name, tensor in leaves(ctx["inputs"])
+            "input_gradients": {path_key(path): snapshot(tensor.grad) for path, tensor in tensor_paths(ctx["inputs"], lambda v: isinstance(v, torch.Tensor))
                                 if tensor.requires_grad and tensor.is_leaf},
             "extras": snapshot({name: item for name, item in ctx.items()
                                 if name not in ("inputs", "parameters", "optimizer", "modules", "batch_axes")}),
@@ -150,14 +168,18 @@ def state(ctx, scaler=None):
             "scaler": snapshot(scaler.state_dict()) if scaler else None}
 
 
-def transform(ctx, representation, name):
+def transform(ctx, representation, name, path=None):
     import torch
 
     if representation == "contiguous":
         return
-    if name not in ctx["inputs"] or not isinstance(ctx["inputs"][name], torch.Tensor):
+    path = tuple(path) if path is not None else (name,)
+    try:
+        tensor = path_value(ctx["inputs"], path)
+    except (KeyError, IndexError, TypeError):
         raise ContractError("Representation target must name a tensor input")
-    tensor = ctx["inputs"][name]
+    if not isinstance(tensor, torch.Tensor):
+        raise ContractError("Representation target must name a tensor input")
     if representation == "clone":
         result = tensor.clone()
     elif representation == "strided":
@@ -171,17 +193,18 @@ def transform(ctx, representation, name):
         result = buffer[1:].view(tensor.shape)
         result.copy_(tensor)
     elif representation == "shared":
-        partners = [(key, value) for key, value in ctx["inputs"].items()
-                    if key != name and isinstance(value, torch.Tensor)
+        partners = [(key, value) for key, value in tensor_paths(ctx["inputs"], lambda v: isinstance(v, torch.Tensor))
+                    if key != path
                     and value.shape == tensor.shape and value.dtype == tensor.dtype
-                    and value.device == tensor.device and torch.equal(value, tensor)]
+                    and value.device == tensor.device and torch.equal(value, tensor)
+                    and not value.requires_grad and not tensor.requires_grad]
         if not partners:
             raise ContractError("Shared storage needs a compatible equal-valued input partner")
         result = tensor.view_as(tensor)
-        ctx["inputs"][partners[0][0]] = result
+        ctx["inputs"] = replace_path(ctx["inputs"], partners[0][0], result)
     else:
         raise ContractError("Unknown representation")
-    ctx["inputs"][name] = result
+    ctx["inputs"] = replace_path(ctx["inputs"], path, result)
 
 
 def run(source, config, initial_path, recorder):
@@ -191,9 +214,11 @@ def run(source, config, initial_path, recorder):
     from mirage.runtime.mr_actions import SavedTensors, accumulation_supported
 
     configure()
+    environment = describe(config["device"])
     namespace = load(source)
     graph = analyze(source)
     ctx = restore(namespace, config, initial_path)
+    capability_context = dict(ctx)
     target = resolve(config["api"])
     optimizer = ctx["optimizer"]
     precision = config.get("precision", "fp32")
@@ -212,12 +237,19 @@ def run(source, config, initial_path, recorder):
     backward_count = 0
     sample_loss_matches = True
     input_gradients = {}
-    for path, tensor in leaves(ctx["inputs"]):
+    registered_inputs = set()
+    input_leaves = list(tensor_paths(ctx["inputs"], lambda v: isinstance(v, torch.Tensor)))
+    for typed_path, tensor in input_leaves:
+        if id(tensor) in registered_inputs:
+            continue
+        registered_inputs.add(id(tensor))
         if tensor.requires_grad:
-            def input_hook(gradient, name=path):
+            names = tuple(path_key(p) for p, value in input_leaves if value is tensor)
+            def input_hook(gradient, coordinates=names):
                 if current_phase == "training":
                     value = snapshot(gradient) / scaler.get_scale()
-                    input_gradients[name] = input_gradients.get(name, 0) + value
+                    for name in coordinates:
+                        input_gradients[name] = input_gradients.get(name, 0) + value
                 return gradient
             tensor.register_hook(input_hook)
     saved = SavedTensors(config.get("saved_tensors", False))
@@ -252,7 +284,7 @@ def run(source, config, initial_path, recorder):
                 remember(tensor, dependencies)
             if hit:
                 index = len(target_calls)
-                selected = ctx["inputs"].get(config.get("input_name", ""))
+                selected = path_value(ctx["inputs"], config.get("input_path", (config.get("input_name", ""),))) if config.get("input_name") else None
                 rep = config.get("representation", "contiguous")
                 operand_reached = rep == "contiguous"
                 if isinstance(selected, torch.Tensor):
@@ -274,8 +306,18 @@ def run(source, config, initial_path, recorder):
                 recorder.emit("api_exit", api=config["api"], call=index, phase=current_phase)
                 for path, tensor in leaves(result):
                     if tensor.requires_grad:
-                        def hook(gradient, i=index, p=path):
-                            target_gradients.append({"call": i, "path": p})
+                        pending = [tensor.grad_fn] if tensor.grad_fn is not None else []
+                        visited, connected = set(), set()
+                        while pending:
+                            node = pending.pop()
+                            if node in visited:
+                                continue
+                            visited.add(node)
+                            variable = getattr(node, "variable", None)
+                            connected.update(name for name, parameter in ctx["parameters"].items() if variable is parameter)
+                            pending.extend(child for child, _ in node.next_functions if child is not None)
+                        def hook(gradient, i=index, p=path, parameters=tuple(connected)):
+                            target_gradients.append({"call": i, "path": p, "parameter_names": parameters})
                             recorder.emit("target_backward", call=i, path=p)
                             return gradient
                         tensor.register_hook(hook)
@@ -345,9 +387,8 @@ def run(source, config, initial_path, recorder):
                if precision != "fp32" else nullcontext())
         checkpointing = config.get("checkpoint", False) and current_phase == "training"
         def observed_forward(value):
-            for input_name, item in value["inputs"].items():
-                for _, tensor in leaves(item):
-                    remember(tensor, operand_origins(tensor) | {input_name})
+            for input_path, tensor in tensor_paths(value["inputs"], lambda v: isinstance(v, torch.Tensor)):
+                remember(tensor, operand_origins(tensor) | {path_key(input_path)})
             with Observe() if backend == "eager" else nullcontext():
                 return forward(value)
 
@@ -438,10 +479,29 @@ def run(source, config, initial_path, recorder):
     history_updates = update_count
     current_phase = "training"
     recorder.phase = "training"
-    selected = ctx["inputs"].get(config.get("input_name", ""))
+    selected_path = config.get("input_path", (config.get("input_name", ""),))
+    selected = path_value(ctx["inputs"], selected_path) if config.get("input_name") else None
+    checkpoint_capabilities = capability_snapshot(source, config, ctx, "pre_transform",
+        {"sample_loss": "sample_loss" in namespace, "mutated_operations": mutated_operations,
+         "all_gradient_coordinates": bool(common["state"]["gradients"] or common["state"]["input_gradients"])
+             and all(g is not None for g in (*common["state"]["gradients"].values(), *common["state"]["input_gradients"].values()))}, environment)
+    # Recheck concrete transform and optimizer prerequisites at injection time.
+    # Backward connectivity is independently verified on the actual target path.
+    if config.get("candidate_id"):
+        from mirage.contracts.capabilities import EvidenceStatus
+        local = next((s["facts"] for s in checkpoint_capabilities.subjects
+                      if list(s["path"]) == list(selected_path)), {})
+        for requirement in config.get("candidate_prerequisites", ()):
+            if requirement in ("backward", "target_operand", "mutation"):
+                continue
+            key = "optimizer_bound" if requirement == "optimizer" else requirement
+            evidence = (local.get(key) if key in local else None)
+            evidence = evidence or vars(checkpoint_capabilities.facts.get(key))
+            if evidence["status"] != EvidenceStatus.VERIFIED:
+                raise ContractError(f"Checkpoint prerequisite {requirement}: {evidence['reason']}")
     previous_storage = selected.untyped_storage().data_ptr() if isinstance(selected, torch.Tensor) else None
-    transform(ctx, config.get("representation", "contiguous"), config.get("input_name", ""))
-    transformed = ctx["inputs"].get(config.get("input_name", ""))
+    transform(ctx, config.get("representation", "contiguous"), config.get("input_name", ""), selected_path)
+    transformed = path_value(ctx["inputs"], selected_path) if config.get("input_name") else None
     representation_changed = (isinstance(transformed, torch.Tensor)
                               and transformed.untyped_storage().data_ptr() != previous_storage)
     transformed_metadata = tensor_metadata((ctx["inputs"], ctx["parameters"]))
@@ -520,7 +580,7 @@ def run(source, config, initial_path, recorder):
         elif event["event"] in ("api_exit", "backward", "optimizer_update", "checkpoint_forward"):
             transition.append(f"{event.get('phase', '')}:{event['event']}")
     result = {
-        "version": 3, "graph": graph, "environment": describe(config["device"]),
+        "version": 3, "graph": graph, "environment": environment,
         "initial": initial, "common": common, "transformed_metadata": transformed_metadata,
         "api_executed": api_seen, "backward_executed": backward_seen,
         "target_state_reached": (representation_reached and gradient_reached
@@ -540,6 +600,17 @@ def run(source, config, initial_path, recorder):
         "config": config, "completed": True,
         "transition": transition,
     }
+    observed = {"backward_executed": backward_seen, "sample_loss": "sample_loss" in namespace,
+                "mutated_operations": mutated_operations,
+                "all_gradient_coordinates": bool(before_update["gradients"] or before_update["input_gradients"])
+                    and all(g is not None for g in (*before_update["gradients"].values(), *before_update["input_gradients"].values())),
+                "input_names": sorted(set().union(*(set(target_calls[i].get("input_names", ())) for i in train_calls))),
+                "target_parameter_names": sorted({name for item in target_gradients if item["call"] in train_calls
+                                                   for name in item.get("parameter_names", ())})}
+    result["capabilities"] = capability_snapshot(source, config, capability_context, "canonical_execution", observed, environment).payload()
+    result["checkpoint_capabilities"] = checkpoint_capabilities.payload()
+    from mirage.runtime.mr_actions import semantic_evidence
+    result["mr_evidence"] = semantic_evidence(pure, result["batch_separable"], mutated_operations)
     return result
 
 

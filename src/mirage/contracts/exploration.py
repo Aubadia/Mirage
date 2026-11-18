@@ -22,8 +22,6 @@ def targets(base, metadata, limit):
         ("storage", {"representation": "clone", "optimizer_steps": 2}),
         (None, {"representation": "shared"}),
     ]
-    if base["api"].split(".")[-1].endswith("_"):
-        variants.insert(0, ("mutation", {"backend": base["backend"] if base["backend"] != "eager" else "compile_eager"}))
     if not names:
         names = [""]
         variants = [(rule, change) for rule, change in variants if "representation" not in change]
@@ -82,7 +80,16 @@ def validate_history(actions, config):
     return tuple(actions)
 
 
-def history_request(config, source, path):
+def history_request(config, source, path, paths=None):
+    if paths is not None:
+        return Request(Stage.TRANSITION,
+            "Select one offered legal complete history. Return JSON with exactly actions, "
+            "equal to one offered path. Do not invent, extend or repair actions. "
+            "The catalogue already enforces graph lifetime, update count and final gradient state. "
+            "Use the path hint to rank diversity among these valid choices.",
+            {"contract": "state-plan", "configuration": config,
+             "offered_paths": [list(p) for p in paths],
+             "path_hint": "minimal history" if path == 0 else "alternative legal accumulation/history"})
     return Request(Stage.TRANSITION, (
         "Plan a legal history before the target training operation. Return JSON with exactly actions. "
         "Available actions: zero:none clears gradients to None; zero:zero allocates zero gradients; "

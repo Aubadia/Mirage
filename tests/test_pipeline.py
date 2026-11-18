@@ -48,6 +48,15 @@ class FakeProvider:
 
 
 class PipelineTests(unittest.TestCase):
+    def test_public_stateful_entry_uses_shared_sessions_and_preserves_treatment(self):
+        from mirage.contracts.programs import RunOptions
+        from mirage.workflow import run_stateful
+        options = RunOptions('unused', 'fixture', strategy='stateful', contract_version=4,
+                             active_api_limit=2, generation_pipeline=True)
+        with patch('mirage.runtime.multi_api.run_multi_api', return_value={'stop_reason': 'completed'}) as sessions:
+            run_stateful(options, ('torch.sin', 'torch.cos'), path_policy='mixed', predicates=[])
+        self.assertEqual(sessions.call_args.kwargs['stateful_options'], {'path_policy': 'mixed', 'predicates': []})
+
     def pipeline(self, root, budget=1):
         return ExecutionPipeline(root, 'torch.linalg.slogdet', budget, 120, replay_failures=0, workers=1)
 
@@ -186,6 +195,67 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(provider.calls, 2)
             self.assertEqual(p.timing()['framework_worker_seconds'], 29)
             p.close()
+
+    def test_tail_budget_rejects_before_dispatch_without_shared_cancellation(self):
+        from mirage.contracts.scheduling import SchedulingOptions
+        from mirage.runtime.scheduler import SharedScheduler, SessionScope, session_scope
+        scheduler = SharedScheduler(SchedulingOptions(2, 2))
+        first = SessionScope(scheduler, 'first', 'cpu', threading.Event())
+        other = SessionScope(scheduler, 'other', 'cpu', threading.Event())
+        with session_scope(other):
+            pass
+        with tempfile.TemporaryDirectory() as tmp, session_scope(first):
+            root = Path(tmp)
+            p = self.pipeline(root, 1)
+            now = time.time()
+            p.model_seconds = .8
+            p.model_events = [{'stage': Stage.CANONICAL.value, 'contract': 'source',
+                'outcome': 'completed', 'started': now-2, 'finished': now-1,
+                'request_started': now-1.8, 'request_finished': now-1, 'seconds': .8}]
+            provider = FakeProvider()
+            try:
+                with self.assertRaises(GenerationBudgetExhausted):
+                    BudgetedProvider(provider, p).generate(Request(Stage.CANONICAL, 'generate', {'contract': 'source'}))
+                self.assertEqual(provider.calls, 0)
+                self.assertEqual(p.model_seconds, .8)
+                self.assertEqual(len(p.model_events), 1)
+                self.assertFalse(scheduler.cancel.is_set())
+                self.assertFalse(first.cancel.is_set())
+                self.assertFalse(other.cancel.is_set())
+                decision = p.timing()['generation_budget_stop']
+                self.assertFalse(decision['request_dispatched'])
+                self.assertAlmostEqual(decision['remaining_model_seconds'], .2)
+                self.assertEqual(decision['estimated_request_seconds'], 1)
+            finally:
+                p.close()
+            state = json.loads((root/'pipeline-state.json').read_text())
+            self.assertEqual(state['generation_budget_stop'], decision)
+            resumed = ExecutionPipeline(root, p.api, 1, 120, resume=True)
+            self.assertEqual(resumed.generation_budget_stop, decision)
+            resumed.close()
+            state = json.loads((root/'pipeline-state.json').read_text())
+            state.pop('generation_budget_stop')
+            (root/'pipeline-state.json').write_text(json.dumps(state))
+            legacy = ExecutionPipeline(root, p.api, 1, 120, resume=True)
+            self.assertIsNone(legacy.generation_budget_stop)
+            legacy.close()
+
+    def test_budget_admission_does_not_borrow_another_contracts_cost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self.pipeline(Path(tmp), 1)
+            now = time.time()
+            p.model_seconds = .5
+            p.model_events = [{'stage': Stage.CANONICAL.value, 'contract': 'source',
+                'outcome': 'completed', 'started': now-2, 'finished': now-1,
+                'request_started': now-1.5, 'request_finished': now-1, 'seconds': .5}]
+            provider = FakeProvider()
+            try:
+                BudgetedProvider(provider, p).generate(Request(Stage.STATE_GOAL, 'plan', {'contract': 'plan'}))
+                self.assertEqual(provider.calls, 1)
+                self.assertEqual(p.model_seconds, .75)
+                self.assertIsNone(p.generation_budget_stop)
+            finally:
+                p.close()
 
     def test_feedback_is_a_snapshot_and_next_call_receives_completed_feedback(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -467,6 +537,46 @@ class PipelineRuntimeTests(unittest.TestCase):
             self.assertEqual(report['pipeline_timing']['overlap_seconds'], 0)
             self.assertFalse(report['pipeline_timing']['generation_overlap'])
             self.assertEqual(report['pipeline_timing']['framework_worker_limit'], 2)
+
+    def test_budget_admission_stops_generation_and_finishes_existing_drain(self):
+        for predicates in ([], None):
+            with self.subTest(rejected_stage='generation' if predicates == [] else 'state_plan'):
+                self._check_budget_admission_drain(predicates)
+
+    def _check_budget_admission_drain(self, predicates):
+        from mirage.contracts.programs import RunOptions
+        from mirage.workflow import run_stateful
+        original = BudgetedProvider._generate
+        def limited(provider, request, **kwargs):
+            if provider.calls:
+                provider.pipeline.generation_budget_stop = {
+                    'basis': 'injected admission rejection', 'request_dispatched': False,
+                    'remaining_model_seconds': 1, 'estimated_request_seconds': 2}
+                raise GenerationBudgetExhausted('Known request cost exceeds remaining budget')
+            return original(provider, request, **kwargs)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)/'run'
+            options = RunOptions(str(root), 'test_pipeline:create', cases=2,
+                time_limit=120, worker_timeout=120, strategy='stateful', contract_version=4,
+                generation_pipeline=True, workers=2, replay_failures=0)
+            with patch.dict(os.environ, {'PYTHONPATH': str(Path(__file__).parent) + os.pathsep + os.environ.get('PYTHONPATH', '')}), patch.object(BudgetedProvider, '_generate', limited):
+                report = run_stateful(options, ('torch.linalg.slogdet',), predicates=predicates,
+                    search_policy='round_robin', generation_mode='full', coverage_refinement=False,
+                    representation_traversal=True, oracle_improvements=True)
+            self.assertTrue(report['pipeline_complete'])
+            self.assertEqual(report['provider_calls'], 1)
+            self.assertEqual(report['stop_reason'], 'llm_time_limit')
+            rejected = [row for row in report['records'] if row.get('status') == 'budget_before_generation']
+            self.assertEqual(len(rejected), 1)
+            self.assertFalse(rejected[0]['program_generation_dispatched'])
+            self.assertFalse(rejected[0]['budget_rejected_request_dispatched'])
+            if predicates is None:
+                self.assertIn('planning_family_selection', rejected[0])
+                self.assertFalse(rejected[0]['planning_dispatched'])
+                self.assertEqual(report['search_metrics']['planning_calls'], 0)
+            self.assertFalse(any(row.get('status') == 'provider_failed' for row in report['records']))
+            self.assertFalse(report['pipeline_timing']['generation_budget_stop']['request_dispatched'])
+            self.assertTrue(report['representation_traversal']['dispatch_complete'])
 
     def test_controller_drains_after_source_case_limit(self):
         from mirage.contracts.programs import RunOptions

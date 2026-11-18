@@ -75,6 +75,11 @@ class HTTPProvider:
             "type": "object", "properties": {field: PROGRAM_SCHEMA["properties"][field]},
             "required": [field], "additionalProperties": False,
         }
+        if contract == "state-plan" and "offered_paths" in request.context:
+            paths = request.context["offered_paths"]
+            if not paths:
+                raise ValueError("A legal path catalogue must not be empty")
+            schema["properties"]["actions"] = {"type": "array", "items": {"type": "string"}, "enum": paths}
         if contract == "state-goal-plan":
             from mirage.generator.state_plan import planning_schema
             schema = planning_schema(request.context.get("goal_catalog", []))

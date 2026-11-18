@@ -25,6 +25,9 @@ class RunOptions:
     replay_failures: int = 1
     workers: int | None = None
     generation_concurrency: int = 2
+    active_api_limit: int = 1
+    per_api_worker_limit: int | None = None
+    per_api_generation_limit: int | None = None
     contract_version: int = 3
     canonicals_per_api: int = 3
     targets_per_canonical: int = 12
@@ -53,6 +56,11 @@ class RunOptions:
             object.__setattr__(self, 'workers', 8 if self.strategy == 'stateful' and self.generation_pipeline else 1)
         positive(self.workers, "workers")
         positive(self.generation_concurrency, "generation_concurrency")
+        from mirage.contracts.scheduling import SchedulingOptions
+        SchedulingOptions(self.workers, self.generation_concurrency, self.active_api_limit,
+                          self.per_api_worker_limit, self.per_api_generation_limit)
+        if self.active_api_limit > 1 and self.strategy == 'properties':
+            raise ValueError('Shared API scheduling supports training and stateful')
         for name in ("time_limit", "worker_timeout"):
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:

@@ -73,6 +73,14 @@ Previous testing approaches include API/model-input fuzzing, model architecture 
 - Distinguish generation failures, unresolved plans, unreachable states, inapplicable MRs, and oracle violations. Never classify an arbitrary difference as a framework bug or give coverage-only cases a correctness pass.
 - Report an oracle violation as a suspected failure with evidence. Confirm a framework defect only after reproduction, minimization, revalidation, and corroboration; absence of MR violations does not prove framework correctness.
 
+## Generality and Extensibility
+
+- All proposed methods and improvements must be designed for general applicability beyond the current 10 benchmark APIs. Consider expansion to all PyTorch APIs and the future addition of other DL frameworks, such as TensorFlow.
+- Do not hard-code the current benchmark API names, count, or incidental characteristics into general algorithms, generation logic, state exploration, MR selection, inspection, or coverage reporting.
+- Base applicability on explicit API semantics, framework capabilities, and required preconditions. Keep necessary API-specific or framework-specific handling separate from shared logic, and document its scope; do not assume every API or framework supports the same training states, transformations, or MRs.
+- Explain how a proposed method or improvement extends to APIs outside the current benchmark and to additional frameworks, including any assumptions, unsupported cases, and required adaptations. This requirement does not select TensorFlow for immediate implementation or require every method to apply to every API.
+- Validation must state the evidence and limits of generality. Results on the current 10 benchmark APIs alone do not establish applicability to all PyTorch APIs or other frameworks.
+
 ## Required Approval and Editing Workflow
 
 - Read the user's requirements and the relevant existing code before proposing changes.

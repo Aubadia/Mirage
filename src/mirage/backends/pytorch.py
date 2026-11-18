@@ -17,6 +17,83 @@ _REPRESENTATION_SEMANTIC_CLASSES = {
 class PyTorchBackend:
     name = "pytorch"
 
+    def training_capabilities(self, context, *, checkpoint, provenance, observed=None):
+        """Concrete runner facts, scoped to this context and checkpoint.
+
+        Tensor shape/schema facts authorize mechanics only. They never certify
+        purity, mathematical equivalence, or sample independence.
+        """
+        import torch
+        from mirage.contracts.candidates import CapabilitySnapshot, tensor_paths, path_key
+
+        def fact(value, reason):
+            status = (EvidenceStatus.UNKNOWN if value is None else
+                      EvidenceStatus.VERIFIED if value else EvidenceStatus.REJECTED)
+            return Evidence(status, reason, value, checkpoint, "adapter")
+
+        observed = observed or {}
+        inputs = list(tensor_paths(context["inputs"], self.is_tensor))
+        parameters = context["parameters"]
+        optimizer = context["optimizer"]
+        bound = [p for g in optimizer.param_groups for p in g["params"]] if optimizer is not None else []
+        binding = bool(bound) and all(any(p is q for q in parameters.values()) for p in bound)
+        linked = observed.get("target_parameter_names")
+        connected = None if linked is None else bool(set(linked) &
+            {name for name, p in parameters.items() if any(p is q for q in bound)})
+        usable = False if optimizer is None or not binding else connected
+        axes = context["batch_axes"]
+        lengths = {context["inputs"][name].shape[0] for name in axes}
+        slicing = (bool(axes) and len(lengths) == 1 and min(lengths) >= 2
+                   and observed.get("sample_loss") is True and provenance.get("precision") == "fp32")
+        subjects = []
+        object_groups, storage_groups = {}, {}
+        for path, tensor in inputs:
+            storage = self.storage_identity(tensor)
+            object_group = object_groups.setdefault(id(tensor), len(object_groups))
+            storage_group = storage_groups.setdefault(storage, len(storage_groups))
+            aliases = [other_path for other_path, other in inputs
+                       if other_path != path and self.storage_identity(other) == storage]
+            parameter_alias = any(self.storage_identity(p) == storage for p in parameters.values())
+            independent = not aliases and not parameter_alias
+            partners = [other_path for other_path, other in inputs if other_path != path
+                        and other.shape == tensor.shape and other.dtype == tensor.dtype
+                        and other.device == tensor.device and torch.equal(other, tensor)
+                        and not other.requires_grad and not tensor.requires_grad]
+            name = path_key(path)
+            consumed = observed.get("input_names")
+            local = {
+                "target_operand": fact(None if consumed is None else name in consumed,
+                                       "observed target operand dependency"),
+                "alias_preserved": fact(independent,
+                    "single-coordinate adapter requires independent input storage; alias topology retained as an unmet goal"),
+                "clone": fact(tensor.layout == torch.strided, "dense clone mechanics"),
+                "offset": fact(tensor.layout == torch.strided and tensor.numel() > 0, "dense nonempty offset mechanics"),
+                "strided": fact(tensor.layout == torch.strided and tensor.ndim > 0 and tensor.numel() > 1,
+                                "noncontiguity requires multiple elements"),
+                "shared": fact(bool(partners) and not parameter_alias,
+                               "shared storage requires a distinct equal-valued nontrainable partner"),
+            }
+            subjects.append(dict(path=list(path), shape=list(tensor.shape), dtype=str(tensor.dtype),
+                device=str(tensor.device), layout=str(tensor.layout), requires_grad=tensor.requires_grad,
+                is_leaf=tensor.is_leaf, object_group=object_group, storage_group=storage_group,
+                aliases=[list(p) for p in aliases], parameter_alias=parameter_alias,
+                shared_partners=[list(p) for p in partners], facts={k: vars(v) for k, v in local.items()}))
+        backward = observed.get("backward_executed")
+        gradients = bool(parameters) or any(t.requires_grad for _, t in inputs)
+        facts = {
+            "optimizer": fact(usable, "optimizer presence, registered bindings and target-to-parameter backward path"),
+            "optimizer_present": fact(optimizer is not None, "runtime optimizer object"),
+            "optimizer_bound": fact(binding, "runtime optimizer parameter identities"),
+            "backward": fact(backward, "canonical target backward observed"),
+            "gradients": fact(gradients, "registered gradient coordinates"),
+            "accumulated_gradients": fact(observed.get("all_gradient_coordinates"),
+                                          "canonical backward populates every registered gradient coordinate"),
+            "microbatch": fact(slicing, "sample_loss, common nonempty batch lengths and FP32 slicing mechanics"),
+            "mutation": fact(None if "mutated_operations" not in observed else bool(observed["mutated_operations"]),
+                             "observed writes authorize compiled mutation exploration, not equivalence"),
+        }
+        return CapabilitySnapshot(self.name, checkpoint, provenance, tuple(subjects), facts)
+
     def is_tensor(self, value):
         import torch
         return isinstance(value, torch.Tensor)

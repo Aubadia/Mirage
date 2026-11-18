@@ -37,6 +37,35 @@ class ProcessResult:
 
 def run_worker(request: dict, directory: Path, timeout: float, *, cancel=None) -> ProcessResult:
     cancel = cancel if cancel is not None else _cancellation.get()
+    from mirage.runtime.scheduler import AnyCancellation, SchedulingCancelled, current_scope
+    scope = current_scope()
+    if scope is None:
+        return _run_worker(request, directory, timeout, cancel=cancel)
+    cancellation = AnyCancellation(cancel, scope.cancel, scope.scheduler.cancel)
+    # Provider subprocesses use generation capacity, acquired outside their timer.
+    if request.get('mode') == 'provider':
+        return _run_worker(request, directory, timeout, cancel=cancellation)
+    config = request.get('config', {})
+    device = config.get('device', scope.device)
+    resource = 'cuda' if str(device).split(':')[0] == 'cuda' else 'cpu'
+    begin = time.monotonic()
+    try:
+        with scope.scheduler.lease(scope.identifier, 'execution', resource=resource,
+                                   deadline=scope.deadline, cancel=cancellation, label=directory) as event:
+            remaining = timeout if scope.deadline is None else min(timeout, scope.deadline - time.monotonic())
+            result = _run_worker(request, directory, remaining, cancel=cancellation)
+            queue_seconds = event['granted'] - event['submitted']
+    except SchedulingCancelled:
+        result = _run_worker(request, directory, 0, cancel=cancellation)
+        queue_seconds = time.monotonic() - begin
+    result.resources['scheduling'] = dict(session=scope.identifier, resource=resource,
+                                         queue_seconds=queue_seconds)
+    (directory / 'process.json').write_text(json.dumps(asdict(result), indent=2), encoding='utf-8')
+    return result
+
+
+def _run_worker(request: dict, directory: Path, timeout: float, *, cancel=None) -> ProcessResult:
+    cancel = cancel if cancel is not None else _cancellation.get()
     directory.mkdir(parents=True, exist_ok=False)
     request_path = directory / "request.json"
     request_path.write_text(json.dumps(request, indent=2, allow_nan=False), encoding="utf-8")

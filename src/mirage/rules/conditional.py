@@ -42,7 +42,9 @@ def inspect(rule, left, right):
             config.pop(key, None)
     if a != b:
         reasons.append("Configurations differ outside the MR input relation")
-    if rule != "mutation" and not all(r["pure"] for r in (left, right)):
+    if rule != "mutation" and not all(
+            r.get("mr_evidence", {}).get("representation_independence", {}).get("status") == "verified"
+            if "mr_evidence" in r else r["pure"] for r in (left, right)):
         reasons.append("Purity/representation-independence was not established")
     if rule not in ("mutation", "accumulation"):
         actual = [[call for call in record["target_calls"] if call["phase"] == "training"]
@@ -72,7 +74,8 @@ def inspect(rule, left, right):
                 or not evidence["packed"] or not evidence["unpacked"] or not evidence["roundtrip_valid"]):
             reasons.append("No verified lossless saved-tensor roundtrip")
     if rule == "accumulation":
-        if not all(r["batch_separable"] and r.get("sample_loss_matches") for r in (left, right)):
+        if not all((r.get("mr_evidence", {}).get("batch_separability", {}).get("status") == "verified"
+                    if "mr_evidence" in r else r["batch_separable"]) and r.get("sample_loss_matches") for r in (left, right)):
             reasons.append("Batch separability was not certified")
         if (left["config"].get("precision") != "fp32" or right["config"].get("microbatches", 1) <= 1
                 or not left["config"].get("accumulation_source")

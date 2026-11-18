@@ -90,6 +90,17 @@ class IsolatedProvider:
         self.cancel = cancel
 
     def generate(self, request: Request, *, deadline: float | None) -> Response:
+        from mirage.runtime.scheduler import current_scope, generation_slot
+        scope = current_scope()
+        try:
+            with generation_slot(deadline=deadline, label=self.directory / f'provider-{self.calls + 1:03d}'):
+                return self._timed_generate(request, deadline=deadline)
+        except ProviderFailure as error:
+            if scope and error.cancellation_uncertain:
+                scope.scheduler.abort(f'Shared provider cancellation unconfirmed: {error}')
+            raise
+
+    def _timed_generate(self, request: Request, *, deadline: float | None) -> Response:
         import json
         import time
         started, before = time.time(), self.calls

@@ -10,6 +10,35 @@ from mirage.cli import main, parser
 
 
 class CLITests(unittest.TestCase):
+    def test_report_reads_multi_api_summary_without_treating_it_as_manifest(self):
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'summary.json').write_text(json.dumps({'multi_api': True, 'stop_reason': 'completed', 'sessions': []}))
+            with redirect_stdout(StringIO()) as output:
+                self.assertEqual(main(['report', tmp]), 0)
+            self.assertTrue(json.loads(output.getvalue())['multi_api'])
+
+    def test_shared_api_options_apply_to_training_and_stateful(self):
+        from mirage.contracts.programs import RunOptions
+        for strategy in ('training', 'stateful'):
+            with self.subTest(strategy=strategy):
+                switches = ['run', '--provider', 'vllm', '--strategy', strategy,
+                            '--active-apis', '3', '--workers', '4', '--workers-per-api', '2',
+                            '--generation-concurrency', '2', '--generation-per-api', '1']
+                with patch('mirage.workflow.run', return_value={'stop_reason': 'completed'} ) as execute, redirect_stdout(StringIO()):
+                    self.assertEqual(main(switches), 0)
+                options = execute.call_args.args[0]
+                self.assertEqual((options.active_api_limit, options.per_api_worker_limit,
+                                  options.per_api_generation_limit), (3, 2, 1))
+        with self.assertRaises(ValueError):
+            RunOptions('unused', 'fixture', active_api_limit=0)
+        with self.assertRaises(ValueError):
+            RunOptions('unused', 'fixture', strategy='properties', active_api_limit=2)
+
+    def test_multi_api_partial_failure_returns_nonzero(self):
+        with patch('mirage.workflow.run', return_value={'stop_reason': 'completed_with_failures'}), redirect_stdout(StringIO()):
+            self.assertEqual(main(['run', '--provider', 'vllm', '--active-apis', '2']), 1)
+
     def test_parallel_options_and_service_failure_exit_status(self):
         arguments = parser().parse_args(["run", "--provider", "vllm", "--workers", "2",
                                         "--generation-concurrency", "1"])

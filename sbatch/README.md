@@ -190,3 +190,40 @@ terminal. The [results](../result/e2e-latency/report.md) retain the candidate
 `batch_norm` budget-gate failure and keep 32 workers experimental; eight remains
 the product default. Resource accounting includes all startup/diagnostic/idle
 time and must not be interpreted as GPU utilization.
+
+## Shared multi-API scheduling validation
+
+`validation/multi_api_scheduling.sbatch` snapshots code before running scheduler,
+training, stateful alternating/drain, CLI, provider and report regressions. It uses
+the prepared project Python and one allocated test GPU; no model is loaded by this
+script. Prepare logs and preflight the same explicit resources before submission:
+
+```bash
+mkdir -p result/validation/logs
+bash -n sbatch/validation/multi_api_scheduling.sbatch
+sbatch --test-only --time=00:30:00 --mem=96G sbatch/validation/multi_api_scheduling.sbatch
+sbatch --parsable --time=00:30:00 --mem=96G sbatch/validation/multi_api_scheduling.sbatch
+```
+
+Default account/partition/CPU/GPU settings remain ACD115198/8gpus/8/1. An immutable
+pre-submission snapshot can be selected with `MIRAGE_PROJECT_ROOT` and an absolute
+compute-node-accessible `MIRAGE_PYTHON`. Logs, hashes, native test exit status and
+`cleanup.json` remain under the selected `MIRAGE_OUTPUT_ROOT` and job directory.
+A pending job or successful test-only check is not executed validation.
+
+Both `benchmarks/training_candidates.py prepare` and
+`benchmarks/e2e_latency.py prepare` accept `--active-apis`, `--workers` and
+`--generation-concurrency`. Newly prepared campaigns (including the one-active-API baseline) use the same shared session
+coordinator and one dedicated service. The training protocol retains 500-second
+per-API wall budgets when requested; the stateful protocol retains its model
+request budget and exact search treatment. They check global service idleness at
+shared campaign boundaries rather than between overlapping APIs. Frozen earlier
+campaigns and currently queued jobs retain their original code and configuration.
+
+Use the existing two-GPU serving/testing session launcher for model validation,
+with one service and separate `srun` steps for serving and testing. Set the
+service's `MIRAGE_GENERATION_CONCURRENCY` before startup and record it alongside
+client limits; increasing client capacity alone does not change `max-num-seqs`.
+Freeze each test iteration, reuse the healthy service for the current task, and
+stop owned processes/service and verify terminal Slurm steps before completion.
+Do not infer a speedup or hardware utilization from configured limits.

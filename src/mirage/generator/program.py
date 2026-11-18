@@ -72,7 +72,7 @@ def load(source):
     return namespace
 
 
-def request(metadata, seed, device, size, requires_backward=True):
+def request(metadata, seed, device, size, requires_backward=True, required_capabilities=()):
     return Request(Stage.CANONICAL, (
         "Generate a small legal PyTorch training program for the target API using its supplied "
         "installed signature and documentation. Return JSON with exactly source. The source value "
@@ -104,6 +104,8 @@ def request(metadata, seed, device, size, requires_backward=True):
            "include its result in the structured output and derive the training loss from another "
            "floating output if necessary. Target backward connectivity is not required for this case.")
     ), {"contract": "training-program", "api_context": metadata,
+        "unmet_capability_requirements": list(required_capabilities),
+        "capability_guidance": "When legal, choose a source supporting these unmet capabilities. Runtime evidence will verify them; declarations do not certify support.",
         "configuration": {"seed": seed, "device": device, "size_hint": size,
                           "requires_backward": requires_backward}})
 

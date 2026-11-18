@@ -58,6 +58,13 @@ def completion(payload, *, usage=True):
 
 
 class HTTPProviderTests(unittest.TestCase):
+    def test_training_path_payload_is_constrained_to_offered_complete_paths(self):
+        paths = [["zero:none"], ["forward", "backward", "zero:none"]]
+        request = Request(Stage.TRANSITION, "Choose", {"contract": "state-plan", "offered_paths": paths})
+        payload = HTTPProvider(HTTPConfig("http://localhost/v1"))._payload(request)
+        actions = payload["response_format"]["json_schema"]["schema"]["properties"]["actions"]
+        self.assertEqual(actions["enum"], paths)
+
     def setUp(self):
         self.request = Request(Stage.CANONICAL, "Generate", {"configuration": {"seed": 17}})
 

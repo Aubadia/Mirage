@@ -10,6 +10,52 @@ from mirage.cli import main
 
 
 class ArtifactTests(unittest.TestCase):
+    def test_search_metrics_distinguish_rejected_failed_and_legacy_dispatches(self):
+        from mirage.artifacts.report import summarize_search
+        family = {'planning_family_selection': {'family': 'tensor_state'}}
+        cases = [
+            (dict(family, planning_dispatched=False, planning_usage=None,
+                  program_generation_dispatched=False), 0, 0, True),
+            (dict(family, planning_dispatched=True, planning_usage=None,
+                  program_generation_dispatched=False), 1, 0, False),
+            (dict(family, planning_usage={'input_tokens': 2, 'output_tokens': 3},
+                  first_blocking_stage='state_plan'), 1, 5, True),
+        ]
+        for row, calls, tokens, complete in cases:
+            with self.subTest(row=row):
+                summary = summarize_search({'records': [row]})
+                self.assertEqual(summary['planning_calls'], calls)
+                self.assertEqual(summary['planning_family_calls'], {'tensor_state': calls} if calls else {})
+                self.assertEqual(summary['known_tokens'], tokens)
+                self.assertEqual(summary['token_usage_complete'], complete)
+                self.assertEqual(summary['attempts'], 1)
+
+    def test_multi_api_reports_keep_per_api_denominators_and_nonadditive_time(self):
+        from mirage.artifacts.report import summarize_multi_api
+        rows = [dict(api='a', strategy='training', state='completed', session_wall_seconds=8,
+                     report={'coverage': {'declared': 3}}),
+                dict(api='b', strategy='stateful', state='completed', session_wall_seconds=7,
+                     report={'coverage': {'declared': 5}})]
+        report = summarize_multi_api(rows, {'cancelled': False}, {'workers': 2}, 10)
+        self.assertEqual(report['elapsed_seconds'], 10)
+        self.assertEqual(report['per_api_elapsed_seconds_sum'], 15)
+        self.assertEqual([row['coverage']['declared'] for row in report['per_api']], [3, 5])
+        self.assertNotIn('coverage', report)
+        self.assertNotIn('verdict', report)
+        self.assertEqual(report['completed_api_runs'], 2)
+
+    def test_candidate_counts_keep_admission_and_attainment_separate(self):
+        from mirage.artifacts.report import summarize_training_candidates
+        summary = summarize_training_candidates([
+            {"candidates": [{"status": "admitted", "reasons": []},
+                            {"status": "rejected", "reasons": ["no optimizer"]}]}],
+            [{"id": "canonical-t00-p0", "candidate_id": "c", "status": "executed", "verified": False}])
+        self.assertEqual(summary["registered_instances"], 2)
+        self.assertEqual(summary["registry"]["admitted"], 1)
+        self.assertEqual(summary["executed_path_attempts"], 1)
+        self.assertEqual(summary["attained_path_attempts"], 0)
+        self.assertEqual(summary["mr_applicable_path_attempts"], 0)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -114,6 +160,97 @@ class ArtifactTests(unittest.TestCase):
             with self.assertRaises(error):
                 write_json(path, bad)
             self.assertEqual(path.read_bytes(), before)
+
+
+    def test_report_partial_storage_failure_preserves_previous_json(self):
+        from contextlib import contextmanager
+        import errno
+        from unittest.mock import patch
+        from mirage.workflow import write_json
+
+        path = Path(self.directory.name) / 'report.json'
+        write_json(path, {'previous': True})
+        before = path.read_bytes()
+        original = tempfile.NamedTemporaryFile
+
+        @contextmanager
+        def partial_file(*args, **kwargs):
+            with original(*args, **kwargs) as stream:
+                original_write = stream.write
+                def fail(payload):
+                    original_write(payload[:7])
+                    stream.flush()
+                    raise OSError(errno.ENOSPC, 'Injected full output storage')
+                stream.write = fail
+                yield stream
+
+        with patch('mirage.workflow.tempfile.NamedTemporaryFile', partial_file):
+            with self.assertRaises(OSError) as raised:
+                write_json(path, {'replacement': 'x' * 100})
+        self.assertEqual(raised.exception.errno, errno.ENOSPC)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(list(path.parent.glob('.report.json.*.pending')), [])
+
+    def test_report_publication_failure_preserves_previous_json(self):
+        import errno
+        from unittest.mock import patch
+        from mirage.workflow import write_json
+
+        path = Path(self.directory.name) / 'report.json'
+        write_json(path, {'previous': True})
+        before = path.read_bytes()
+        with patch.object(Path, 'replace', side_effect=OSError(errno.ENOSPC, 'Injected publication failure')):
+            with self.assertRaises(OSError):
+                write_json(path, {'replacement': True})
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(list(path.parent.glob('.report.json.*.pending')), [])
+
+    def test_report_reader_never_observes_a_partial_write(self):
+        from contextlib import contextmanager
+        import threading
+        from unittest.mock import patch
+        from mirage.workflow import write_json
+
+        path = Path(self.directory.name) / 'report.json'
+        previous, replacement = {'previous': True}, {'replacement': 'x' * 100}
+        write_json(path, previous)
+        partial, release = threading.Event(), threading.Event()
+        errors = []
+        original = tempfile.NamedTemporaryFile
+
+        @contextmanager
+        def delayed_file(*args, **kwargs):
+            with original(*args, **kwargs) as stream:
+                original_write = stream.write
+                def delayed(payload):
+                    original_write(payload[:7])
+                    stream.flush()
+                    partial.set()
+                    if not release.wait(10):
+                        raise TimeoutError('Test did not release the pending write')
+                    return 7 + original_write(payload[7:])
+                stream.write = delayed
+                yield stream
+
+        def writer():
+            try:
+                write_json(path, replacement)
+            except BaseException as error:
+                errors.append(error)
+
+        with patch('mirage.workflow.tempfile.NamedTemporaryFile', delayed_file):
+            thread = threading.Thread(target=writer)
+            thread.start()
+            try:
+                self.assertTrue(partial.wait(5))
+                self.assertEqual(json.loads(path.read_text()), previous)
+            finally:
+                release.set()
+                thread.join(10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(json.loads(path.read_text()), replacement)
+        self.assertEqual(list(path.parent.glob('.report.json.*.pending')), [])
 
 
 class ExplorationMetricsTests(unittest.TestCase):

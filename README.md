@@ -206,3 +206,51 @@ differed; candidate `batch_norm` also failed the original request-budget toleran
 (179.851 s versus nominal 180 s). These observations do not establish equal-quality
 E2E acceleration. See the [full results](result/e2e-latency/report.md), including
 the preserved failures, attribution limits, and completed resource cleanup.
+
+Independent API sessions can share generation and testing capacity in either
+`training` or `stateful` mode:
+
+```bash
+mirage run --strategy training --provider vllm --apis torch.sin torch.cos \
+  --active-apis 2 --workers 4 --workers-per-api 3 \
+  --generation-concurrency 2 --generation-per-api 2 --time-limit 500 \
+  --output result/experiments/multi-training
+mirage run --strategy stateful --provider vllm --apis torch.sin torch.cos \
+  --active-apis 2 --workers 4 --generation-concurrency 2 \
+  --no-generation-overlap --time-limit 180 --output result/experiments/multi-stateful
+```
+
+Run these computational commands with `srun` in an appropriate Slurm allocation.
+`--workers` and `--generation-concurrency` are campaign-wide capacities in shared
+mode. Each API has independent seeds, queues, feedback and reports. The broker
+rotates among ready sessions, lends unused slots, and serializes CUDA test
+subprocesses on the assigned test GPU. Waiting coordinators do not consume test
+slots. CPU and provider subprocess overhead still needs allocated host resources;
+worker slots are not CPU cores or GPU utilization. Generated code using extra
+undeclared devices and distributed/multi-GPU tests need a resource adapter and
+are outside this initial single-test-GPU policy.
+
+The default `--active-apis 1` retains the existing entry behavior. Explicit shared
+sessions use fresh output directories. Training gets a separate wall deadline and
+case cap per admitted API; resource waits after admission count toward that wall
+budget. Stateful pipeline mode retains cumulative per-API provider request seconds,
+excluding local dispatch/backpressure waits, followed by full admitted traversal
+drain. Service-side queue time remains part of request time. Alternating mode
+waits only for its own API's feedback. Disabling the stateful pipeline keeps its
+wall-budget behavior. Admission queue time and per-session durations are reported
+separately from actual campaign makespan; their sum can exceed makespan.
+
+Each API's native evidence and stateful `pipeline-state.json` stay in its own
+`api-NNN` directory. `multi-api.json` records session outcomes and resource events;
+it does not turn controller completion into a correctness Pass or combine distinct
+coverage denominators. Resume an interrupted stateful drain with
+`mirage resume result/experiments/multi-stateful/api-000`; this issues no new model
+requests. Training resume and automatic multi-replica serving are not implemented.
+Unconfirmed cancellation on the dedicated shared model endpoint stops new work
+across its sessions; normal case/controller failures remain local.
+
+Library callers can pass `APIJob` records to `mirage.runtime.multi_api.run_sessions`
+with `SchedulingOptions` to retain per-API devices, budgets and explicit stateful
+search treatments. Shared scheduling knows no benchmark API names or framework
+tensors. New frameworks require their own legal execution/isolation and resource
+adapters; success on a bounded PyTorch roster does not establish universal support.
