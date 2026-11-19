@@ -29,18 +29,20 @@ def _failed(report):
                for row in report.get('experiments', report.get('records', [])))
 
 
-def run_multi_api(options, apis, *, stateful_options=None):
+def run_multi_api(options, apis, *, stateful_options=None, check=False, deadline=None):
     apis = tuple(apis)
     if not apis or len(set(apis)) != len(apis):
         raise ValueError('API sessions require nonempty distinct APIs')
     root = Path(options.output).resolve()
     jobs = tuple(APIJob(f'api-{index:03d}', api,
                        replace(options, output=str(root / f'api-{index:03d}'),
-                               seed=options.seed + 1009 * index), dict(stateful_options or {}))
+                               seed=options.seed + 1009 * index,
+                               device=('cuda' if check and api.startswith('torch.cuda.') else options.device)),
+                       dict(stateful_options or {}), check=check)
                  for index, api in enumerate(apis))
     limits = SchedulingOptions(options.workers, options.generation_concurrency, options.active_api_limit,
                                options.per_api_worker_limit, options.per_api_generation_limit)
-    return run_sessions(jobs, limits, root)
+    return run_sessions(jobs, limits, root, deadline=deadline)
 
 
 def run_sessions(jobs, limits, output, *, deadline=None):
@@ -71,7 +73,7 @@ def run_sessions(jobs, limits, output, *, deadline=None):
     scheduler = SharedScheduler(limits, deadline=deadline)
     row_lock = threading.RLock()
     submitted = time.monotonic()
-    rows = [dict(session_id=job.identifier, api=job.api, strategy=job.options.strategy,
+    rows = [dict(session_id=job.identifier, api=job.api, strategy='check' if job.check else job.options.strategy,
                  device=job.options.device, seed=job.options.seed, directory=str(outputs[index]),
                  budget_seconds=job.options.time_limit, state='queued', report=None,
                  budget_scope=('model_request_seconds_then_drain' if job.options.strategy == 'stateful'
@@ -104,6 +106,9 @@ def run_sessions(jobs, limits, output, *, deadline=None):
                    started_epoch=time.time())
         begin = time.monotonic()
         try:
+            if job.check:
+                _write(root / f'check-start-{index:03d}.json', dict(session=job.identifier, api=job.api,
+                       directory=str(outputs[index]), started_epoch=row['started_epoch']))
             Path(job.options.output).parent.mkdir(parents=True, exist_ok=True)
             with session_scope(scope):
                 from mirage.workflow import run
@@ -111,6 +116,16 @@ def run_sessions(jobs, limits, output, *, deadline=None):
                                   workers=min(job.options.workers, limits.per_api_worker_limit),
                                   generation_concurrency=min(job.options.generation_concurrency, limits.per_api_generation_limit),
                                   per_api_worker_limit=None, per_api_generation_limit=None)
+                if job.check:
+                    from mirage.workflow import check_api
+                    report = check_api(job.api, output=options.output, session_options=options)
+                    # Per-case tensors, ledgers and traces live under the isolated session.
+                    # Never serialize them again into both campaign summaries.
+                    compact = {k: report.get(k) for k in ('status', 'terminal', 'reason', 'exit_status')}
+                    compact['path'] = str(outputs[index] / 'summary.json')
+                    failed = not report.get('terminal') or report.get('exit_status') != 0
+                    update(index, report=compact, state='failed' if failed else 'completed')
+                    return
                 if job.stateful_options:
                     from mirage.workflow import run_stateful
                     report = run_stateful(options, (job.api,), **job.stateful_options)
@@ -161,6 +176,7 @@ def run_sessions(jobs, limits, output, *, deadline=None):
         scheduler.abort(f'Coordinator interrupted: {type(error).__name__}: {error}')
         raise
     finally:
+        scheduler.differential.close()
         for number, handler in handlers.items():
             signal.signal(number, handler)
         final = persist()

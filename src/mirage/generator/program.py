@@ -467,6 +467,34 @@ def stateful_request(metadata, configuration, *, edges=True, canonical=None, pre
             "checkpoint. Use only torch/math, no external I/O, random sampling or expected answers. "
             "The initial and final checkpoints belong to the framework. Use only history needed by this claim. "
             + instructions[claim])
+        if configuration.get('state_goal'):
+            goal = configuration['state_goal']
+            prompt += ('\nTarget measured history: ' + goal['objective'] +
+                       '\nKeep the exact target on this path. Use the shortest legal sequence. '
+                       'Preserve materialized semantic input values on both devices. '
+                       'When a prefix is supplied, reuse its relevant initialization and verified '
+                       'operations and change only what the new history requires. A user mark or '
+                       'self-reported boolean cannot satisfy an observer. Never fabricate evidence. '
+                       'The framework injects make_tensor(shape, *, kind="distinct", dtype=..., '
+                       'device=device, requires_grad=False, index_bound=None, sample=0) directly in '
+                       'program globals. Use kind distinct, positive, index, invertible, tiny or nonzero. '
+                       'Set an integer index_bound for index. Use different sample numbers for batches '
+                       'or general nonsymmetric, distinguishable coordinates. Use explicit concrete '
+                       'initial tensors wherever special API semantics require them.')
+        if configuration.get('state_goal', {}).get('family') == 'rng':
+            prompt += ' Use deterministic initial operands. Any stochastic draw must occur inside the target, optionally with an explicitly seeded generator.'
+        if configuration.get('guided_prefix_mode') == 'append_only':
+            prompt += ('\nKeep the parent build, all helpers, run signature, original non-return '
+                       'statements and final return unchanged. Insert new statements immediately '
+                       'before the final return. The harness checks this and the original target trace.')
+        elif configuration.get('guided_prefix_mode') == 'reference_only':
+            prompt += '\nUse the prior program as a reference for this goal.'
+        if configuration.get('input_recipe'):
+            prompt += ('\nA bounded input recipe is in configuration.input_recipe. In build you '
+                       'can call the injected make_operand(name, *, requires_grad=False, sample=None) '
+                       'for any name listed in recipe.operands. It reconstructs the recorded shape '
+                       'and dtype directly on the requested device. Preserve that tested overload '
+                       'and its relationships when using its operands.')
         return Request(Stage.TRANSITION if canonical else Stage.CANONICAL, prompt,
             dict(contract='training-program', program_kind='stateful-1', api_context=context,
                  canonical_source=canonical, configuration=configuration, state_predicates=list(predicates),

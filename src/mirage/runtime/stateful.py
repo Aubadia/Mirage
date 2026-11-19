@@ -21,6 +21,8 @@ def snapshot(value):
         return logical.detach().cpu().clone()
     if isinstance(value, (torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler)):
         return {'stateful_type':type(value).__qualname__, 'state_dict':snapshot(value.state_dict())}
+    if isinstance(value, torch.Generator):
+        return {'generator_device': str(value.device), 'generator_state': value.get_state().clone()}
     if isinstance(value, (torch.dtype, torch.device)):
         return {'framework_literal':str(value)}
     if isinstance(value, dict): return {str(k):snapshot(v) for k,v in value.items()}
@@ -28,6 +30,26 @@ def snapshot(value):
     if value is None or type(value) in (bool, int, float, str): return value
     if callable(value): return {'callable':getattr(value, '__qualname__', type(value).__qualname__)}
     raise ContractError(f'Unsupported observation type: {type(value).__name__}')
+
+
+def operand_generators(value, path=()):
+    import torch
+    if isinstance(value, torch.Generator):
+        yield path, value
+    elif isinstance(value, (dict, list, tuple)):
+        items = value.items() if isinstance(value, dict) else enumerate(value)
+        for key, child in items:
+            yield from operand_generators(child, (*path, key))
+
+
+def output_structure(value):
+    """Keep Python return containers that a portable tensor snapshot normalizes."""
+    import torch
+    if isinstance(value, dict):
+        return ['mapping', {str(k):output_structure(v) for k,v in value.items()}]
+    if isinstance(value, (list,tuple)):
+        return [type(value).__module__ + '.' + type(value).__qualname__, [output_structure(v) for v in value]]
+    return 'tensor' if isinstance(value, torch.Tensor) else type(value).__qualname__
 
 
 def training_snapshot(ctx):
@@ -90,12 +112,22 @@ class Probe:
         self.products = []
         self.product_events = []
         self.accumulations = []
+        self.saved_tensor_events = []
+        self.state_operations = []
+        self._goal_output = None
+        self._goal_leaves = []
+        self.recompute_frames = []
+        self._recompute_id = 0
+        self._executing_target = None
         self._leaf_calls = {}
         self._previous_grads = {}
         self._continuing_grads = {}
         self.mutations, self.candidates = [], []
         self.operations = []
         self.context_events = []
+        self.observed_products = set()
+        self.factory_requires_invocation = False
+        self.context_observer = None
         self.compiled_graphs = []
         self.capture_replays = []
         self._observing = False
@@ -313,11 +345,154 @@ class Probe:
             values = [p for group in product.param_groups for p in group['params']] if isinstance(product, torch.optim.Optimizer) else []
             return snapshot((product.state_dict(), values))
         before = state()
+        scheduler = isinstance(product, torch.optim.lr_scheduler.LRScheduler)
+        rates = snapshot([g['lr'] for g in product.optimizer.param_groups]) if scheduler else None
         result = product.step(*args, **kwargs)
         effect = self._backend.compare(before, state(), 'exact')
         if effect['equal'] is False:
-            self.product_events.append(dict(call=owner, event='persistent_step_effect'))
+            self.product_events.append(dict(call=owner, event='persistent_step_effect',
+                product_kind='scheduler' if scheduler else 'optimizer',
+                persistent_state=bool(product.state) if not scheduler else False,
+                learning_rate_changed=(self._backend.compare(
+                    rates, snapshot([g['lr'] for g in product.optimizer.param_groups]), 'exact')['equal'] is False) if scheduler else False))
         return result
+
+    def recompute(self, fn, *args):
+        """Link initial invocation and an actual non-reentrant checkpoint recomputation."""
+        from torch.utils.checkpoint import checkpoint, set_checkpoint_early_stop
+        group = self._recompute_id
+        self._recompute_id += 1
+        pass_number = 0
+        def invoke(*values):
+            nonlocal pass_number
+            self.recompute_frames.append((group, pass_number))
+            pass_number += 1
+            try:
+                return fn(*values)
+            finally:
+                self.recompute_frames.pop()
+        with set_checkpoint_early_stop(False):
+            return checkpoint(invoke, *args, use_reentrant=False, preserve_rng_state=True)
+
+    def saved_on_cpu(self):
+        """Pack to independent CPU storage; only target-issued saves are credited."""
+        import torch
+        def pack(tensor):
+            owner = self._executing_target
+            payload = tensor.detach().to('cpu', copy=True)
+            return owner, tensor.device, payload
+        def unpack(saved):
+            owner, device, payload = saved
+            restored = payload.to(device, copy=True)
+            if owner is not None and self._backward_invocation is not None and len(self.saved_tensor_events) < 32:
+                self.saved_tensor_events.append(dict(call=owner, invocation=self._backward_invocation,
+                    source_device=str(device), stored_device=str(payload.device), restored_device=str(restored.device)))
+            return restored
+        return torch.autograd.graph.saved_tensors_hooks(pack, unpack)
+
+    def _target_resources(self, operands):
+        """Identity links to registered batch inputs and module buffers at the actual boundary."""
+        import torch
+        inputs = {id(t): path for path, t in leaves(self._ctx['inputs'])}
+        buffers = {id(t): (key, name, module.training) for key, module in self._ctx.get('modules', {}).items()
+                   for name, t in module.named_buffers()}
+        resources = []
+        for descriptor, tensor in operands:
+            item = dict(path=list(descriptor.path))
+            key = id(tensor)
+            if key in buffers:
+                module, name, training = buffers[key]
+                item['module_buffer'] = dict(module=module, name=name, training=training)
+            if key in inputs and tensor.layout == torch.strided and not tensor.is_quantized and not tensor.is_nested:
+                item['input_key'] = inputs[key]
+            if len(item) > 1:
+                resources.append(item)
+        return resources
+
+    def _goal_update(self):
+        import torch
+        result = self._goal_output
+        if (not isinstance(result, torch.Tensor) or not result.requires_grad or not result.is_floating_point()
+                or not 0 < result.numel() <= 4096 or not self._goal_leaves):
+            raise ContractError('State update requires a bounded real differentiable target result and a registered leaf operand')
+        optimizer = self._ctx.get('optimizer')
+        if type(optimizer) not in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
+            raise ContractError('State update observer supports native SGD, Adam and AdamW')
+        registered = [p for group in optimizer.param_groups for p in group['params']]
+        leaves = [entry for entry in self._goal_leaves if any(entry[3] is p for p in registered)]
+        if not leaves:
+            raise ContractError('State update requires optimizer identity binding to the target leaf')
+        return optimizer, result.sum(), leaves
+
+    def scaled_overflow_step(self):
+        """Exercise an enabled scaler; prove skipped step via an actual optimizer hook."""
+        import torch
+        optimizer, loss, bound = self._goal_update()
+        scaler = self._ctx.get('scaler')
+        if not isinstance(scaler, torch.amp.GradScaler) or not scaler.is_enabled():
+            raise ContractError('Scaled step needs an enabled torch.amp.GradScaler on the target device')
+        optimizer.zero_grad(set_to_none=True)
+        initial_scale = scaler.get_scale()
+        invocation = len(self.backward_invocations)
+        scaler.scale(loss * float('inf')).backward()
+        nonfinite = [(idx, path, key) for idx, path, key, p in bound if p.grad is not None and not bool(p.grad.isfinite().all())]
+        actual_steps = []
+        hook = optimizer.register_step_post_hook(lambda *args: actual_steps.append(True))
+        try:
+            scaler.step(optimizer)
+            scaler.update()
+        finally:
+            hook.remove()
+        if not actual_steps and scaler.get_scale() < initial_scale:
+            self.state_operations.extend(dict(event='skipped_scaled_step', call=idx, path=path, parameter=key,
+                                               invocation=invocation) for idx, path, key in nonfinite)
+
+    def restore_and_step(self):
+        """Restore a nonempty optimizer checkpoint and observe its state tensors in the next update."""
+        import torch
+        from copy import deepcopy
+        from torch.utils._python_dispatch import TorchDispatchMode
+        optimizer, loss, bound = self._goal_update()
+        watched = [entry for entry in bound if optimizer.state.get(entry[3])]
+        if not watched:
+            raise ContractError('Prepare a real warmup update with persistent optimizer state before restoring')
+        checkpoint = deepcopy(optimizer.state_dict())
+        for _, _, _, p in watched:
+            optimizer.state.pop(p, None)
+        optimizer.load_state_dict(checkpoint)
+        if self._backend.compare(snapshot(optimizer.state_dict()), snapshot(checkpoint), 'exact')['equal'] is not True:
+            raise ContractError('Saved optimizer state was not reconstructed')
+        state_ids = {key: {id(t) for _, t in leaves(optimizer.state[p])} for _, _, key, p in watched}
+        touched = set()
+        class ObserveState(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                values = {id(t) for _, t in leaves((args, kwargs or {}))}
+                # These operations consume prior tensor values in the supported native optimizers.
+                if func._schema.name in ('aten::mul_', 'aten::add_', 'aten::lerp_', 'aten::addcmul_', 'aten::sqrt'):
+                    touched.update(key for key, ids in state_ids.items() if ids & values)
+                return func(*args, **(kwargs or {}))
+        optimizer.zero_grad(set_to_none=True)
+        invocation = len(self.backward_invocations)
+        loss.backward()
+        with ObserveState():
+            optimizer.step()
+        self.state_operations.extend(dict(event='used_restored_state', call=idx, path=path, parameter=key,
+                                           invocation=invocation) for idx, path, key, _ in watched if key in touched)
+
+    def synchronize_gradient(self):
+        """Complete a real collective on target-produced gradients in an installed process group."""
+        import torch.distributed as dist
+        if not dist.is_available() or not dist.is_initialized() or dist.get_world_size() < 2:
+            raise ContractError('An initialized multi-rank process group is required')
+        _, loss, bound = self._goal_update()
+        invocation = len(self.backward_invocations)
+        loss.backward()
+        for idx, path, key, p in bound:
+            if p.grad is None:
+                continue
+            dist.all_reduce(p.grad)
+            self.state_operations.append(dict(event='synchronized_gradient', call=idx, path=path, parameter=key,
+                invocation=invocation, world_size=dist.get_world_size(), rank=dist.get_rank()))
 
     def wait(self, product):
         import torch
@@ -423,7 +598,7 @@ class Probe:
         # Factory construction returns a callable, not an operand-differentiable result.
         # Creating sample-input AccumulateGrad nodes here can disturb CUDA capture's
         # stream ownership; observe edges only when the returned callable executes.
-        factory = self._config.get('api') in ('torch.compile', 'torch.cuda.make_graphed_callables')
+        factory = self.factory_requires_invocation
         input_edges = [] if factory else self._backend.gradient_edges(operands)
         entry_context = dict(context_state(), inference_enabled=torch.is_inference_mode_enabled())
         # User-supplied MR obligations cannot certify a numerical replay as read-only.
@@ -462,7 +637,8 @@ class Probe:
         dispatches = []
         from contextlib import nullcontext
         native_observer = nullcontext()
-        if self._config.get('check_claim') in ('forward', 'operand_relation'):
+        if (self._config.get('check_claim') in ('forward', 'operand_relation') or
+                self._config.get('device_observation') and self._config.get('check_claim') in ('backward', 'accumulation')):
             from torch.utils._python_dispatch import TorchDispatchMode
             class ObserveDispatch(TorchDispatchMode):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -473,12 +649,49 @@ class Probe:
         self.operations.append({'name': 'target_enter'})
         self._recorder.emit("api_enter", call=index, metadata=descriptors)
         self._observing = False
+        guided = isinstance(self._config.get('state_goal'), dict)
+        resources = self._target_resources(operands) if guided else []
+        family = self._config.get('state_goal', {}).get('family')
+        rng_before = None
+        if guided and (index == 0 or family == 'rng'):
+            from mirage.runtime.state import rng_state
+            rng_before = rng_state(self._config['device'])
+            explicit_rng = [(path, gen, gen.get_state()) for path, gen in operand_generators(tree)]
+        self._executing_target = index
         try:
             with native_observer:
                 output = target(*tree['args'], **tree['kwargs'])
+        except (ValueError, TypeError, RuntimeError, IndexError) as error:
+            if (self._config.get('device_observation') and getattr(self._recorder, 'path', None) is not None
+                    and not isinstance(error, (torch.OutOfMemoryError, NotImplementedError))):
+                partial = dict(index=index, inputs=before, metadata=descriptors, entry_context=entry_context,
+                               execution_mode='eager', writable_paths=writable_paths,
+                               target_exception=type(error).__name__)
+                torch.save(dict(self._device_initial, config=self._config, completed=False,
+                                api_executed=False, target_calls=[*self.calls, partial]),
+                           self._recorder.path.parent / 'target-exception.pt')
+            if self._config.get('check_claim'):
+                self._recorder.emit('target_exception', call=index, exception=type(error).__name__,
+                                    native_schema=dispatches[0]['schema'] if len(dispatches) == 1 else None,
+                                    diagnostic=str(error)[:320])
+            raise
         finally:
+            self._executing_target = None
             self._observing = True
-        if self._config.get('check_claim') in ('scope_exit', 'callable_use', 'callback_trigger', 'async_completion', 'persistent_step'):
+        product_kinds = set()
+        if guided:
+            if hasattr(type(output), '__enter__') and hasattr(type(output), '__exit__'):
+                product_kinds.add('context')
+                if self.context_observer:
+                    self.context_observer.register_product(output)
+            if callable(output):
+                product_kinds.add('callable')
+            if isinstance(output, torch.optim.Optimizer):
+                product_kinds.add('optimizer')
+            if isinstance(output, torch.optim.lr_scheduler.LRScheduler):
+                product_kinds.add('scheduler')
+            self.observed_products.update(product_kinds)
+        if product_kinds or self._config.get('check_claim') in ('scope_exit', 'callable_use', 'callback_trigger', 'async_completion', 'persistent_step'):
             self.products.append((output, index))
         self.calls.append({"index": index, "inputs": before, "metadata": descriptors,
                            "output": snapshot(output) if isinstance(output, (torch.Tensor, dict, list, tuple, int, float, str, bool, type(None)))
@@ -490,6 +703,24 @@ class Probe:
                            "writable_paths": writable_paths, "native_dispatch": dispatches,
                            "destination_values": [snapshot(t) for d, t in operands if list(d.path) in writable_paths],
                            "guard_preserved": torch.equal(guard_before, snapshot(guard)) if guard is not None else None})
+        if self._config.get('device_observation'):
+            self.calls[-1]['output_structure'] = output_structure(output)
+        if guided:
+            self.calls[-1]['registered_resources'] = resources
+            if family in ('loss_scaling', 'training_checkpoint', 'distributed'):
+                self._goal_output = output
+                self._goal_leaves = [(index, list(d.path), key, p) for d, t in operands
+                                     for key, p in self._ctx['parameters'].items() if t is p]
+            if self.recompute_frames:
+                self.calls[-1]['recompute_frame'] = list(self.recompute_frames[-1])
+                self.calls[-1]['backward_invocation'] = self._backward_invocation
+            if rng_before is not None:
+                rng_after = rng_state(self._config['device'])
+                advanced = [key for key in ('cpu', 'cuda') if rng_before[key] is not None
+                            and not torch.equal(rng_before[key], rng_after[key])]
+                advanced.extend(list(path) for path, gen, state in explicit_rng
+                                if not torch.equal(state, gen.get_state()))
+                self.calls[-1].update(target_rng_consumed=bool(advanced), rng_sources_advanced=advanced)
         if writable_paths:
             written_groups = {d.storage_group for d, _ in operands if list(d.path) in writable_paths
                               and d.storage_group is not None and d.layout == 'torch.strided'}
@@ -511,7 +742,8 @@ class Probe:
             self.calls[-1]['local_vjp_snapshot'] = {
                 'version': 'local-vjp-snapshot-1', 'independent_logical_copies': True,
                 'target_read_only': schema_read_only and not self.calls[-1]['write_effects']}
-        self._recorder.emit("api_exit", call=index)
+        self._recorder.emit("api_exit", call=index,
+                            native_schema=dispatches[0]['schema'] if len(dispatches) == 1 else None)
         self.operations.append({'name': 'target_return'})
         import inspect
         self.observe_outputs(index, leaves(output), input_edges,
@@ -519,7 +751,7 @@ class Probe:
         return output
 
 
-def execute(source, config, recorder, initial_reference=None):
+def execute(source, config, recorder, initial_reference=None, *, restore_prefix_rng=False):
     import torch
     from copy import deepcopy
     config = deepcopy(config)
@@ -527,7 +759,13 @@ def execute(source, config, recorder, initial_reference=None):
     from mirage.runtime.state import rng_state
     configure()
     graph = analyze_stateful(source)
-    namespace = {"torch": torch, "math": math}
+    from mirage.runtime.input_constraints import OPERAND_CONSTRUCTOR, operand_builder, make_tensor
+    constructed = []
+    from functools import partial
+    namespace = {"torch": torch, "math": math,
+                 "make_tensor": partial(make_tensor, device=config["device"]),
+                 OPERAND_CONSTRUCTOR: operand_builder(config.get("input_recipe"), config["device"],
+                     config.get("input_recipe_sha256"), constructed)}
     exec(compile(source, "<mirage-stateful-program>", "exec"), namespace)
     before_rng = torch.random.get_rng_state().clone()
     build_rng = rng_state(config['device']) if config.get('check_claim') else None
@@ -568,9 +806,14 @@ def execute(source, config, recorder, initial_reference=None):
     if build_rng is not None:
         rng_changed |= PyTorchBackend().compare(build_rng, rng_state(config['device']), 'exact')['equal'] is not True
     probe = Probe(resolve(config['api']), ctx, config, recorder)
+    if config.get('device_observation'):
+        probe._device_initial = dict(initial=initial, initial_metadata=initial_metadata, environment=environment)
     from mirage.runtime.optimizer import OptimizerEvidence
     optimizer_evidence = OptimizerEvidence(probe, source)
     probe._optimizer_evidence = optimizer_evidence
+    if restore_prefix_rng:
+        from mirage.runtime.state import restore_rng
+        restore_rng(initial_reference['initial_rng'], config['device'])
     initial_rng = rng_state(config['device'])
     probe.mark('initial')
     from torch.overrides import TorchFunctionMode
@@ -601,6 +844,7 @@ def execute(source, config, recorder, initial_reference=None):
     from mirage.backends.pytorch import ContextObserver, CompilerObserver, CaptureObserver, OptimizerObserver, capture_source_certificate, execution_source_certificate
     try:
         with ContextObserver(probe._target, probe.context_events, lambda name: probe.operations.append({'name':name})) as contexts:
+            probe.context_observer = contexts
             with CompilerObserver(probe, namespace, config) as compiler, CaptureObserver(probe, namespace, config) as capture:
                 probe.compiled_graphs = compiler.graphs
                 probe.capture_replays = capture.replays
@@ -621,7 +865,14 @@ def execute(source, config, recorder, initial_reference=None):
         if group is not None and group < len(contexts.instances):
             event['factory_call'] = next((index for value, index in probe.products
                                           if value is contexts.instances[group]), None)
-    result = {"product_events": probe.product_events, "accumulations": probe.accumulations,
+            event['autocast_scope'] = isinstance(contexts.instances[group], torch.autocast)
+            owner = event.get('wrapper_owner_group')
+            if owner is not None:
+                event['wrapper_factory_call'] = next((index for value, index in probe.products
+                                                      if value is contexts.instances[owner]), None)
+    result = {"observed_products":sorted(probe.observed_products),
+            "factory_requires_invocation":probe.factory_requires_invocation, "product_events": probe.product_events, "accumulations": probe.accumulations,
+            "saved_tensor_events": probe.saved_tensor_events, "state_operations": probe.state_operations,
             "version": "stateful-1", "environment": environment, "run_rng_unchanged": rng_unchanged,
             "initial_rng": initial_rng, "final_rng": final_rng, "graph": graph, "config": config, "completed": True,
             "initial": initial, "initial_metadata": initial_metadata, "final_training_state": final_training_state,
@@ -648,6 +899,18 @@ def execute(source, config, recorder, initial_reference=None):
             "correctness": "unassessed", "verdict": None,
             "reason": "Stateful runtime evidence collected; relation validation required"}
 
+    # Probe only a witnessed direct re-entry with an available restoration contract.
+    # The generated program and its final observations have already finished.
+    if (contexts.supported and config.get('state_goal') and not config.get('device_observation')
+            and not config.get('representation_candidate')):
+        from mirage.backends.pytorch import probe_context_decorator
+        direct = {e.get('factory_call') for e in probe.context_events if e.get('balanced')
+                  and e.get('reentrant_same_instance') and not e.get('decorated_entry')}
+        for value, index in probe.products:
+            if index in direct:
+                result['decorator_probes'] = [dict(call=index, identity=probe_context_decorator(value))]
+                break
+    result["constructed_operands"] = constructed
     if config.get('oracle_improvements'):
         result['scoped_vjp_source_certificate'] = PyTorchBackend().scoped_vjp_source_certificate(source)
 

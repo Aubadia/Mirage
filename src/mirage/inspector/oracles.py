@@ -11,13 +11,16 @@ def unavailable(reason, *, status='unknown'):
 
 def audit_admission(record):
     """Cheap eligibility check; eligibility never establishes numerical agreement."""
-    if not record.get('completed') or not record.get('inspection', {}).get('valid'):
+    valid = record.get('inspection', {}).get('valid')
+    scoped = record.get('scoped_vjp_source_certificate') == 'explicit_scoped_local_vjp_v1'
+    if not record.get('completed') or not (valid or (scoped and record.get('api_executed')
+                                            and record.get('backward_executed'))):
         return unavailable('original execution/state/path is not verified')
     if not record.get('gradient_evidence'):
         return unavailable('legacy record has no numerical backward evidence')
     if record.get('run_rng_unchanged') is not True:
         return unavailable('execution RNG effects are not certified', status='unsupported')
-    if (record.get('program_certificate')
+    if valid and (record.get('program_certificate')
             or record.get('numerical_source_certificate') == 'explicit_straight_line_local_vjp_v1'):
         return {'status': 'eligible', 'route': 'legacy_source'}
     if (not record.get('config', {}).get('oracle_improvements')
@@ -81,7 +84,8 @@ def verified_violation_calls(record):
     if (audit.get('version') != AUDIT_VERSION or audit.get('scope') != 'target_vjp'
             or audit.get('status') != 'violation'
             or evidence.get('version') != 'gradient-evidence-1'
-            or not record.get('completed') or not record.get('inspection', {}).get('valid')):
+            or not record.get('completed') or not (record.get('inspection', {}).get('valid')
+                or audit.get('admission', {}).get('route') == 'scoped_local_effects')):
         return ()
     completed = {item['index'] for item in record.get('backward_invocations', []) if item.get('completed')}
     references = {(item.get('call'), item.get('node'), item.get('invocation'))

@@ -353,12 +353,53 @@ def summarize_multi_api(sessions, scheduling, limits, wall_seconds):
                 orchestration_scope='Completed sessions describe controller completion, not framework correctness')
 
 
+def check_completion(native, differential, runtime_valid):
+    """Classify generation loss separately from unfinished execution obligations."""
+    rows = native.get('records', [])
+    def truncated(row):
+        return row.get('status') == 'generation_truncated' or (
+            row.get('status') == 'provider_failed' and not row.get('cancellation_uncertain') and
+            row.get('reason') in ('ProviderFailure: Completion ended with length', 'Completion ended with length'))
+    truncations = [row['attempt'] for row in rows if truncated(row)]
+    details = dict(truncated_attempts=truncations,
+                   retry_attempts=[r['attempt'] for r in rows if r.get('retry_of_attempt') is not None])
+    stop = native.get('stop_reason')
+    if (stop in ('metadata_failed','controller_error','provider_cancellation_unconfirmed',
+                 'generation_capacity_unavailable','interrupted','pipeline_incomplete')
+            or any(r.get('cancellation_uncertain') or r.get('status') == 'provider_failed' and not truncated(r)
+                   or r.get('process', {}).get('outcome') in ('crash','timeout') for r in rows)):
+        return ('failed','execution_incomplete',1), details
+    if differential.get('incomplete'):
+        return ('partial','differential_incomplete',1), details
+    if not runtime_valid and not any(r.get('source_completed') and r.get('api_executed') for r in rows):
+        return ('skipped','budget_exhausted' if stop=='time_limit' else 'no_verified_execution',0), details
+    if truncations:
+        return ('completed_with_generation_errors','bounded_execution_finished',0), details
+    return ('completed','bounded_execution_finished',0), details
+
+
 def summarize_api_check(report):
     """Expose native evidence without promoting completion to correctness Pass."""
     metrics = report.get("search_metrics") or summarize_search(report)
     rows = report.get("records", [])
     resources = [r['process']['resources'] for r in rows if r.get('process', {}).get('resources')]
-    return {"attempts": metrics["attempts"], "runtime_valid": metrics["runtime_valid"],
+    inspections = [inspection for row in rows for inspection in (
+        row.get('inspection', {}), row.get('followup_inspection', {})) if inspection.get('legal_source')]
+    units = sorted({unit for obs in inspections for unit in obs.get('training_state_units', ())})
+    catalog = report.get('state_family_catalog', [])
+    families = {goal['id']: goal['family'] for goal in catalog}
+    sources = [row for row in rows if row.get('proposal_origin') != 'framework_representation']
+    state_coverage = dict(observed_units=units, families=sorted({families[u] for u in units if u in families}),
+        candidate_families=sorted({g['family'] for g in catalog if g['availability'] == 'candidate'}),
+        transitions=sorted({u for obs in inspections for u in obs.get('training_state_transitions', ())}),
+        combinations=sorted({tuple(pair) for obs in inspections for pair in obs.get('training_state_combinations', ())}))
+    prefix_claims = [r for r in sources if r.get('configuration', {}).get('guided_prefix_mode') == 'append_only']
+    state_coverage['prefix_attempts'] = len(prefix_claims)
+    state_coverage['prefix_verified'] = sum(r.get('guided_prefix_witness', {}).get('verified') is True
+                                            for r in prefix_claims)
+    return {"training_state_coverage": state_coverage,
+            "legal_generated_sources": sum(bool(r.get('source_completed') and r.get('api_executed')) for r in sources),
+            "representation_statuses": report.get('representation_traversal', {}).get('status_counts', {}),"attempts": metrics["attempts"], "runtime_valid": metrics["runtime_valid"],
             "verified_apis": metrics["verified_apis"],
             "mr_verdicts": dict(Counter(row.get("mr_verdict") or "unassessed"
                                        for row in report.get("records", []))),

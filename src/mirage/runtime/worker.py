@@ -71,7 +71,7 @@ def dispatch(request: dict, directory: Path) -> None:
         return
     if mode == "api_spec":
         from mirage.runtime.api_metadata import specification
-        result = specification(request["api"])
+        result = specification(request["api"], probe_device=request.get("device"))
         (directory / "summary.json").write_text(json.dumps(result, indent=2, allow_nan=False))
         return
     if mode == "provider":
@@ -106,7 +106,8 @@ def dispatch(request: dict, directory: Path) -> None:
         from mirage.backends.pytorch import PyTorchBackend
         from mirage.rules.catalog import representation_pair, optimizer_gradient_candidates, optimizer_gradient_pair
         initial_reference = torch.load(request["initial_reference"], map_location="cpu", weights_only=True) if request.get("initial_reference") else None
-        left = execute(request["source"], dict(request["config"], compiler_reference=True), Recorder(directory / "source-trace.jsonl"), initial_reference)
+        left = execute(request["source"], dict(request["config"], compiler_reference=True), Recorder(directory / "source-trace.jsonl"), initial_reference,
+                       restore_prefix_rng=bool(request.get("guided_prefix")))
         if initial_reference is not None and not request.get("allow_environment_change"):
             if left["environment"] != initial_reference.get("environment"):
                 raise ValueError("Replay environment differs from the recorded execution")
@@ -121,6 +122,9 @@ def dispatch(request: dict, directory: Path) -> None:
                    "eligible_mutations": len(eligible), "verdict": left["verdict"],
                    "correctness": "unassessed", "reason": "no eligible mutation"}
         from mirage.runtime.operands import MutationInapplicable
+        if request.get('guided_prefix'):
+            from mirage.artifacts.corpus import guided_prefix_witness
+            summary['guided_prefix_witness'] = guided_prefix_witness(initial_reference, left, PyTorchBackend())
         summary['source_completed'] = True
         summary['followup_completed'] = False
         right = None
@@ -132,7 +136,8 @@ def dispatch(request: dict, directory: Path) -> None:
                     c['step_index'] == source_action.get('step_index') and
                     c['parameter_key'] == source_action.get('parameter_key')]
             requested = request['config'].get('representation_candidate')
-            if requested is not None and left['inspection']['valid']:
+            if requested is not None and (left['inspection']['valid'] or
+                    request['config'].get('check_claim') and left['api_executed'] and left['completed']):
                 plan = next((p for p in eligible if all(p.get(k) == requested.get(k)
                     for k in ('path', 'action', 'call_index'))), None)
                 if plan is None:
@@ -141,7 +146,8 @@ def dispatch(request: dict, directory: Path) -> None:
                 right = execute(request['source'], config, Recorder(directory / 'followup-trace.jsonl'), left)
                 torch.save(right, directory / 'followup.pt')
                 summary.update(representation_pair(left, right, PyTorchBackend()), mutation=config['mutation'])
-                summary['representation_candidate_attained'] = (right['inspection']['valid'] is True
+                summary['representation_candidate_attained'] = ((right['inspection']['valid'] is True or
+                    bool(request['config'].get('check_claim') and right['completed'] and right['api_executed']))
                     and any(m.get('status') == 'verified' and m.get('action') == plan['action']
                             and m.get('call_index') == plan['call_index']
                             and list(m.get('path', ())) == list(plan['path']) for m in right['mutations']))
@@ -177,6 +183,10 @@ def dispatch(request: dict, directory: Path) -> None:
                 right = execute(request["source"], config, Recorder(directory / "followup-trace.jsonl"), left)
                 torch.save(right, directory / "followup.pt")
                 summary.update(representation_pair(left, right, PyTorchBackend()), mutation=config["mutation"])
+            if requested is not None and right is not None and not (
+                    left['inspection']['valid'] and right['inspection']['valid']):
+                summary.update(verdict='inapplicable', correctness='unassessed',
+                               reason='Representation observed; required state or history unavailable')
             summary['followup_completed'] = (directory / "followup.pt").exists()
             if right is not None:
                 summary['followup_inspection'] = right['inspection']
@@ -304,7 +314,7 @@ def main() -> int:
 
         if isinstance(error, ProviderFailure):
             status["provider_failure"] = {
-                "category": error.category,
+                "category": error.category, "details": error.details,
                 "cancellation_uncertain": error.cancellation_uncertain,
             }
     usage = resource.getrusage(resource.RUSAGE_SELF)

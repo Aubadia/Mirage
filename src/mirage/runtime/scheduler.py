@@ -1,5 +1,7 @@
 """Fair resource leases; waiting controllers never occupy execution capacity."""
 from collections import Counter, deque
+import os
+from pathlib import Path
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -7,6 +9,7 @@ import threading
 import time
 
 from mirage.contracts.scheduling import SchedulingOptions
+from mirage.runtime.differential_pool import CAPACITY, DifferentialPool
 
 
 _scope = ContextVar('mirage_scheduling_scope', default=None)
@@ -74,17 +77,14 @@ def generation_slot(*, deadline=None, label='generation'):
 
 
 class SharedScheduler:
-    """Round-robin admission with unused-slot borrowing and one CUDA test lane.
-
-    Limits cover actual subprocesses, not coordinators or replay wrappers. CUDA
-    requirements are conservative: one CUDA subprocess at a time on the assigned
-    test GPU. A subprocess can execute an entire pair without migrating live state.
-    """
+    """API-fair admission; ordinary CUDA probes run exclusively of differential tasks."""
     def __init__(self, options: SchedulingOptions, *, deadline=None):
         self.options, self.deadline = options, deadline
         self.condition = threading.Condition(threading.RLock())
         self.cancel = threading.Event()
         self.reason = None
+        self.uncertain = []
+        self.service_stop_file = os.environ.get('MIRAGE_GENERATION_STOP_FILE')
         self.cancellations = {}
         self.events = []
         self.pending = {'execution': {}, 'generation': {}}
@@ -92,6 +92,8 @@ class SharedScheduler:
         self.active = Counter()
         self.by_session = Counter()
         self.cuda_active = 0
+        self.lanes = Counter()
+        self.differential = DifferentialPool()
         self.started = time.monotonic()
 
     def abort(self, reason):
@@ -109,13 +111,42 @@ class SharedScheduler:
     def _eligible(self, identifier, kind, event):
         capacity = self.options.workers if kind == 'execution' else self.options.generation_concurrency
         limit = self.options.per_api_worker_limit if kind == 'execution' else self.options.per_api_generation_limit
+        lane = event['resource']
+        available = lane not in CAPACITY or self.lanes[lane] < CAPACITY[lane]
+        if lane == 'cuda':
+            available = self.cuda_active == 0
+        elif lane == 'device_cuda':
+            # Let an older exclusive probe drain the device even under a continuous differential backlog.
+            older_exclusive = any(other['resource'] == 'cuda' and other['submitted'] < event['submitted']
+                                  for queue in self.pending['execution'].values() for other in queue)
+            available = available and self.lanes['cuda'] == 0 and not older_exclusive
         return (self.active[kind] < capacity and self.by_session[identifier, kind] < limit
-                and (event['resource'] != 'cuda' or not self.cuda_active))
+                and available)
+
+    def _release(self, event):
+        event.update(state='finished', finished=time.monotonic())
+        self.active[event['kind']] -= 1
+        self.by_session[event['session'], event['kind']] -= 1
+        self.lanes[event['resource']] -= 1
+        self.cuda_active -= int(event['resource'] in ('cuda','device_cuda'))
 
     def _dispatch(self):
+        for event in self.uncertain[:]:
+            receipt = event.get('receipt')
+            if receipt and Path(receipt).is_file():
+                self._release(event)
+                event['terminal_receipt_verified'] = True
+                self.uncertain.remove(event)
         for kind in ('execution', 'generation'):
             rotation, queues = self.rotation[kind], self.pending[kind]
             while rotation:
+                if kind == 'generation' and self.service_stop_file and Path(self.service_stop_file).exists():
+                    for queue in queues.values():
+                        for event in queue:
+                            event.update(state='service_unavailable', finished=time.monotonic())
+                    rotation.clear()
+                    queues.clear()
+                    break
                 dispatched = False
                 for _ in range(len(rotation)):
                     identifier = rotation.popleft()
@@ -130,7 +161,8 @@ class SharedScheduler:
                         chosen.update(state='running', granted=time.monotonic())
                         self.active[kind] += 1
                         self.by_session[identifier, kind] += 1
-                        self.cuda_active += int(chosen['resource'] == 'cuda')
+                        self.lanes[chosen['resource']] += 1
+                        self.cuda_active += int(chosen['resource'] in ('cuda','device_cuda'))
                         chosen['global_active_at_dispatch'] = self.active[kind]
                         chosen['session_active_at_dispatch'] = self.by_session[identifier, kind]
                         dispatched = True
@@ -146,7 +178,7 @@ class SharedScheduler:
 
     @contextmanager
     def lease(self, identifier, kind, *, resource='cpu', deadline=None, cancel=None, label=''):
-        if kind not in self.pending or resource not in ('cpu', 'cuda'):
+        if kind not in self.pending or resource not in ('cpu', 'cuda', *CAPACITY):
             raise ValueError('Unknown scheduling resource')
         if kind == 'generation':
             resource = 'cpu'
@@ -155,6 +187,9 @@ class SharedScheduler:
         event = dict(session=identifier, kind=kind, resource=resource, label=str(label),
                      submitted=time.monotonic(), state='queued', _deadline=deadline, _cancel=cancel)
         with self.condition:
+            if kind == 'generation' and self.service_stop_file and Path(self.service_stop_file).exists():
+                from mirage.runtime.pipeline import GenerationBudgetExhausted
+                raise GenerationBudgetExhausted('Model service exited; drain submitted tests')
             self.events.append(event)
             queue = self.pending[kind].get(identifier)
             if queue is None:
@@ -163,18 +198,33 @@ class SharedScheduler:
             queue.append(event)
             self._dispatch()
             while event['state'] == 'queued':
+                service_lost = self.service_stop_file and Path(self.service_stop_file).exists()
+                cannot_reconcile = (len(self.uncertain) == self.options.generation_concurrency
+                                    and all(not e.get('receipt') for e in self.uncertain))
+                if kind == 'generation' and (service_lost or cannot_reconcile):
+                    from mirage.runtime.pipeline import GenerationBudgetExhausted
+                    event['_deadline'] = time.monotonic()
+                    self._dispatch()
+                    raise GenerationBudgetExhausted('Model service unavailable or no confirmable slots; drain queued execution')
                 self.condition.wait(timeout=.05)
                 self._dispatch()
+            if event['state'] == 'service_unavailable':
+                from mirage.runtime.pipeline import GenerationBudgetExhausted
+                raise GenerationBudgetExhausted('Model service exited; drain submitted tests')
             if event['state'] == 'cancelled':
                 raise SchedulingCancelled(self.reason or 'Task cancelled or deadline expired while queued')
         try:
             yield event
+        except BaseException as error:
+            if kind == 'generation' and getattr(error, 'cancellation_uncertain', False):
+                with self.condition:
+                    event.update(state='awaiting_receipt', receipt=getattr(error, 'receipt', None))
+                    self.uncertain.append(event)
+            raise
         finally:
             with self.condition:
-                event.update(state='finished', finished=time.monotonic())
-                self.active[kind] -= 1
-                self.by_session[identifier, kind] -= 1
-                self.cuda_active -= int(resource == 'cuda')
+                if event['state'] == 'running':
+                    self._release(event)
                 self._dispatch()
 
     def snapshot(self):

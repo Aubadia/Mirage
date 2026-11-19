@@ -43,8 +43,9 @@ class Response:
 class ProviderFailure(RuntimeError):
     """A service failure, distinct from an invalid generated program."""
 
-    def __init__(self, category: str, message: str, *, cancellation_uncertain: bool = False):
+    def __init__(self, category: str, message: str, *, cancellation_uncertain: bool = False, details=None):
         super().__init__(message)
+        self.details = details or {}
         self.category = category
         self.cancellation_uncertain = cancellation_uncertain
 
@@ -90,15 +91,22 @@ class IsolatedProvider:
         self.cancel = cancel
 
     def generate(self, request: Request, *, deadline: float | None) -> Response:
-        from mirage.runtime.scheduler import current_scope, generation_slot
-        scope = current_scope()
-        try:
-            with generation_slot(deadline=deadline, label=self.directory / f'provider-{self.calls + 1:03d}'):
+        from mirage.runtime.scheduler import generation_slot
+        import os
+        import re
+        from pathlib import Path
+        with generation_slot(deadline=deadline, label=self.directory / f'provider-{self.calls + 1:03d}'):
+            try:
                 return self._timed_generate(request, deadline=deadline)
-        except ProviderFailure as error:
-            if scope and error.cancellation_uncertain:
-                scope.scheduler.abort(f'Shared provider cancellation unconfirmed: {error}')
-            raise
+            except ProviderFailure as error:
+                receipt_root = os.environ.get('MIRAGE_REQUEST_RECEIPTS')
+                if error.cancellation_uncertain and receipt_root:
+                    artifacts = list((self.directory / f'provider-{self.calls:03d}').glob('http-*.json'))
+                    if len(artifacts) == 1:
+                        key = artifacts[0].stem[5:]
+                        if re.fullmatch('[a-f0-9]{32}', key):
+                            error.receipt = str(Path(receipt_root) / key)
+                raise
 
     def _timed_generate(self, request: Request, *, deadline: float | None) -> Response:
         import json
@@ -140,7 +148,7 @@ class IsolatedProvider:
             if "provider_failure" in status:
                 failure = status["provider_failure"]
                 raise ProviderFailure(failure["category"], process.error or process.outcome,
-                                      cancellation_uncertain=failure["cancellation_uncertain"])
+                                      cancellation_uncertain=failure["cancellation_uncertain"], details=failure.get('details'))
             if self.specification == "vllm":
                 raise ProviderFailure("process", process.error or process.outcome,
                                       cancellation_uncertain=True)

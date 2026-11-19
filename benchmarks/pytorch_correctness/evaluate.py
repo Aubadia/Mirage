@@ -669,10 +669,11 @@ def stateful_mechanism(issue, record):
     if issue=='203078':
         for call in calls:
             by_path={tuple(d['path']):d for d in call.get('metadata',[])}
-            index=by_path.get(('args',2),{})
-            src=by_path.get(('args',3),{})
+            index=by_path.get(('args',2),by_path.get(('kwargs','index'),{}))
+            destination=by_path.get(('args',0),by_path.get(('kwargs','self'),{}))
             # Paths are typed; schema-independent positions are interpreted only here.
-            if index.get('strides')==[1,0] and len(src.get('shape',[]))==2 and src['shape'][1]>index['shape'][1]: return True
+            if (index.get('strides')==[1,0] and len(index.get('shape',[]))==2
+                and len(destination.get('shape',[]))==2 and destination['shape'][1]>index['shape'][1]): return True
         return False
     if issue=='204407': return any(prop(d,'negative') for d in descriptors) and record.get('backward_executed',False)
     if issue=='200599':

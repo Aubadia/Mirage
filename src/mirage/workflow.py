@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
 from dataclasses import asdict
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -292,8 +293,14 @@ def execute(source, config, initial, directory, budget, engine=None, cancel=None
     return process, record
 
 
-def check_api(api, *, output=None):
+from mirage.runtime.differential_pool import standalone as differential_session
+
+
+@differential_session
+def check_api(api, *, output=None, session_options=None):
     """Run a name-only check using prepared environment settings and isolated probes."""
+    from dataclasses import replace
+    from mirage.runtime.scheduler import current_scope
     from mirage.contracts.apis import validate_api_name
     from mirage.contracts.programs import RunOptions
     from mirage.artifacts.report import summarize_api_check
@@ -309,7 +316,7 @@ def check_api(api, *, output=None):
     report = {"version": "api-check-1", "api": api, "directory": str(root),
               "status": "running", "stage": "configuration", "terminal": False,
               "correctness": "unassessed", "processes": [], "metrics": None,
-              "implementation_stage": "spec-fragments-1", "differential": {"status": "not_evaluated"}}
+              "implementation_stage": "state-guided-parallel-2", "differential": {"status": "not_evaluated"}}
     write_json(root / "summary.json", report)
 
     def finish(status, reason, exit_status):
@@ -320,31 +327,31 @@ def check_api(api, *, output=None):
 
     try:
         validate_api_name(api)
-        limit = float(os.environ.get("MIRAGE_CHECK_TIME_LIMIT", "300"))
-        worker_timeout = float(os.environ.get("MIRAGE_CHECK_WORKER_TIMEOUT", "60"))
-        device = os.environ.get("MIRAGE_CHECK_DEVICE", "auto")
+        wall_limit = float(os.environ.get("MIRAGE_CHECK_TIME_LIMIT", "14400"))
+        if not math.isfinite(wall_limit) or wall_limit <= 0:
+            raise ValueError("MIRAGE_CHECK_TIME_LIMIT must be finite and positive")
+        scope = current_scope()
+        deadline = scope.deadline if scope and scope.deadline is not None else started + wall_limit
+        device = session_options.device if session_options else os.environ.get("MIRAGE_CHECK_DEVICE", "auto")
         if device not in ("auto", "cpu", "cuda"):
             raise ValueError("MIRAGE_CHECK_DEVICE must be auto, cpu or cuda")
-        provider = os.environ.get("MIRAGE_PROVIDER", "vllm")
-        # Configuration is frozen before any worker starts. Auto begins on CPU;
-        # claim-specific device exploration is implemented by later milestones.
-        options = RunOptions(output=str(root / "execution"), provider=provider,
-            cases=int(os.environ.get("MIRAGE_CHECK_CASES", "4")), time_limit=limit,
-            worker_timeout=worker_timeout, seed=int(os.environ.get("MIRAGE_CHECK_SEED", "0")),
-            strategy="stateful", contract_version=4, forward_only=True,
-            device="cpu" if device == "auto" else device,
-            representation_traversal=True, oracle_improvements=True)
-        toggle = os.environ.get("MIRAGE_CHECK_DIFFERENTIAL", "1")
-        if toggle not in ("0", "1"):
-            raise ValueError("MIRAGE_CHECK_DIFFERENTIAL must be 0 or 1")
-        report["configuration"] = dict(asdict(options), differential=toggle == "1")
-        report["configuration"]["budget_scope"] = "whole-check wall time, including preflight and metadata"
-        deadline = started + limit
+        options = (replace(session_options, output=str(root / "execution")) if session_options else
+            RunOptions(output=str(root / "execution"), provider=os.environ.get("MIRAGE_PROVIDER", "vllm"),
+                cases=int(os.environ.get("MIRAGE_CHECK_CASES", "100000")),
+                time_limit=float(os.environ.get("MIRAGE_CHECK_MODEL_SECONDS", "180")),
+                worker_timeout=float(os.environ.get("MIRAGE_CHECK_WORKER_TIMEOUT", "75")),
+                seed=int(os.environ.get("MIRAGE_CHECK_SEED", "0")), strategy="stateful",
+                contract_version=4, forward_only=True, generation_pipeline=True,
+                device="cpu" if device == "auto" else device,
+                representation_traversal=True, oracle_improvements=True))
+        provider, worker_timeout = options.provider, options.worker_timeout
+        report["configuration"] = dict(asdict(options), differential=True, wall_limit_seconds=deadline-started)
+        report["configuration"]["budget_scope"] = "Per-API cumulative model request seconds; independent worker drain"
         if time.monotonic() >= deadline:
             return finish("skipped", "budget_exhausted", 0)
         report["stage"] = "specification"
         write_json(root / "summary.json", report)
-        process = run_worker({"mode": "api_spec", "api": api}, root / "specification",
+        process = run_worker({"mode": "api_spec", "api": api, "device": options.device}, root / "specification",
                              min(worker_timeout, deadline - time.monotonic()))
         report["processes"].append(asdict(process))
         if process.outcome != "completed":
@@ -357,7 +364,6 @@ def check_api(api, *, output=None):
         if spec["status"] != "resolved":
             return finish("skipped", "api_unavailable", 0)
         if device == "auto" and api.startswith("torch.cuda."):
-            from dataclasses import replace
             options = replace(options, device="cuda")
             report["configuration"]["device"] = "cuda"
         if options.device == "cuda" and not spec["environment"]["cuda_available"]:
@@ -377,11 +383,37 @@ def check_api(api, *, output=None):
             return finish("skipped", "budget_exhausted", 0)
         report["stage"] = "execution"
         write_json(root / "summary.json", report)
-        # Reserve a bounded slice for real-device comparison. Both experimental arms
-        # use the same generation budget to preserve paired-seed attribution.
-        generation_deadline = deadline - min(45., limit / 5) if spec["environment"]["cuda_available"] else deadline
-        result = run_stateful(options, (api,), path_policy="mixed", predicates=[],
-            representation_traversal=True, oracle_improvements=True, wall_deadline=generation_deadline, api_spec=spec)
+        from mirage.artifacts.replay import assess_devices
+        from collections import deque
+        device_feedback = deque(maxlen=12)
+        feedback_lock = threading.Lock()
+
+        def compare_online(row, admitted):
+            judged = assess_devices(root, {"records": [row]}, spec, enabled=True, timeout=worker_timeout,
+                                    deadline=deadline, resume=True, append=True, admitted=admitted)
+            with feedback_lock:
+                for item in judged["rows"]:
+                    device_feedback.append({k: item.get(k) for k in ("attempt", "member", "status", "reason")})
+
+        def publish(row):
+            if row.get("source_completed") and row.get("api_executed"):
+                online_jobs.append(comparisons.submit(copy_context().run, compare_online, row.copy(), time.monotonic()))
+            while online_jobs and online_jobs[0].done():
+                online_jobs.popleft().result()
+
+        def latest_device_feedback():
+            with feedback_lock:
+                return list(device_feedback)
+
+        # One writer per API publishes completed comparisons during generation.
+        # Both workers acquire the campaign's shared CPU/CUDA execution leases.
+        online_jobs = deque()
+        with ThreadPoolExecutor(max_workers=min(4, options.workers), thread_name_prefix="mirage-device") as comparisons:
+            result = run_stateful(options, (api,), path_policy="mixed", predicates=[],
+                representation_traversal=True, oracle_improvements=True, wall_deadline=deadline,
+                api_spec=spec, case_observer=publish, device_feedback=latest_device_feedback)
+            for future in online_jobs:
+                future.result()
         report["execution_summary"] = "execution/summary.json"
         report["metrics"] = summarize_api_check(result)
         stop = result.get("stop_reason")
@@ -389,21 +421,11 @@ def check_api(api, *, output=None):
         write_json(root/"execution-complete.json", {"stop_reason": stop, "records": len(result.get("records", []))})
         report["stage"] = "differential"
         write_json(root/"summary.json", report)
-        from mirage.artifacts.replay import assess_devices
-        report["differential"] = assess_devices(root, result, spec, enabled=toggle == "1",
-                                                timeout=worker_timeout, deadline=deadline)
-        failures = [row for row in result.get("records", [])
-                    if row.get("status") == "provider_failed"]
-        worker_failures = [row for row in result.get("records", [])
-                           if row.get("process", {}).get("outcome") in ("crash", "timeout")]
-        if failures or worker_failures or stop in ("metadata_failed", "controller_error", "provider_cancellation_unconfirmed"):
-            return finish("failed", "execution_incomplete", 1)
-        if report["metrics"]["runtime_valid"] == 0:
-            reason = "budget_exhausted" if stop == "time_limit" else "no_verified_execution"
-            return finish("skipped", reason, 0)
-        if report["differential"]["incomplete"]:
-            return finish("partial", "differential_incomplete", 1)
-        return finish("completed", "bounded_execution_finished", 0)
+        report["differential"] = assess_devices(root, result, spec, enabled=True,
+                                                timeout=worker_timeout, deadline=deadline, workers=options.workers, resume=True)
+        from mirage.artifacts.report import check_completion
+        completion, report['generation_completion'] = check_completion(result, report['differential'], report['metrics']['runtime_valid'])
+        return finish(*completion)
     except KeyboardInterrupt:
         if report['stage'] == 'differential':
             report['differential']['incomplete'] = True
@@ -759,10 +781,10 @@ def _run(options, apis):
 
 def replay(manifest_path, *, timeout=600, allow_environment_change=False, deadline=None, cancel=None):
     candidate = json.loads(Path(manifest_path).read_text())
-    if candidate.get('format') == 'device-differential-1':
+    if candidate.get('format') in ('device-differential-1', 'device-differential-2', 'device-differential-3'):
         from mirage.artifacts.replay import replay_devices
         result = replay_devices(manifest_path, timeout=timeout, deadline=deadline or time.monotonic()+timeout)
-        return dict(result, replay_valid=result['status'] != 'incomplete')
+        return dict(result, replay_valid=result['status'] not in ('incomplete', 'unstable_or_unconfirmed'))
     if candidate.get('format') == 'stateful-1-replay':
         return replay_stateful(Path(manifest_path), timeout=timeout,
                                allow_environment_change=allow_environment_change, cancel=cancel)
@@ -989,7 +1011,8 @@ def run_stateful(options, apis, **kwargs):
 
 def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="backward", coverage_refinement=True,
                  search_policy="adaptive", generation_mode="local", coverage_basis="semantic",
-                 representation_traversal=False, oracle_improvements=False, _pipeline=None, wall_deadline=None, api_spec=None):
+                 representation_traversal=False, oracle_improvements=False, _pipeline=None, wall_deadline=None, api_spec=None,
+                 case_observer=None, device_feedback=None):
     """Corpus-guided local generation, runtime mutation and conditional MR assessment.
 
     API/issue benchmark data never enters this path. Every candidate and repair
@@ -1034,7 +1057,7 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     for index, api in enumerate(apis):
         directory = root / f'api-{index}'
         if api_spec is not None:
-            from mirage.generator.state_plan import check_context, fragment_claims
+            from mirage.generator.state_plan import check_context, select_state_goal
             if api_spec['api'] != api or api_spec['status'] != 'resolved':
                 raise ValueError('Acquired Spec does not identify the requested API')
             metadata[api] = check_context(api_spec)
@@ -1079,6 +1102,8 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
     claim_index = 0
     input_index = 0
     exception_reruns = Counter()
+    constraint_history = {}
+    refined_inputs = []
     def consume_representations():
         if not _pipeline:
             return
@@ -1096,6 +1121,8 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
             audit_seen_units.update(child.get('audit_candidate_units', []))
             write_json(Path(child['directory']) / 'outcome.json', child)
             rows.append(child)
+            if case_observer:
+                case_observer(child)
     if _pipeline:
         from mirage.runtime.pipeline import BudgetedProvider
         _pipeline.consume = consume_representations
@@ -1152,8 +1179,10 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
             pending = None
         elif api_spec is not None:
             api = api_spec['api']
-            protocol = fragment_claims(api_spec)
-            claim = protocol[claim_index % len(protocol)]
+            decision = None
+            state_goal = None
+            parent_entry = None
+            claim = 'operand_relation'
             parent_source = None
             requested = []
             if relation_id:
@@ -1165,17 +1194,71 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                 requested = [candidate['predicate']]
                 claim = 'operand_relation'
             else:
+                state_goal, parent_entry, decision = select_state_goal(
+                    api_spec, rows, corpus, claim_index, device=options.device)
+                claim = state_goal['check_claim']
                 claim_index += 1
+                if parent_entry is not None:
+                    parent_source = corpus.source(parent_entry)
             config = dict(api=api, device=options.device, seed=options.seed, attempt=index,
                           proposal_index=input_index, predicates=requested, check_claim=claim,
                           requires_backward=claim in ('backward', 'accumulation') or any(
                               p.get('relation') or p.get('peer_relation') for p in requested),
-                          input_categories=['ordinary'], representation_traversal=True)
+                          input_categories=list(stateful_input_profile(claim_index - 1 if claim_index else 0).requested),
+                          representation_traversal=True)
+            from mirage.runtime.input_constraints import choose_input_recipe
+            recipe = choose_input_recipe(api_spec.get("constraints", {}), input_index)
+            if recipe:
+                config['input_recipe'] = recipe
+            if state_goal:
+                config.update(state_goal=state_goal, requires_backward=state_goal['requires_backward'])
+            strict_prefix = False
+            if parent_entry is not None:
+                from mirage.generator.repair import supports_guided_prefix
+                strict_prefix = supports_guided_prefix(parent_source, state_goal)
+                config['guided_prefix_mode'] = 'append_only' if strict_prefix else 'reference_only'
+                if strict_prefix or decision and decision.get('oracle_proposal'):
+                    parent_config = parent_entry['configuration']
+                    config.update(device=parent_config['device'], seed=parent_config['seed'])
+                    config.pop('input_recipe', None)
+                    if parent_config.get('input_recipe'):
+                        config['input_recipe'] = parent_config['input_recipe']
             request = stateful_request(metadata[api], config, predicates=requested, canonical=parent_source)
+            if decision and decision.get('confirm_prefix'):
+                request.context.update(configuration_source_reuse=True, generation_reason='confirm_witnessed_state')
+                for key in ('device','seed','input_recipe','input_categories'):
+                    if key in parent_entry['configuration']:
+                        config[key] = parent_entry['configuration'][key]
+                    else:
+                        config.pop(key, None)
+            if decision and decision.get('oracle_proposal'):
+                request.context['oracle_precondition'] = decision['oracle_proposal']
+            if decision and decision.get('extend_confirmation'):
+                request.context['extension_instruction'] = 'Preserve the witnessed product-use path. Add only the missing state axis at that call.'
+                request.context['confirmed_parent'] = decision['extend_confirmation']
+            if strict_prefix:
+                request.context['guided_initial_reference'] = str(corpus.root / parent_entry['initial_reference'])
             if relation_id:
                 request.context['relation_id'] = relation_id
-            choice = dict(api=api, parent=None, kind='fresh', goal=claim)
-            selection = dict(policy='spec_and_observed_relations', candidate_count=len(protocol))
+            if parent_entry is not None:
+                request.context.update(generation_parent_id=parent_entry['id'],
+                    parent_manifest_sha256=parent_entry['manifest_sha256'], prefix_mode=config['guided_prefix_mode'])
+            if parent_entry is not None:
+                request.context['witnessed_prefix_units'] = sorted(parent_entry.get('witnesses', {}))
+            recent = next((r for r in reversed(rows) if r.get('api') == api and
+                           r.get('status') == 'execution_failed' and r.get('reason')), None)
+            if recent:
+                request.context['prior_execution_diagnostic'] = dict(attempt=recent['attempt'],
+                    observed=str(recent['reason'])[:750], scope='prior configuration only')
+            if constraint_history:
+                request.context['observed_input_feedback'] = list(constraint_history.values())[-4:]
+                request.context['observed_constraint_refinements'] = refined_inputs[-3:]
+            if device_feedback:
+                request.context['device_feedback'] = device_feedback()
+            choice = dict(api=api, parent=parent_entry['id'] if parent_entry else None,
+                          kind='state_goal' if state_goal else 'operand_relation',
+                          goal=state_goal['id'] if state_goal else claim)
+            selection = decision or dict(policy='observed_operand_relation', candidate_count=1)
             input_index += 1
         else:
             mutation = None
@@ -1288,6 +1371,9 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                     for entry in traversal.sources if entry['configuration']['api'] == api][-4:]
             input_index += 1
         config = json.loads(json.dumps(config))
+        if config.get('input_recipe'):
+            from mirage.runtime.input_constraints import recipe_digest
+            config.setdefault('input_recipe_sha256', recipe_digest(config['input_recipe']))
         if oracle_improvements:
             config.update(oracle_improvements=True, oracle_seen_units=sorted(audit_seen_units))
         request.context['configuration'] = config
@@ -1418,6 +1504,8 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                            generation_mode='configuration' if reuse_configuration else 'local' if mutation else 'full', candidate=choice)
                 write_json(directory/'request.json', asdict(request))
             phase = 'generation'
+            if 'truncated_attempt' in request.context:
+                row['retry_of_attempt'] = request.context['truncated_attempt']
             reuse_configuration = bool(request.context.get('configuration_source_reuse') and not request.previous_content)
             row['program_generation_dispatched'] = not reuse_configuration
             if reuse_configuration:
@@ -1432,6 +1520,9 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                 edit = {'kind': 'execution_configuration', 'parent_id': parent_id,
                         'representation_candidate' if representation_plan else 'optimizer_gradient_action':
                             representation_plan or config.get('optimizer_gradient_action')}
+                if request.context.get('generation_reason') == 'confirm_witnessed_state':
+                    edit = dict(kind='witness_confirmation', parent_id=parent_id, goal=config['state_goal']['id'])
+                    row['realized_transition'] = dict(edit, source_changed=False)
                 if representation_plan:
                     row['generation_mode'] = 'representation'
                     row['representation_traversal'] = {
@@ -1477,6 +1568,9 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                 row['raw_syntax_valid'] = normalization is None
             (directory/'program.py').write_text(source)
             phase = 'static_contract'; graph = analyze_stateful(source)
+            if request.context.get('guided_initial_reference'):
+                from mirage.generator.repair import validate_guided_prefix
+                validate_guided_prefix(request.context['canonical_source'], source)
             row.update(contract_valid=True, fingerprint=graph['fingerprint'])
             if graph['fingerprint'] == request.context.get('repair_rejected_fingerprint'):
                 row['duplicate_repair_kind'] = 'ast'
@@ -1489,6 +1583,9 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
             if remaining <= 0: raise TimeoutError('Budget exhausted before execution')
             worker_request = {'mode':'execute_stateful_pair', 'source':source, 'config':config,
                                   'engine':str(root/'engine'),
+                                  **({'initial_reference': request.context['guided_initial_reference'],
+                                      'reference_scope': 'initialization', 'guided_prefix': True}
+                                     if request.context.get('guided_initial_reference') else {}),
                                   **({'initial_reference': request.context['traversal_initial_reference'],
                                       'reference_scope': 'initialization'}
                                      if request.context.get('traversal_initial_reference') else {}),
@@ -1554,7 +1651,7 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                                 min(options.worker_timeout, max(5, 2*process.elapsed_seconds+2), remaining))
         except GenerationBudgetExhausted as error:
             # No request was sent; retain prior planning evidence and drain existing work.
-            stop = 'llm_time_limit'
+            stop = 'llm_time_limit' if _pipeline.generation_budget_stop else 'generation_capacity_unavailable'
             if phase == 'state_plan':
                 row['planning_dispatched'] = False
             row.update(status='budget_before_generation', reason=str(error),
@@ -1572,7 +1669,15 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
             row.update(status=status, **failure_record(phase, str(error)))
             repairable = phase != 'state_plan'
         except ProviderFailure as error:
-            row.update(status='provider_failed', reason=str(error), cancellation_uncertain=error.cancellation_uncertain)
+            truncated = error.category == 'generation_truncated' and not error.cancellation_uncertain
+            row.update(status='generation_truncated' if truncated else 'provider_failed', reason=str(error),
+                       provider_category=error.category, provider_details=error.details,
+                       cancellation_uncertain=error.cancellation_uncertain)
+            if (truncated and phase == 'generation' and api_spec is not None and 'truncated_attempt' not in request.context
+                    and not request.context.get('oracle_precondition')):
+                pending = replace(request, context=dict(request.context, truncated_attempt=index,
+                    retry_instruction='Return the shortest complete legal source. Omit commentary and redundant setup.'))
+                pending_selection = (choice, dict(policy='one_bounded_truncation_retry', retry_of_attempt=index))
             if error.cancellation_uncertain:
                 stop = 'provider_cancellation_unconfirmed'
                 session = os.environ.get('MIRAGE_SESSION_DIR')
@@ -1612,9 +1717,17 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
         if repairable and state_repair_stalled(request.context.get('repair_state_progress'), progress):
             repairable = False
             row['repair_stopped'] = 'no_monotonic_state_progress'
+        gap = request.context.get('oracle_precondition')
+        if gap and repairable:
+            uses = row.get('inspection', {}).get('product_use', {}).get('uses', ())
+            # A different observed usage or a validated runtime diagnostic gives the repair new evidence.
+            repairable = repair_count == 0 and (any(u['mode'] not in ('scope_exit', gap['observed_use'])
+                for u in uses) or row.get('runtime_diagnostic', {}).get('repair_allowed') is True)
         if repairable and row.get('verdict') != 'suspected_failure' and response is not None and repair_count < (1 if noop else 2):
             repair_count += 1
             diagnostic=row.get('reason','contract violation')
+            if gap:
+                diagnostic += ' Required product use: ' + gap['required_use'] + '. Observed: ' + str(uses[:4])
             if noop:
                 diagnostic += '. The patch is AST-identical. Implement the missing transition_plan delta; formatting changes do not attain the goal.'
             if mutation and 'protected target' in diagnostic:
@@ -1634,7 +1747,21 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
             item = row['representation_traversal']
             item['status'] = traversal.complete(item['source_id'], item['candidate_id'], row)
         if api_spec is not None:
+            from mirage.runtime.input_constraints import trace_input_observations, refine_trace_constraints
             from mirage.generator.state_plan import offer_relations
+            inputs = trace_input_observations(directory / 'execution/source-trace.jsonl')
+            row['target_input_observations'] = inputs
+            for observation in inputs:
+                signature = json.dumps(observation, sort_keys=True)
+                if signature not in constraint_history:
+                    constraint_history[signature] = dict(observation, evidence=str(directory), attempt=index)
+            if inputs:
+                refined_inputs = refine_trace_constraints(api_spec, list(constraint_history.values()),
+                                                          device=options.device)
+            write_json(root/'input-feedback.json', dict(api=api, build=api_spec.get('framework_build'),
+                refinements=refined_inputs,
+                observations=list(constraint_history.values()),
+                scope='Observed public target calls. Rejections are local to the complete operand tuple and execution history.'))
             key = request.context.get('relation_id')
             if key:
                 item = relation_ledger[key]
@@ -1700,6 +1827,8 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
                                            coverage_feedback=coverage_feedback, generation_parent_id=refinement['parent_id'])
                     pending_selection = ({'api':api, 'parent':refinement['parent_id'], 'kind':'initialization'},
                                          {'policy':'input_refinement', 'candidate_count':1, 'selected_probability':1.})
+        if case_observer:
+            case_observer(row)
         if _pipeline:
             if row.get('executable'):
                 _pipeline.register(source, row)
@@ -1751,7 +1880,11 @@ def _run_stateful(options, apis, *, edges=True, predicates=None, path_policy="ba
             result['stop_reason'] = 'pipeline_incomplete'
         result['budget_scope'] = 'Cumulative model request seconds per API; framework drain is independent'
     if api_spec is not None:
-        result['model_request_timings'] = provider.request_timings
+        from mirage.generator.state_plan import state_family_catalog
+        from mirage.generator.state_plan import observed_capabilities
+        result['state_family_catalog'] = state_family_catalog(api_spec, options.device,
+            observed=observed_capabilities(api_spec['api'], rows))
+        result['model_request_timings'] = (provider.provider if _pipeline else provider).request_timings
         result['relation_goal_counts'] = dict(Counter(item['status'] for item in relation_ledger.values()))
         result['relation_goal_candidates'] = len(relation_ledger)
     result['search_metrics'] = summarize_search(result)

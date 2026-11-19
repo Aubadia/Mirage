@@ -20,6 +20,12 @@ def program_goal_catalog(catalog):
     return [g for g in catalog if g['predicate']['dimension'] not in ('representation', 'tensor_relation')]
 
 
+def legal_check_source(row):
+    """Target return and legal program completion are independent of a requested state."""
+    return (row.get('source_completed') is True and row.get('api_executed') is True
+            and bool(row.get('configuration', {}).get('check_claim')))
+
+
 def previously_reached(plan, row):
     """Reuse exact runtime mutation evidence, independently of the MR verdict."""
     followup = row.get('followup_inspection', {})
@@ -64,8 +70,9 @@ class RepresentationTraversal:
     def register(self, source, row):
         if (row.get('proposal_origin') == 'framework_representation'
                 or (not self.include_suspects and row.get('verdict') == 'suspected_failure')
-                or row.get('inspection', {}).get('valid') is not True
-                or row.get('mutation_obligations_valid') is not True):
+                or (not legal_check_source(row) and
+                    (row.get('inspection', {}).get('valid') is not True
+                     or row.get('mutation_obligations_valid') is not True))):
             return None
         candidates = row.get('mutation_candidates')
         if not isinstance(candidates, list):

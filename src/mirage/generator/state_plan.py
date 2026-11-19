@@ -541,6 +541,15 @@ def check_context(spec):
                 sources=spec['sources'], unknown_fields=spec['unknown_fields'],
                 callable_capabilities=spec['capabilities'],
                 schemas=[row['schema'][:400] for row in spec['operator_schemas'][:8]])
+    if 'constraints' in spec:
+        model = spec['constraints']
+        meta['constraints'] = dict(version=model.get('version'), probe_status=model.get('probe_status'),
+            validation_guards=[{'expression': item.get('expression', '')[:180], 'scope': item.get('scope')}
+                               for item in model.get('validation_guards', [])[:3]],
+            observations=[{k: item.get(k) for k in ('dtype','shape','returned','device')}
+                          for item in model.get('observations', [])[:4]],
+            refinements=[{k: item.get(k) for k in ('proposal','status','counts')}
+                         for item in model.get('refinements', [])[:3]])
     meta.pop('documentation_references', None)
     return meta
 
@@ -562,6 +571,213 @@ def fragment_claims(spec):
                                       'returns a graphed', 'optimized function', 'compiled function')):
         return ['callable_use', 'forward']
     return ['forward', 'backward', 'accumulation']
+
+
+# Each predicate names an observer contract, not an API. The requested prefix
+# is only a planning prerequisite. Only inspector-owned evidence grants coverage.
+_STATE_GOALS = (
+    ('autograd', 'inference_target', 'forward', (), 'Execute the target under torch.inference_mode() and use its actual return.'),
+    ('autograd', 'target_backward', 'backward', (), 'Differentiate a target output with respect to a real input. Use distinguishable coordinates where legal.'),
+    ('gradient_buffer', 'leaf_accumulation', 'accumulation', ('target_backward',), 'Perform two target-connected backwards contributing to the same leaf without clearing its gradient.'),
+    ('graph_lifecycle', 'same_graph_twice', 'backward', ('target_backward',), 'Call the target once, then differentiate the same returned graph twice. Retain it on the first backward.'),
+    ('module_buffer', 'module_buffer_operand', 'forward', (), 'Pass an actual registered module buffer as a target operand. Return that module in build under modules.'),
+    ('activation_checkpoint', 'target_recomputed', 'backward', ('target_backward',), 'Use probe.recompute(function, tensor) where function invokes probe.call on the target. Drive backward through its output to trigger recomputation.'),
+    ('saved_tensor', 'saved_target_unpacked', 'backward', ('target_backward',), 'Around the real target forward use with probe.saved_on_cpu(): then perform backward. Choose an operation path which saves a tensor for backward.'),
+    ('autocast', 'autocast_target', 'forward', (), 'Use a legal torch.autocast context for the requested device while actually invoking the target.'),
+    ('autocast', 'scope_reentry', 'scope_exit', (), 'Re-enter the same target-produced context before its outer scope exits, using a documented decorator recursively when supported. Let both scopes exit.'),
+    ('loss_scaling', 'overflow_step_skipped', 'backward', ('target_backward',), 'Build a native optimizer and enabled torch.amp.GradScaler(device) in ctx. Use a registered trainable leaf as an actual target operand yielding a floating tensor; call probe.scaled_overflow_step() after the target to drive its scaled backward and verify a skipped update.'),
+    ('optimizer', 'target_update', 'backward', ('target_backward',), 'Use the target on a registered FP64 parameter, backpropagate its result, then perform one actual optimizer update.'),
+    ('optimizer', 'produced_optimizer_state', 'persistent_step', (), 'Construct the target optimizer with probe.call, initialize a parameter gradient and use probe.advance. Choose a legal configuration with persistent state when available.'),
+    ('scheduler', 'produced_scheduler_step', 'persistent_step', (), 'Construct the target scheduler using probe.call, advance its bound optimizer and use probe.advance on the scheduler so the applied learning rate changes.'),
+    ('rng', 'target_rng_consumed', 'forward', (), 'Use explicitly initialized inputs and invoke the target with a legal stochastic setting that advances a default or explicitly supplied generator within the target call.'),
+    ('data_progress', 'distinct_batches', 'forward', (), 'Build two different named inputs of the same shape and dtype representing distinct batches. Pass them directly at the same target operand path on consecutive calls.'),
+    ('training_checkpoint', 'restored_update', 'backward', ('target_backward',), 'Build a native SGD optimizer with momentum or Adam and a registered trainable leaf. Warm up its state with a real update, then pass that same leaf directly to the target yielding a floating tensor. Invoke probe.restore_and_step() to checkpoint, clear, restore and use the saved state in the next backward/update.'),
+    ('compile', 'compiled_target', 'forward', (), 'Place the target in a torch.compile callable and execute the resulting graph. For a compiler factory target, call the exact factory via probe.call, then invoke its product.'),
+    ('capture', 'captured_target_replay', 'callable_use', (), 'Construct a graph-captured callable and execute the target-linked replay on concrete CUDA inputs.'),
+    ('distributed', 'synchronized_gradient', 'backward', ('target_backward',), 'Use an existing multi-rank process group and a native optimizer with a bound registered leaf target operand. Call probe.synchronize_gradient() after the target to backpropagate its floating result and complete a collective on the gradient.'),
+    ('gradient_buffer', 'distinct_batch_accumulation', 'accumulation', ('leaf_accumulation', 'distinct_batches'), 'Build two distinct registered inputs at the same shape and dtype. Call the target once with each batch and the same trainable leaf parameter, backpropagate each result in order without clearing the shared gradient.'),
+    ('compile', 'autocast_compiled_target', 'forward', ('compiled_target', 'autocast_target'), 'Execute the actual compiled graph containing the target under device-appropriate autocast.'),
+    ('activation_checkpoint', 'autocast_recomputed_target', 'backward', ('target_recomputed', 'autocast_target'), 'Use probe.recompute(function, tensor) and a genuine autocast scope inside function around probe.call; drive backward to re-execute the target in autocast.'),
+)
+
+
+def state_family_catalog(spec, device='cpu', *, observed=()):
+    """Candidate goals for this installed spec; environmental and observer gaps stay visible."""
+    protocol = fragment_claims(spec)
+    caps = spec.get('capabilities', {})
+    goals = []
+    for family, identifier, claim, needs, objective in _STATE_GOALS:
+        availability = 'candidate'
+        if identifier == 'synchronized_gradient' and (spec.get('environment', {}).get('distributed_world_size') or 0) < 2:
+            availability = 'requires_multi_rank_environment'
+        elif identifier == 'captured_target_replay':
+            if not device.startswith('cuda'):
+                availability = 'requires_cuda'
+
+        elif identifier == 'target_update' and device != 'cpu':
+            availability = 'optimizer_observer_requires_cpu'
+        elif identifier in ('produced_optimizer_state', 'produced_scheduler_step'):
+            product = 'optimizer' if identifier == 'produced_optimizer_state' else 'scheduler'
+            if 'persistent_step' not in protocol and product not in observed:
+                availability = 'requires_steppable_target_product'
+            elif caps.get('scheduler_product') is True and family == 'optimizer' or caps.get('optimizer_product') is True and family == 'scheduler':
+                availability = 'different_product_kind'
+        elif identifier == 'scope_reentry' and 'scope_exit' not in protocol and 'context' not in observed:
+            availability = 'requires_context_product'
+        elif claim in ('accumulation', 'backward') and 'backward' not in protocol and 'target_backward' not in observed:
+            if identifier != 'target_backward' or not ('callable' in observed or 'callable_use' in protocol):
+                availability = 'missing_differentiable_use_protocol'
+        elif identifier in ('module_buffer_operand', 'distinct_batches') and protocol[0] in ('scope_exit', 'persistent_step', 'async_completion', 'callback_trigger') and 'tensor_operand' not in observed:
+            availability = 'no_direct_tensor_operand_evidence'
+        goals.append(dict(id=identifier, family=family, check_claim=claim, requires_backward=claim in ('backward','accumulation'),
+                          prerequisites=list(needs), objective=objective, availability=availability))
+    return goals
+
+
+def observed_capabilities(api, rows):
+    """Positive capabilities measured on legal target paths in this API session."""
+    observed = {kind for row in rows if row.get('api') == api and row.get('inspection', {}).get('legal_source')
+                for kind in row['inspection'].get('observed_products', [])}
+    for row in rows:
+        obs = row.get('inspection', {})
+        if row.get('api') == api and obs.get('legal_source'):
+            observed.update(obs.get('training_state_units', ()))
+            if any(w.get('operand_path') for w in obs.get('semantic_coverage', {}).get('witnesses', ())):
+                observed.add('tensor_operand')
+    return observed
+
+
+def select_state_goal(spec, rows, corpus, proposal_index, *, device='cpu'):
+    """Select using published source/variant evidence and return a verified corpus prefix if available."""
+    from collections import Counter
+    api = spec['api']
+    observed = observed_capabilities(api, rows)
+    goals = state_family_catalog(spec, device, observed=observed)
+    protocol = fragment_claims(spec)
+    entries = {e['id']: e for e in corpus.entries if e['active'] and e['configuration']['api'] == api}
+    attempts, family_attempts, reached, prefixes = Counter(), Counter(), set(), []
+    legal = validated = False
+    used_routes, attempted_routes, pending_routes = set(), set(), []
+    confirmed = {r.get('selection', {}).get('confirm_prefix') for r in rows if r.get('api') == api and r.get('selection')}
+    feedback_rows = 0
+    for row in rows:
+        if row.get('api') != api:
+            continue
+        feedback_rows += 1
+        cfg = row.get('configuration', {})
+        inspection = row.get('inspection', {})
+        child = row.get('proposal_origin') == 'framework_representation'
+        if child:
+            inspection = row.get('followup_inspection', {}) if row.get('representation_candidate_attained') else {}
+        else:
+            goal = cfg.get('state_goal', {})
+            product_use = inspection.get('product_use', {})
+            if inspection.get('legal_source'):
+                used_routes.update(u['mode'] for u in product_use.get('uses', ()))
+                admission = row.get('corpus_admission', {})
+                parent = row.get('oracle_prefix_id') or admission.get('prefix_id') or admission.get('seed_id')
+                if parent:
+                    pending_routes.extend((gap, parent) for gap in product_use.get('oracle_gaps', ()))
+            if goal.get('required_use') and row.get('program_generation_dispatched'):
+                attempted_routes.add((goal['oracle'], goal['required_use']))
+            if goal:
+                attempts[goal['id']] += 1
+                family_attempts[goal['family']] += 1
+            legal |= inspection.get('legal_source') is True
+            validated |= inspection.get('valid') is True
+        units = set(inspection.get('training_state_units', ()))
+        reached.update(units)
+        parent_id = row.get('corpus_admission', {}).get('seed_id')
+        if not child and parent_id in entries and inspection.get('valid'):
+            prefixes.append((entries[parent_id], units))
+
+    for entry in getattr(corpus, 'prefixes', ()):
+        cfg = entry['configuration']
+        if cfg['api'] == api and cfg['device'] == device:
+            prefixes.append((entry, set(entry['witnesses'])))
+    candidates = [g for g in goals if g['availability'] == 'candidate']
+    # After confirming one source, try exactly one new axis on that same source.
+    # The old prefix is sufficient to propose this edit, never to credit the conjunction.
+    last_confirmation = next((r for r in reversed(rows) if r.get('api') == api
+        and (r.get('selection') or {}).get('confirm_prefix') and r.get('inspection', {}).get('valid')), None)
+    extension = None
+    if last_confirmation:
+        confirmed_id = last_confirmation['selection']['confirm_prefix']
+        attempted_extension = any((r.get('selection') or {}).get('extend_confirmation') == confirmed_id for r in rows)
+        parent = next((e for e, _ in prefixes if e['id'] == confirmed_id), None)
+        units = set(last_confirmation['inspection'].get('training_state_units', ()))
+        if parent and not attempted_extension:
+            extension = next(((g, parent) for g in candidates if len(g['prerequisites']) == 2
+                and len(set(g['prerequisites']) - units) == 1 and g['id'] not in reached), None)
+    # Deep conjunctions extend established capabilities. Single-axis goals
+    # remain available from a fresh source even without a reusable prefix.
+    candidates = [g for g in candidates if len(g['prerequisites']) < 2 or set(g['prerequisites']).issubset(reached)]
+    if 'backward' not in protocol and attempts['target_backward'] and 'target_backward' not in observed:
+        candidates = [g for g in candidates if g['id'] != 'target_backward']
+    if not legal and (proposal_index == 0 or proposal_index % 3 == 0):
+        base = protocol[0]
+        chosen = dict(id='bootstrap', family='bootstrap', check_claim=base, requires_backward=False,
+                      objective='Establish a legal baseline with an actual target return using its documented protocol.',
+                      prerequisites=[], availability='candidate')
+    else:
+        def priority(goal):
+            # New families get a turn. Failed goals yield to other reachable
+            # families; a measured prefix breaks ties without starving new ones.
+            needs = set(goal['prerequisites'])
+            return (family_attempts[goal['family']], goal['id'] in reached,
+                    attempts[goal['id']], not needs.issubset(reached))
+        chosen = min(candidates, key=priority)
+    confirm = None
+    if not validated:
+        # Independently retest a single witnessed capability with a prospectively declared goal.
+        for entry, units in prefixes:
+            if entry['id'] in confirmed:
+                continue
+            goal = next((g for g in candidates if g['id'] in units and not g['prerequisites']), None)
+            if goal:
+                confirm, chosen = entry, goal
+                break
+    dependencies = set(chosen['prerequisites'])
+    matching = [e for e, units in prefixes if dependencies and dependencies.issubset(units)]
+    prefix = min(matching, key=lambda e: e.get('cost', {}).get('seconds', float('inf'))) if matching else None
+    prefix = confirm or prefix
+    if extension and not confirm:
+        chosen, prefix = extension
+    elif not confirm:
+        attempted_claims = {r.get('configuration', {}).get('check_claim') for r in rows
+                            if r.get('api') == api and r.get('proposal_origin') != 'framework_representation'}
+        protocols = [('context', 'scope_exit'), ('scheduler', 'persistent_step'),
+                     ('optimizer', 'persistent_step'), ('callable', 'callable_use')]
+        use = next((claim for capability, claim in protocols if capability in observed), None)
+        if use and use not in attempted_claims:
+            chosen = dict(id='bootstrap', family='bootstrap', check_claim=use, requires_backward=False,
+                          objective='Use the actual returned product of this target through the observed protocol.',
+                          prerequisites=[], availability='candidate')
+            prefix = next((entry for entry, units in prefixes if entry.get('active')), None)
+    gap_proposal = None
+    parents = {entry['id']: entry for entry, _ in prefixes}
+    for gap, parent in pending_routes:
+        key = (gap['oracle'], gap['required_use'])
+        if key in attempted_routes or gap['required_use'] in used_routes or parent not in parents:
+            continue
+        goal = next((g for g in candidates if g['id'] == gap['state']), None)
+        if goal and key == ('context_restore', 'decorated_same_instance'):
+            chosen = dict(goal, required_use=gap['required_use'], oracle=gap['oracle'],
+                objective='Preserve the parent initialization, context factory arguments and tensor operation. '
+                          'Use the returned context as a decorator of a local function. Call that decorated '
+                          'function recursively once so its scopes overlap on the same instance; let both '
+                          'exit. Only the history needed for this scope claim is required.')
+            prefix, confirm, extension = parents[parent], None, None
+            gap_proposal = dict(gap, parent_id=parent)
+            break
+    decision = dict(policy='oracle_precondition' if gap_proposal else 'family_coverage_and_verified_prefix',
+                    oracle_proposal=gap_proposal, feedback_rows=feedback_rows,
+                    observed_capabilities=sorted(observed), extend_confirmation=prefix['id'] if extension and not confirm else None,
+                    confirm_prefix=confirm['id'] if confirm else None,
+                    reached=sorted(reached), family_attempts=dict(family_attempts), selected=chosen['id'],
+                    prerequisites=chosen['prerequisites'], prefix_id=prefix['id'] if prefix else None,
+                    candidates=[dict(id=g['id'], availability=g['availability']) for g in goals])
+    return dict(chosen), prefix, decision
 
 
 def offer_relations(row, ledger):

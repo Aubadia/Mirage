@@ -115,7 +115,7 @@ class HTTPProviderTests(unittest.TestCase):
             value["usage"]["prompt_tokens"] = -1
             return value
 
-        for factory, category in ((wrong_model, "protocol"), (truncated, "incomplete"), (invalid_usage, "protocol")):
+        for factory, category in ((wrong_model, "protocol"), (truncated, "generation_truncated"), (invalid_usage, "protocol")):
             with self.subTest(category=category), stub_service(lambda p: (200, factory(p))) as (url, _):
                 with self.assertRaises(ProviderFailure) as caught:
                     HTTPProvider(HTTPConfig(url)).generate(self.request, deadline=None)

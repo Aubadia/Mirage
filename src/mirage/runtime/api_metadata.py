@@ -102,7 +102,7 @@ def referenced_documentation(api, documentation, *, limit=3, budget=16000):
     return references
 
 
-def specification(api):
+def specification(api, *, probe_device=None):
     """Build a version-bound description; proposals and runtime facts stay separate."""
     import torch
 
@@ -130,8 +130,12 @@ def specification(api):
                                 "future_product": inspect.isclass(target) and issubclass(target, torch.futures.Future),
                                 "steppable_product": inspect.isclass(target) and issubclass(
                                     target, (torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler)),
+                                "optimizer_product": inspect.isclass(target) and issubclass(target, torch.optim.Optimizer),
+                                "scheduler_product": inspect.isclass(target) and issubclass(target, torch.optim.lr_scheduler.LRScheduler),
                                 "backward": "unknown", "device_support": "unknown"},
-                  environment={"cuda_available": torch.cuda.is_available()})
+                  environment={"cuda_available": torch.cuda.is_available(),
+                               "distributed_world_size": torch.distributed.get_world_size()
+                               if torch.distributed.is_available() and torch.distributed.is_initialized() else 1})
     result["sources"].append({
         "kind": "installed_documentation", "framework_version": result["framework_version"],
         "identity": api, "sha256": metadata["documentation_sha256"],
@@ -153,6 +157,10 @@ def specification(api):
     else:
         result["external_documentation"] = {"status": "not_needed",
                                              "reason": "installed documentation available"}
+    from mirage.runtime.input_constraints import input_spec, probe_input_domain
+    result["constraints"] = input_spec(target, result)
+    if probe_device and (probe_device == "cpu" or torch.cuda.is_available()):
+        probe_input_domain(result, probe_device)
     result["unknown_fields"].extend(("semantic_guarantees", "backward", "device_support"))
     return result
 

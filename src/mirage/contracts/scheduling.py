@@ -39,10 +39,14 @@ class APIJob:
     api: str
     options: 'RunOptions'
     stateful_options: dict = field(default_factory=dict)
+    check: bool = False
 
     def __post_init__(self):
         if not self.identifier or not self.api:
             raise ValueError('Session identifier and API are required')
+        if self.check and (self.options.strategy != 'stateful' or not self.options.generation_pipeline
+                           or self.stateful_options):
+            raise ValueError('API check sessions require a stateful generation pipeline and a resolved name')
         allowed = {'edges', 'predicates', 'path_policy', 'coverage_refinement', 'search_policy',
                    'generation_mode', 'coverage_basis', 'representation_traversal', 'oracle_improvements'}
         if set(self.stateful_options) - allowed or self.stateful_options and self.options.strategy != 'stateful':

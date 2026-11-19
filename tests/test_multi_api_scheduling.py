@@ -197,7 +197,7 @@ class SchedulerTests(unittest.TestCase):
                 finally:
                     pipeline.close()
 
-    def test_provider_uncertainty_aborts_shared_endpoint(self):
+    def test_provider_uncertainty_retains_only_its_slot(self):
         from mirage.generator.provider import IsolatedProvider, ProviderFailure, Request, Stage
         scheduler = SharedScheduler(SchedulingOptions(1))
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,11 +206,120 @@ class SchedulerTests(unittest.TestCase):
                 with patch.object(provider, '_timed_generate', side_effect=ProviderFailure('timeout', 'unknown', cancellation_uncertain=True)):
                     with self.assertRaises(ProviderFailure):
                         provider.generate(Request(Stage.CANONICAL, '', {}), deadline=time.monotonic() + 1)
-        self.assertTrue(scheduler.cancel.is_set())
-        self.assertEqual(scheduler.snapshot()['active']['generation'], 0)
+        self.assertFalse(scheduler.cancel.is_set())
+        self.assertEqual(scheduler.snapshot()['active']['generation'], 1)
 
 
 class SessionTests(unittest.TestCase):
+    def test_benchmark_audit_requires_promised_members_and_retains_trial_cost(self):
+        import sys
+        with patch.object(sys, 'path', [str(Path(__file__).resolve().parents[1]/'benchmarks'), *sys.path]):
+            from stateful_check_e2e import score_session, write
+            from pytorch_correctness import evaluate
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            case = root/'execution/attempt-0000'
+            write(root/'summary.json', dict(status='completed', terminal=True))
+            write(case/'outcome.json', dict(attempt=0, source_completed=True, followup_completed=True,
+                api_executed=True, inspection={'valid':False,'legal_source':True}))
+            for n, elapsed in enumerate((1.,2.)):
+                stage = root/'differential/attempt-0000/source'/f'trial-{n}'/'0-cpu'
+                write(stage/'request.json', {})
+                write(stage/'process.json',dict(elapsed_seconds=elapsed))
+            session = dict(directory=str(root), session_id='test', state='completed')
+            target = dict(api='generic', id='generic', device='cpu')
+            # Only the source was saved, although both the source and followup were promised.
+            (case/'execution').mkdir()
+            (case/'execution/source.pt').touch()
+            with patch('mirage.artifacts.bundle.load_tensor_record', return_value={}), \
+                 patch.object(evaluate,'stateful_independent_audit',return_value={'label':'negative'}) as audited, \
+                 patch.object(evaluate,'stateful_attribution',return_value={'structural_trigger':False,'benchmark_reproduction':False}):
+                result = score_session(session,target,time.monotonic()+5)
+            self.assertEqual(audited.call_count, 1)
+            self.assertFalse(result['attribution_complete'])
+            self.assertEqual(result['case_counts']['legal_state_unmet_members'], 1)
+            self.assertEqual(result['evidence_errors'][0]['file'], str(case/'execution/followup.pt'))
+            self.assertEqual(result['differential_worker_seconds'], 3.)
+            self.assertEqual(result['differential_all_trials']['recorded_processes'], 2)
+
+    def test_fusion_startup_requires_successful_requests_target_returns_and_overlap(self):
+        import sys
+        with patch.object(sys, 'path', [str(Path(__file__).resolve().parents[1]/'benchmarks'), *sys.path]):
+            from stateful_check_e2e import MODEL, REVISION, started, write
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root/'service-ready.json', {'health_http_status':200, 'model_list_verified':True})
+            write(root/'serving/environment.json', {'model':MODEL,'declared_revision':REVISION})
+            for index in range(2):
+                session = root/'campaign'/f'api-{index}'
+                execution = session/'execution'
+                write(session.parent/f'check-start-{index}.json',
+                      {'api':f'api{index}','directory':str(session),'started_epoch':100+index})
+                write(session/'session.json', {'finished_epoch':130+index})
+                write(execution/'provider-001/http-good.json', {'http_status':200,'request':{'model':MODEL}})
+                write(execution/'provider-001/response.json', {'model':MODEL})
+                write(execution/'provider-001/process.json', {'outcome':'completed'})
+                trace = execution/'attempt-0000/execution/source-trace.jsonl'
+                trace.parent.mkdir(parents=True)
+                trace.write_text('{"event":"api_exit"}\n' if index==0 else '{"event":"api_enter"}\n')
+            self.assertFalse(started(root)['started'])
+            trace.write_text('{"event":"api_exit"}\n')
+            self.assertTrue(started(root)['started'])
+            write(session.parent/'api-0/session.json', {'finished_epoch':101})
+            self.assertFalse(started(root)['started'])
+
+    def test_name_checks_have_independent_model_budgets_and_overlapping_pools(self):
+        together = threading.Barrier(2, timeout=5)
+        def check(api, *, output, session_options):
+            together.wait()
+            scope = current_scope()
+            self.assertEqual(scope.identifier, api)
+            self.assertTrue(session_options.generation_pipeline)
+            self.assertEqual(session_options.time_limit, 180)
+            Path(output).mkdir(parents=True)
+            Path(output, 'summary.json').write_text('{}')
+            return dict(terminal=True, exit_status=0, status='completed', heavy_native_data=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            jobs = []
+            for name in ('a','b'):
+                options = RunOptions(str(Path(tmp) / name), 'fixture', strategy='stateful', contract_version=4,
+                                     generation_pipeline=True, time_limit=180)
+                jobs.append(APIJob(name, name, options, check=True))
+            with patch('mirage.workflow.check_api', side_effect=check) as run:
+                result = run_sessions(jobs, SchedulingOptions(2, active_api_limit=2), Path(tmp)/'campaign')
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(result['stop_reason'], 'completed')
+            for row in result['sessions']:
+                self.assertEqual(row['budget_scope'], 'model_request_seconds_then_drain')
+                self.assertTrue(Path(row['report']['path']).is_file())
+                self.assertNotIn('heavy_native_data', row['report'])
+
+    def test_projection_device_and_declared_mixed_topology_share_cuda_lane(self):
+        from mirage.runtime.process import ProcessResult, run_worker
+        def finished(request, directory, timeout, *, cancel):
+            directory.mkdir()
+            return ProcessResult('completed', 0, 0., str(directory))
+        scheduler = SharedScheduler(SchedulingOptions(2))
+        with tempfile.TemporaryDirectory() as tmp:
+            scope = SessionScope(scheduler, 'cpu-source', 'cpu', threading.Event())
+            with session_scope(scope), patch('mirage.runtime.process._run_worker', side_effect=finished):
+                run_worker(dict(mode='device_member', device='cuda'), Path(tmp)/'gpu', 5)
+                run_worker(dict(mode='device_member', device='cpu', config={'device':'cuda'}), Path(tmp)/'mixed', 5)
+            self.assertEqual([r['resource'] for r in scheduler.events], ['cuda','cuda'])
+
+    def test_benchmark_scatter_trigger_uses_destination_width(self):
+        import sys
+        with patch.object(sys, 'path', [str(Path(__file__).resolve().parents[1]/'benchmarks'), *sys.path]):
+            from pytorch_correctness.evaluate import stateful_mechanism
+        def measured(width):
+            return {'target_calls': [{'metadata': [
+                dict(path=['args',0], shape=[3,width], strides=[width,1]),
+                dict(path=['args',2], shape=[2,16], strides=[1,0]),
+                dict(path=['args',3], shape=[2,16], strides=[16,1]),
+            ]}]}
+        self.assertTrue(stateful_mechanism('203078', measured(32)))
+        self.assertFalse(stateful_mechanism('203078', measured(16)))
+
     def test_sessions_keep_seed_feedback_and_case_limits_and_reallocate_on_completion(self):
         seen = []
         lock = threading.Lock()

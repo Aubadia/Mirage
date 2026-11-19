@@ -38,7 +38,9 @@ class ProcessResult:
 def run_worker(request: dict, directory: Path, timeout: float, *, cancel=None) -> ProcessResult:
     cancel = cancel if cancel is not None else _cancellation.get()
     from mirage.runtime.scheduler import AnyCancellation, SchedulingCancelled, current_scope
-    scope = current_scope()
+    from mirage.runtime import differential_pool
+    pooled = request.get('engine_identity') and request.get('mode') in ('device_member','compare_devices')
+    scope = differential_pool.scope() if pooled else current_scope()
     if scope is None:
         return _run_worker(request, directory, timeout, cancel=cancel)
     cancellation = AnyCancellation(cancel, scope.cancel, scope.scheduler.cancel)
@@ -46,14 +48,19 @@ def run_worker(request: dict, directory: Path, timeout: float, *, cancel=None) -
     if request.get('mode') == 'provider':
         return _run_worker(request, directory, timeout, cancel=cancellation)
     config = request.get('config', {})
-    device = config.get('device', scope.device)
+    device = config.get('device', request.get('device', scope.device))
     resource = 'cuda' if str(device).split(':')[0] == 'cuda' else 'cpu'
+    if pooled:
+        resource = 'comparison' if request['mode'] == 'compare_devices' else 'device_' + resource
     begin = time.monotonic()
     try:
         with scope.scheduler.lease(scope.identifier, 'execution', resource=resource,
                                    deadline=scope.deadline, cancel=cancellation, label=directory) as event:
             remaining = timeout if scope.deadline is None else min(timeout, scope.deadline - time.monotonic())
-            result = _run_worker(request, directory, remaining, cancel=cancellation)
+            if pooled:
+                result = scope.scheduler.differential.execute(request, directory, resource, remaining, cancellation)
+            else:
+                result = _run_worker(request, directory, remaining, cancel=cancellation)
             queue_seconds = event['granted'] - event['submitted']
     except SchedulingCancelled:
         result = _run_worker(request, directory, 0, cancel=cancellation)

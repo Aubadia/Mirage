@@ -21,18 +21,44 @@ def failure_record(first_blocking, reason, secondary=()):
 def callable_execution_indices(record):
     """Return only observed invocations linked to this configured callable factory."""
     target = record.get('config', {}).get('api')
-    kinds = {'torch.compile': ('compiled_callable_execution', 'compilation_factories'),
-             'torch.cuda.make_graphed_callables': ('factory_result_execution', 'capture_factories')}
-    if target not in kinds:
-        return set()
-    kind, records = kinds[target]
-    factories = {f['factory_id']: f for f in record.get(records, ())
-                 if 'factory_id' in f and f.get('factory_target') == target}
+    registrations = {(kind, f['factory_id'], product)
+                     for kind, field in [('compiled_callable_execution','compilation_factories'),
+                                         ('factory_result_execution','capture_factories')]
+                     for f in record.get(field, ()) if 'factory_id' in f and f.get('factory_target') == target
+                     for product in f.get('callable_ids', ())}
     return {c['index'] for c in record.get('target_calls', ())
-            if c.get('kind') == kind and c.get('factory_target') == target
-            and c.get('callable_identity_verified') is True
-            and c.get('factory_id') in factories
-            and c.get('callable_id') in factories[c['factory_id']].get('callable_ids', ())}
+            if c.get('factory_target') == target and c.get('callable_identity_verified') is True
+            and (c.get('kind'), c.get('factory_id'), c.get('callable_id')) in registrations}
+
+
+def product_use_feedback(record):
+    """Keep target-linked use evidence independent of selected goal attainment."""
+    calls = {c['index'] for c in record.get('target_calls', ())}
+    usages = set()
+    gaps = []
+    probes = {p['call']: p['identity'] for p in record.get('decorator_probes', ())}
+    for event in record.get('context_events', ()):
+        call = event.get('factory_call')
+        owner = event.get('wrapper_factory_call')
+        if owner in calls and event.get('balanced') and event.get('wrapper_owner_group') != event.get('instance_group'):
+            usages.add((owner, 'decorated_different_instance'))
+        if call not in calls or not event.get('balanced'):
+            continue
+        mode = 'scope_exit'
+        if event.get('reentrant_same_instance'):
+            mode = 'decorated_same_instance' if event.get('decorated_entry') else 'direct_same_instance'
+        elif event.get('decorated_entry'):
+            mode = 'decorated_scope'
+        usages.add((call, mode))
+        if mode == 'direct_same_instance' and record.get('context_contract') and probes.get(call) == 'same_instance':
+            gap = dict(oracle='context_restore', state='scope_reentry', required_use='decorated_same_instance',
+                       observed_use=mode, call=call)
+            if gap not in gaps:
+                gaps.append(gap)
+    for event in record.get('product_events', ()):
+        if event.get('call') in calls and event.get('event'):
+            usages.add((event['call'], event['event']))
+    return dict(uses=[dict(call=c, mode=m) for c, m in sorted(usages)], oracle_gaps=gaps)
 
 
 def inspect_state(record, predicates=()):
@@ -70,7 +96,9 @@ def inspect_state(record, predicates=()):
                          'observed': fact.value, 'evidence_status': fact.status.value, 'reason': fact.reason,
                          'attained': predicate.holds(fact)})
     callable_calls = callable_execution_indices(record)
-    factory_target = record.get('config', {}).get('api') in ('torch.compile', 'torch.cuda.make_graphed_callables')
+    factory_target = record.get('factory_requires_invocation')
+    if factory_target is None:  # The original archives predate runtime adapter identity.
+        factory_target = record.get('config', {}).get('api') in ('torch.compile', 'torch.cuda.make_graphed_callables')
     api = bool(record.get('api_executed')) and (not factory_target or bool(callable_calls))
     backward_required=record.get('config',{}).get('requires_backward',True)
     completed = {e['index'] for e in record.get('backward_invocations', ()) if e['completed']}
@@ -86,11 +114,38 @@ def inspect_state(record, predicates=()):
             required_path=field+('_callable' if factory_target else '_target')
     claim = record.get('config', {}).get('check_claim')
     history = claim_history(record, claim, callable_calls, completed)
-    valid = bool(record.get('completed') and api and backward and history['attained'] and all(p['attained'] for p in attained))
-    return {'valid': valid, 'claim_history': history,
+    legal_source = bool(record.get('completed') and record.get('api_executed') and record.get('target_calls'))
+    goal = record.get('config', {}).get('state_goal')
+    witnesses = training_state_evidence(record, completed, callable_calls, inspect_optimizer(record)) if goal and legal_source else {}
+    combinations = []
+    for left, right in (('target_backward', 'same_graph_twice'), ('target_backward', 'saved_target_unpacked'),
+                        ('target_backward', 'target_update'), ('target_backward', 'restored_update'),
+                        ('target_backward', 'overflow_step_skipped'), ('target_backward', 'synchronized_gradient'),
+                        ('autocast_target', 'compiled_target'), ('target_recomputed', 'autocast_target')):
+        a, b = witnesses.get(left), witnesses.get(right)
+        if a and b and a['call'] == b['call']:
+            combinations.append([left, right])
+    if 'distinct_batch_accumulation' in witnesses:
+        combinations.append(['distinct_batches', 'leaf_accumulation'])
+    transitions = [unit for unit, witness in witnesses.items() if witness['checkpoint'] in (
+        'completed_backward', 'post_update', 'context_exit', 'post_used_restored_state',
+        'post_skipped_scaled_step', 'post_synchronized_gradient') or unit in ('target_recomputed', 'distinct_batches')]
+    needed = [goal['id']] if goal and goal['id'] != 'bootstrap' else []
+    measured = all(name in witnesses for name in needed)
+    feedback = product_use_feedback(record)
+    required_use = (goal or {}).get('required_use')
+    use_reached = not required_use or any(u['mode'] == required_use for u in feedback['uses'])
+    goal_reached = bool(use_reached and api and backward and history['attained'] and all(p['attained'] for p in attained) and measured)
+    valid = bool(record.get('completed') and goal_reached)
+    return {'valid': valid, 'legal_source': legal_source, 'product_use': feedback, 'claim_history': history,
+            'observed_products': record.get('observed_products', []),
+            'state_goal': dict(id=goal['id'], family=goal['family'], attained=valid,
+                               missing=[name for name in needed if name not in witnesses] + ([required_use] if not use_reached else [])) if goal else None,
+            'training_state_units': sorted(witnesses), 'training_state_evidence': witnesses,
+            'training_state_combinations': combinations, 'training_state_transitions': sorted(transitions),
             'api_executed': api, 'required_backward_executed': backward, 'required_backward_path':required_path,
             'callable_execution_required': factory_target, 'required_callable_executed': not factory_target or bool(callable_calls),
-            'predicates': attained, 'target_state_reached': all(p['attained'] for p in attained),
+            'predicates': attained, 'target_state_reached': goal_reached if goal else all(p['attained'] for p in attained),
             'transition_signature': record.get('transition_signature', []),
             'correctness': 'unassessed', 'semantic_coverage': semantic_coverage(record, valid=valid),
             'optimizer_coverage': inspect_optimizer(record, valid=valid)}
@@ -110,13 +165,133 @@ def claim_history(record, claim, callable_calls, completed):
     elif claim == 'accumulation':
         contributions = {(e['invocation'], e['call'], tuple(e['path'])) for e in record.get('target_operand_gradients', ())}
         events = [e for e in record.get('accumulations', ())
-                  if {e['first'], e['second']} <= completed and e['second'] == e['first'] + 1
+                  if e.get('leaf_calls') and {e['first'], e['second']} <= completed and e['second'] == e['first'] + 1
                   and all(any((inv, call, tuple(path)) in contributions for call, path in e['leaf_calls'])
                           for inv in (e['first'], e['second']))]
     else:
         return dict(claim=claim, attained=True, reason='target, backward and predicates validated separately')
     return dict(claim=claim, attained=bool(events), events=events, checkpoint='final',
                 reason='linked runtime history observed' if events else 'required linked runtime history missing')
+
+
+def training_state_evidence(record, completed, callable_calls, optimizer):
+    """Return target-linked units. Raw observation indices are evidence, never novelty keys."""
+    calls = {c['index']: c for c in record.get('target_calls', ())}
+    facts = {}
+    def mark(unit, call, checkpoint='target_return', **evidence):
+        facts.setdefault(unit, dict(call=call, checkpoint=checkpoint, **evidence))
+
+    device_kind = str(record['config'].get('device', 'cpu')).split(':')[0]
+    samples, graph_nodes, recomputes = {}, {}, {}
+    for index, call in calls.items():
+        context = call.get('entry_context', {})
+        if context.get('inference_enabled') is True:
+            mark('inference_target', index, 'target_entry')
+        if context.get(device_kind + '_enabled') is True:
+            mark('autocast_target', index, 'target_entry')
+        if call.get('target_rng_consumed') is True:
+            mark('target_rng_consumed', index)
+        for resource in call.get('product_resources', call.get('registered_resources', ())):
+            if 'module_buffer' in resource:
+                mark('module_buffer_operand', index, 'target_entry', path=resource['path'], **resource['module_buffer'])
+            if 'input_key' in resource:
+                path = tuple(resource['path'])
+                value = call.get('product_inputs', call.get('inputs'))
+                for component in path:
+                    value = value[str(component)] if isinstance(value, dict) else value[component]
+                slot = (call.get('factory_id'), call.get('callable_id'), path)
+                prior = samples.get(slot)
+                # Compare small, same-domain *registered inputs* at the same call slot.
+                # A second call over identical values is insufficient evidence.
+                if prior is not None and prior[1] != resource['input_key'] and index == prior[0] + 1:
+                    old = prior[2]
+                    supported = str(value.dtype) in ('torch.bool','torch.uint8','torch.int8','torch.int16',
+                        'torch.int32','torch.int64','torch.float16','torch.bfloat16','torch.float32','torch.float64',
+                        'torch.complex64','torch.complex128')
+                    if (supported and value.shape == old.shape and value.dtype == old.dtype and value.numel() <= 4096
+                            and bool(value.isfinite().all()) and bool(old.isfinite().all())
+                            and not value.equal(old)):
+                        mark('distinct_batches', index, 'target_entry', previous_call=prior[0], path=list(path))
+                samples[slot] = index, resource['input_key'], value
+        frame = call.get('recompute_frame')
+        if frame:
+            group, number = frame
+            if number == 0:
+                recomputes[group] = index
+            elif group in recomputes and call.get('backward_invocation') in completed:
+                mark('target_recomputed', index, 'completed_backward', original_call=recomputes[group],
+                     invocation=call['backward_invocation'])
+                if context.get(device_kind + '_enabled') is True:
+                    mark('autocast_recomputed_target', index, 'completed_backward',
+                         original_call=recomputes[group], invocation=call['backward_invocation'])
+        if (call.get('execution_mode') == 'compiled' and call.get('evidence') == 'executed FX graph'
+                and (call.get('kind') != 'compiled_callable_execution' or index in callable_calls)):
+            mark('compiled_target', index)
+            if context.get(device_kind + '_enabled') is True:
+                mark('autocast_compiled_target', index)
+        if index in callable_calls and call.get('execution_mode') == 'captured' and call.get('completed_replays', 0) > 0:
+            mark('captured_target_replay', index)
+
+    nodes = list(record.get('target_backward_nodes', ())) + [
+        n for n in record.get('callable_backward_nodes', ()) if n.get('call') in callable_calls]
+    for node in nodes:
+        idx, invocation = node.get('call'), node.get('invocation')
+        if idx in calls and invocation in completed:
+            mark('target_backward', idx, 'completed_backward', invocation=invocation)
+            if type(node.get('node')) is not int:
+                continue
+            group = graph_nodes.setdefault((idx, node['node']), set())
+            group.add(invocation)
+            if len(group) > 1:
+                mark('same_graph_twice', idx, 'completed_backward', invocations=sorted(group))
+    history = claim_history(record, 'accumulation', callable_calls, completed)
+    batches = facts.get('distinct_batches')
+    for event in history.get('events', ()):
+        owner = event['leaf_calls'][0][0]
+        if owner in calls:
+            mark('leaf_accumulation', owner, 'completed_backward', first=event['first'], second=event['second'])
+        if batches:
+            keys = {(g['invocation'], g['call'], tuple(g['path'])) for g in record.get('target_operand_gradients', ())}
+            leaf_calls = {(idx, tuple(path)) for idx, path in event['leaf_calls']}
+            if all(any((inv, call, path) in keys for idx, path in leaf_calls if call == idx)
+                   for inv, call in [(event['first'], batches['previous_call']), (event['second'], batches['call'])]):
+                mark('distinct_batch_accumulation', batches['call'], 'completed_backward',
+                     previous_call=batches['previous_call'], first=event['first'], second=event['second'])
+    for event in record.get('saved_tensor_events', ()):
+        index, invocation = event.get('call'), event.get('invocation')
+        if (index in calls and invocation in completed and event.get('stored_device') == 'cpu'
+                and event.get('source_device') == event.get('restored_device')
+                and any(n.get('call') == index and n.get('invocation') == invocation for n in nodes)):
+            mark('saved_target_unpacked', index, 'completed_backward', invocation=invocation)
+    operations = {'skipped_scaled_step': 'overflow_step_skipped', 'used_restored_state': 'restored_update',
+                  'synchronized_gradient': 'synchronized_gradient'}
+    for event in record.get('state_operations', ()):
+        idx, invocation, kind = event.get('call'), event.get('invocation'), event.get('event')
+        if idx not in calls or invocation not in completed or kind not in operations or not event.get('parameter'):
+            continue
+        if kind == 'synchronized_gradient' and event.get('world_size', 0) < 2:
+            continue
+        if (any(node.get('call') == idx and node.get('invocation') == invocation for node in nodes)
+                and any(g.get('call') == idx and g.get('invocation') == invocation and g.get('path') == event.get('path')
+                        for g in record.get('target_operand_gradients', ()))):
+            mark(operations[kind], idx, 'post_' + kind, parameter=event['parameter'], invocation=invocation)
+    for event in record.get('context_events', ()):
+        index = event.get('factory_call')
+        if (index in calls and event.get('balanced') and event.get('reentrant_same_instance')
+                and event.get('instance_group') is not None):
+            mark('scope_reentry', index, 'context_exit', group=event.get('instance_group'))
+    for event in record.get('product_events', ()):
+        idx = event.get('call')
+        if idx not in calls or event.get('event') != 'persistent_step_effect':
+            continue
+        if event.get('product_kind') == 'optimizer' and event.get('persistent_state'):
+            mark('produced_optimizer_state', idx, 'post_update')
+        if event.get('product_kind') == 'scheduler' and event.get('learning_rate_changed'):
+            mark('produced_scheduler_step', idx, 'post_update')
+    for witness in optimizer.get('witnesses', ()):
+        if witness.get('completed') and witness['call_index'] in calls:
+            mark('target_update', witness['call_index'], witness['post_checkpoint'], parameter=witness['parameter_key'])
+    return facts
 
 
 def _optimizer_path(value):

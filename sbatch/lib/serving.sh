@@ -101,6 +101,11 @@ metadata = {
 }
 Path(sys.argv[1]).write_text(json.dumps(metadata, indent=2))
 PY
+            middleware=()
+            if [[ -n "${MIRAGE_REQUEST_RECEIPTS:-}" ]]; then
+                export PYTHONPATH="$MIRAGE_PROJECT_ROOT/src"
+                middleware=(--middleware mirage.generator.serving_receipt.RequestReceipts)
+            fi
             speculation=()
             if [[ "$MIRAGE_MTP_TOKENS" != 0 ]]; then
                 speculation=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MIRAGE_MTP_TOKENS}")
@@ -110,7 +115,7 @@ PY
                 --port "$MIRAGE_VLLM_PORT" --tensor-parallel-size 1 \
                 --max-model-len "$MIRAGE_MAX_MODEL_LEN" \
                 --max-num-seqs "$MIRAGE_GENERATION_CONCURRENCY" \
-                --enable-prefix-caching "${speculation[@]}" --generation-config vllm
+                --enable-prefix-caching "${middleware[@]}" "${speculation[@]}" --generation-config vllm
         ' mirage-serving "${MIRAGE_JOB_DIR}/serving/environment.json" &
     MIRAGE_SERVICE_PID=$!
 

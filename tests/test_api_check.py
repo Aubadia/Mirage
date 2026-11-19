@@ -179,14 +179,28 @@ class CheckEntryIntegrationTests(unittest.TestCase):
             result = json.loads(stdout.getvalue())
             root = Path(result["directory"])
             self.assertEqual(result["status"], "completed", result)
-            self.assertEqual(result["metrics"]["runtime_valid"], 1)
+            self.assertGreaterEqual(result["metrics"]["runtime_valid"], 1)
             self.assertEqual(result["metrics"]["verified_apis"], ["torch.sin"])
             spec = json.loads((root / "api-spec.json").read_text())
             self.assertEqual(spec["status"], "resolved")
-            records = json.loads((root / "execution/summary.json").read_text())["records"]
-            self.assertTrue(records[0]["api_executed"])
+            execution = json.loads((root / "execution/summary.json").read_text())
+            records = execution["records"]
+            sources = [r for r in records if r.get("proposal_origin") != "framework_representation"]
+            self.assertEqual(len(sources), 1)
+            self.assertTrue(sources[0]["api_executed"])
+            children = [r for r in records if r.get("proposal_origin") == "framework_representation"]
+            self.assertTrue(children)
+            self.assertTrue(all(r.get("program_generation_dispatched") is False for r in children))
+            self.assertTrue(execution["pipeline_complete"])
+            self.assertTrue(all(c["status"] not in ("pending","dispatched")
+                                for s in execution["representation_traversal"]["sources"] for c in s["candidates"]))
+            diff = {(r["attempt"], r["member"]) for r in result["differential"]["rows"] if r.get("legal_member")}
+            self.assertIn((sources[0]["attempt"], "source"), diff)
+            for child in children:
+                if child.get("representation_candidate_attained"):
+                    self.assertIn((child["attempt"], "followup"), diff)
             from mirage.artifacts.bundle import load_tensor_record
-            source = load_tensor_record(Path(records[0]["directory"]) / "execution/source.pt")
+            source = load_tensor_record(Path(sources[0]["directory"]) / "execution/source.pt")
             self.assertEqual(spec["framework_version"], source["environment"]["torch"])
             with redirect_stdout(StringIO()) as displayed:
                 self.assertEqual(main(["report", str(root)]), 0)
@@ -301,6 +315,88 @@ def run(ctx, probe):
 
 
 class DeviceControls(unittest.TestCase):
+    def test_resume_check_drains_staged_program_before_differential_without_model(self):
+        from mirage.artifacts.replay import resume_check
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            execution = root/'execution'
+            execution.mkdir()
+            (execution/'pipeline-state.json').write_text('{}')
+            (root/'api-spec.json').write_text('{}')
+            report = dict(version='api-check-1', stage='execution', terminal=False,
+                          configuration=dict(differential=True,time_limit=180,worker_timeout=60))
+            (root/'summary.json').write_text(json.dumps(report))
+            def drain(directory):
+                self.assertEqual(directory, execution)
+                recovered = dict(records=[], stop_reason='drain_complete')
+                (directory/'summary.json').write_text(json.dumps(recovered))
+                return recovered
+            with patch('mirage.runtime.pipeline.resume_pipeline', side_effect=drain) as pipeline, patch(
+                    'mirage.artifacts.report.summarize_api_check',return_value={'runtime_valid':1}), patch(
+                    'mirage.artifacts.replay.assess_devices',return_value={'incomplete':False}) as devices:
+                result = resume_check(root)
+            self.assertEqual(result['status'],'partial')
+            self.assertFalse(result['generation_resumed'])
+            self.assertEqual(result['reason'],'submitted_work_drained_after_interruption')
+            self.assertTrue((root/'execution-complete.json').exists())
+            pipeline.assert_called_once()
+            self.assertTrue(devices.call_args.kwargs['resume'])
+
+    def test_required_members_include_source_and_initial_representation_despite_primary(self):
+        from mirage.artifacts.replay import differential_members
+        plan = dict(path=['args', 0], action='strided', call_index=0)
+        case = dict(api_executed=True, source_completed=True, configuration={'check_claim':'backward'},
+                    inspection={'valid':True}, mr_verdict='pass', mutation=plan,
+                    mutation_obligations_valid=True, followup_completed=True,
+                    followup_inspection={'valid':True}, followup_mutations=[dict(plan, status='verified')])
+        self.assertEqual(differential_members(case), ['source', 'followup'])
+        case.update(inspection={'valid':False}, followup_completed=False)
+        self.assertEqual(differential_members(case), ['source'])
+        case.update(proposal_origin='framework_representation', representation_candidate_attained=True,
+                    attempt='representation:abc:xyz:0')
+        self.assertEqual(differential_members(case), ['followup'])
+        case.update(representation_candidate_attained=False)
+        self.assertEqual(differential_members(case), [])
+
+    def test_cpu_rejection_still_schedules_cuda_and_preserves_other_sources(self):
+        from mirage.artifacts.replay import assess_devices
+        from mirage.inspector.comparison import PAIRED_DEVICE_POLICY
+        attempted = []
+        def device(request, directory, timeout):
+            directory.mkdir()
+            attempted.append(request['device'])
+            self.assertEqual(request['config']['device'], request['device'])
+            status = 'execution_error' if request['device'] == 'cpu' else 'ready'
+            (directory/'summary.json').write_text(json.dumps(dict(status=status, execution_attempted=True,
+                completed=status=='ready', target_returned=status=='ready', reason='fixture' if status!='ready' else None)))
+            return ProcessResult('completed', 0, .001, str(directory))
+        with tempfile.TemporaryDirectory() as tmp, patch('mirage.artifacts.replay.run_worker', side_effect=device):
+            root = Path(tmp)
+            engine = root/'execution/engine'
+            engine.mkdir(parents=True)
+            (engine/'fixture.py').write_text('')
+            directory = root/'program'
+            (directory/'execution').mkdir(parents=True)
+            (directory/'program.py').write_text('fixture')
+            (directory/'execution/source.pt').write_text('frozen1')
+            (directory/'execution/followup.pt').write_text('frozen2')
+            case = dict(attempt=0, api='torch.add', directory=str(directory), source_completed=True, api_executed=True,
+                        configuration={'check_claim':'forward','device':'cpu'}, inspection={'valid':True}, mr_verdict='pass')
+            def assess(row):
+                return assess_devices(root, {'records':[row]}, {}, enabled=True, timeout=10, append=True, resume=True)
+            row, = assess(case)['rows']
+            self.assertEqual((row['primary_route'],row['status']), ('primary_mr','execution_error'))
+            self.assertEqual(row['policy'], PAIRED_DEVICE_POLICY)
+            self.assertEqual(attempted,['cpu','cuda'])
+            case.update(attempt='representation:abc:xyz:0', proposal_origin='framework_representation',
+                        representation_candidate_attained=True, mutation_obligations_valid=True)
+            row, = assess(case)['rows']
+            self.assertEqual(row['member'],'followup')
+            self.assertTrue(Path(row['manifest']).is_file())
+            assess(case)
+            self.assertEqual(attempted,['cpu','cuda','cpu','cuda'])
+            self.assertEqual(len(json.loads((root/'differential-ledger.json').read_text())),2)
+
     def test_write_destination_and_guard_verdicts(self):
         import torch
         from mirage.rules.catalog import representation_pair, RELATIONS
@@ -350,13 +446,13 @@ class DeviceControls(unittest.TestCase):
                 return run_worker(request, directory, timeout)
             with patch('mirage.artifacts.replay.run_worker', side_effect=interrupt_gpu):
                 partial = check_api('torch.bitwise_not', output=root)
-            first, = partial['differential']['rows']
+            first = next(r for r in partial['differential']['rows'] if r['member'] == 'source')
             self.assertEqual(first['status'], 'incomplete')
             self.assertTrue((Path(first['directory'])/'0-cpu/member.pt').is_file())
             with redirect_stdout(StringIO()) as resumed:
                 self.assertEqual(main(['resume', str(root)]), 0)
             result = json.loads(resumed.getvalue())
-            row, = result['differential']['rows']
+            row = next(r for r in result['differential']['rows'] if r['member'] == 'source')
             self.assertNotEqual(row['directory'], first['directory'])
             self.assertEqual(json.loads((Path(first['directory'])/'summary.json').read_text())['status'], 'incomplete')
             self.assertEqual(row['status'], 'agreement', row)

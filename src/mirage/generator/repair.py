@@ -1,13 +1,81 @@
 """Bounded generation repair. Framework-failure candidates never enter repair."""
 
+import ast
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import StrEnum
 import math
+import symtable
 import time
 from typing import Callable
 
 from mirage.generator.provider import Provider, ProviderFailure, Request, Response
+from mirage.generator.program import ContractError
+
+
+def _prefix_frame(source):
+    tree = ast.parse(source)
+    runs = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "run"]
+    if len(runs) != 1 or not runs[0].body or not isinstance(runs[0].body[-1], ast.Return):
+        raise ContractError("A reusable prefix requires one run with a terminal return")
+    run = runs[0]
+    # Returning an already computed observation is safe. Running the target,
+    # mutating state, or triggering an unknown hook in return could move the
+    # parent's last training action past the newly inserted suffix.
+    read_nodes = (ast.Dict, ast.List, ast.Tuple, ast.Name, ast.Constant, ast.Load,
+                  ast.Subscript, ast.Slice, ast.Attribute, ast.Call)
+    for node in ast.walk(run.body[-1]):
+        if isinstance(node, ast.Return):
+            continue
+        if not isinstance(node, read_nodes):
+            raise ContractError("The parent return must only read previously computed observables")
+        if isinstance(node, ast.Call) and not (
+                isinstance(node.func, ast.Attribute) and node.func.attr in {"detach", "clone", "cpu", "item"}
+                and not node.args and not node.keywords):
+            raise ContractError("The parent return contains an unsupported operation")
+    return tree, run
+
+
+def supports_guided_prefix(parent_source, state_goal):
+    """Only advertise goals that can preserve the entire verified source body."""
+    if not parent_source or not state_goal or state_goal.get("id") != "leaf_accumulation":
+        return False
+    try:
+        _, run = _prefix_frame(parent_source)
+    except (SyntaxError, ContractError):
+        return False
+    nodes = [node for statement in run.body[:-1] for node in ast.walk(statement)]
+    if any(isinstance(node, (ast.Return, ast.Yield, ast.YieldFrom, ast.FunctionDef,
+                             ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)) for node in nodes):
+        return False
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+               and isinstance(node.func.value, ast.Name) and node.func.value.id == "probe"
+               and node.func.attr == "call" for node in nodes)
+
+
+def validate_guided_prefix(parent_source, candidate_source):
+    """Require an append before the same return, with all earlier code and bindings preserved."""
+    if not supports_guided_prefix(parent_source, {"id": "leaf_accumulation"}):
+        raise ContractError("Parent does not support an append-only target prefix")
+    expected, parent_run = _prefix_frame(parent_source)
+    candidate, child_run = _prefix_frame(candidate_source)
+    boundary = len(parent_run.body) - 1
+    suffix = child_run.body[boundary:-1]
+    if not suffix or any(isinstance(node, (ast.Yield, ast.YieldFrom, ast.Global, ast.Nonlocal,
+                                           ast.Return)) for stmt in suffix for node in ast.walk(stmt)):
+        raise ContractError("Append statements immediately before the original return")
+    del child_run.body[boundary:-1]
+    if ast.dump(candidate) != ast.dump(expected):
+        raise ContractError("Preserve build, helpers, the original run statements and its return exactly")
+    # A later assignment can turn an earlier global lookup into an unbound
+    # local even if the source of that earlier statement did not change.
+    def scope_of_run(source):
+        scope = symtable.symtable(source, "<guided-prefix>", "exec")
+        return next(child for child in scope.get_children() if child.get_name() == "run")
+
+    old, new = scope_of_run(parent_source), scope_of_run(candidate_source)
+    if any(old.lookup(name).is_global() != new.lookup(name).is_global() for name in old.get_identifiers()):
+        raise ContractError("Suffix changed name resolution in the original run")
 
 
 class DiagnosticKind(StrEnum):

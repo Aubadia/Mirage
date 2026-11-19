@@ -193,6 +193,10 @@ class HTTPProvider:
                 content = choice["message"]["content"]
                 if not isinstance(content, str):
                     raise ValueError("Expected text content")
+                if choice["finish_reason"] == "length":
+                    raise ProviderFailure("generation_truncated", "Completion ended with length",
+                        details=dict(request_id=request_id, finish_reason="length", usage=value.get("usage"),
+                                     http_artifact=str(artifact) if artifact else None))
                 if choice["finish_reason"] != "stop":
                     raise ProviderFailure("incomplete", f"Completion ended with {choice['finish_reason']}")
                 usage = value.get("usage") or {}

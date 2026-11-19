@@ -27,8 +27,11 @@ def parser() -> argparse.ArgumentParser:
     report = commands.add_parser("report", help="Show validated batch coverage and saved outcomes")
     report.add_argument("directory", type=Path)
 
-    check = commands.add_parser("check", help="Check one public API using the prepared environment")
-    check.add_argument("api")
+    check = commands.add_parser("check", help="Check public APIs with independent model budgets and shared workers")
+    check.add_argument("apis", nargs="+")
+    check.add_argument("--workers", type=positive_integer)
+    check.add_argument("--active-apis", type=positive_integer)
+    check.add_argument("--generation-concurrency", type=positive_integer)
     check.add_argument("--output", type=Path, help="Fresh artifact directory; default is a unique result/check run")
 
     run = commands.add_parser("run", help="Generate, execute and inspect a batch of candidates", allow_abbrev=False)
@@ -89,12 +92,39 @@ def main(argv: list[str] | None = None) -> int:
                     raise KeyboardInterrupt
                 previous = signal.signal(signal.SIGTERM, stop_check)
             try:
-                output = check_api(args.api, output=args.output)
+                if len(args.apis) == 1 and all(x is None for x in (args.workers, args.generation_concurrency, args.active_apis)):
+                    output = check_api(args.apis[0], output=args.output)
+                else:
+                    import os
+                    import uuid
+                    from mirage.contracts.apis import validate_api_name
+                    from mirage.contracts.programs import RunOptions
+                    from mirage.runtime.multi_api import run_multi_api
+                    for api in args.apis:
+                        validate_api_name(api)
+                    root = args.output or Path(os.environ.get("MIRAGE_CHECK_OUTPUT_ROOT", "result/check")) / uuid.uuid4().hex
+                    options = RunOptions(str(root), os.environ.get("MIRAGE_PROVIDER", "vllm"),
+                        strategy="stateful", contract_version=4, generation_pipeline=True,
+                        representation_traversal=True, oracle_improvements=True, forward_only=True,
+                        cases=int(os.environ.get("MIRAGE_CHECK_CASES", "100000")),
+                        time_limit=float(os.environ.get("MIRAGE_CHECK_MODEL_SECONDS", "180")),
+                        worker_timeout=float(os.environ.get("MIRAGE_CHECK_WORKER_TIMEOUT", "75")),
+                        seed=int(os.environ.get("MIRAGE_CHECK_SEED", "0")),
+                        workers=args.workers or 8, generation_concurrency=args.generation_concurrency or 2,
+                        active_api_limit=args.active_apis or len(args.apis))
+                    if len(args.apis) == 1:
+                        from dataclasses import replace
+                        device = os.environ.get("MIRAGE_CHECK_DEVICE", "auto")
+                        if device == "auto":
+                            device = "cuda" if args.apis[0].startswith("torch.cuda.") else "cpu"
+                        output = check_api(args.apis[0], output=root, session_options=replace(options, device=device))
+                    else:
+                        output = run_multi_api(options, args.apis, check=True)
             finally:
                 if previous is not None:
                     signal.signal(signal.SIGTERM, previous)
             print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
-            return output["exit_status"]
+            return output.get("exit_status", int(any(row.get("state") != "completed" for row in output.get("sessions", []))))
         if args.command == "run":
             from mirage.contracts.programs import RunOptions
             from mirage.workflow import run

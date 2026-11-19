@@ -520,6 +520,7 @@ class PyTorchBackend:
         report = {'version': 'source-certificate-analysis-1', 'status': 'unknown',
                   'certificate': None, 'blockers': [],
                   'scope': 'reviewed straight-line source bindings/effects around the target; target value/effect semantics and runtime MR conditions remain separate'}
+        from mirage.runtime.input_constraints import OPERAND_CONSTRUCTOR
         phase = 'module'
         optimizer_effects = optimizer_update or scoped_vjp
 
@@ -735,6 +736,15 @@ class PyTorchBackend:
                     return value
                 reject(node, 'overloaded_operator', 'Unary operator receiver is not proven')
             if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id == OPERAND_CONSTRUCTOR:
+                    if (phase != 'build' or node.func.id in env or len(node.args) != 1
+                            or not isinstance(node.args[0], ast.Constant) or type(node.args[0].value) != str
+                            or any(k.arg not in ('requires_grad', 'sample') or not isinstance(k.value, ast.Constant)
+                                   or (type(k.value.value) != bool if k.arg == 'requires_grad'
+                                       else k.value.value is not None and type(k.value.value) != int)
+                                   for k in node.keywords)):
+                        reject(node, 'operand_constructor_binding', 'Expected injected named operand with literal options')
+                    return tensor
                 if scoped_vjp and isinstance(node.func, ast.Name) and node.func.id == 'list' and node.func.id not in env:
                     if len(node.args) == 1 and not node.keywords:
                         value = expr(node.args[0], env)
@@ -915,12 +925,13 @@ class PyTorchBackend:
             imported = {key: (('dtype', value) if value in dtype_names else ('symbol', value)) for key, value in aliases.items()}
             if scoped_vjp:
                 protected.add('list')
+            protected.add(OPERAND_CONSTRUCTOR)
             protected.update(aliases.keys() | {'min', 'max', 'build', 'run', 'ctx', 'probe', 'device', 'seed'})
             for node in tree.body:
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     for alias in node.names:
                         local = alias.asname or alias.name.split('.')[0]
-                        if local in ('build', 'run', 'ctx', 'probe', 'device', 'seed', 'min', 'max'):
+                        if local in (OPERAND_CONSTRUCTOR, 'build', 'run', 'ctx', 'probe', 'device', 'seed', 'min', 'max'):
                             reject(node, 'binding_reassignment', 'Import shadows an interface or reviewed builtin')
             phase = 'build'
             context = body(definitions['build'], dict(imported, device=('device', None), seed=scalar))
@@ -1016,6 +1027,11 @@ class ContextObserver:
         import torch
         self.target, self.records, self.stack = target, records, []
         self.instances = []
+        self.wrappers = {}
+        self.decorator_methods = set()
+        call_code = getattr(getattr(target, '__call__', None), '__code__', None)
+        if isinstance(target, type) and call_code:
+            self.decorator_methods.add(call_code)
         self.on_action = on_action
         self.supported = target in (torch.autocast, torch.no_grad, torch.enable_grad)
         methods = [getattr(getattr(target, name, None), '__code__', None) for name in ('__enter__', '__exit__')]
@@ -1031,26 +1047,56 @@ class ContextObserver:
         if self.codes: sys.setprofile(self.profile)
         return self
 
+    def register_product(self, value):
+        # A function factory's concrete context type becomes known only after return.
+        import sys
+        methods = [getattr(getattr(type(value), name, None), '__code__', None)
+                   for name in ('__enter__', '__exit__')]
+        if all(methods):
+            if not any(item is value for item in self.instances):
+                self.instances.append(value)
+            if not self.codes:
+                sys.setprofile(self.profile)
+            self.codes.update(zip(methods, ('enter','exit')))
+            call_code = getattr(getattr(type(value), '__call__', None), '__code__', None)
+            if call_code:
+                self.decorator_methods.add(call_code)
+
     def profile(self, frame, event, arg):
         action = self.codes.get(frame.f_code)
         instance = frame.f_locals.get('self')
-        if action and isinstance(instance, self.target):
+        registering = event == 'return' and frame.f_code in self.decorator_methods
+        if (action or registering) and ((isinstance(self.target,type) and isinstance(instance,self.target))
+                       or any(item is instance for item in self.instances)):
+            if registering:
+                from types import FunctionType
+                if isinstance(arg, FunctionType) and arg.__closure__:
+                    self.wrappers.setdefault(arg.__code__, []).append((instance, arg))
             if action == 'enter' and event == 'call':
                 if not any(item is instance for item in self.instances): self.instances.append(instance)
                 group = next(i for i,item in enumerate(self.instances) if item is instance)
                 caller=frame.f_back
-                decorated=bool(caller and (caller.f_globals.get('__name__'),caller.f_code.co_name) in {
-                    ('torch.amp.autocast_mode','decorate_autocast'),
-                    ('torch.utils._contextlib','decorate_context')})
+                # The exact wrapper returned by a target product owns this entry.
+                # Code identity alone would conflate independent decorated functions.
+                owner = None
+                if caller:
+                    for candidate, fn in self.wrappers.get(caller.f_code, ()):
+                        if all(caller.f_locals.get(name) is cell.cell_contents
+                               for name, cell in zip(fn.__code__.co_freevars, fn.__closure__)):
+                            owner = candidate
+                            break
+                decorated = owner is not None
                 reentrant=any(item[0] is instance for item in self.stack)
-                self.stack.append((instance, context_state(), group, len(self.stack), decorated, reentrant))
+                owner_group = next((i for i, item in enumerate(self.instances) if item is owner), None) if decorated else None
+                self.stack.append((instance, context_state(), group, len(self.stack), owner_group, reentrant))
                 if self.on_action: self.on_action('context_enter')
             elif action == 'exit' and event == 'return':
                 if self.stack and self.stack[-1][0] is instance:
-                    _, before, group, depth, decorated, reentrant = self.stack.pop()
+                    _, before, group, depth, owner_group, reentrant = self.stack.pop()
                     self.records.append({'before':before, 'after':context_state(), 'balanced':True,
                                          'instance_group':group, 'entry_depth':depth,
-                                         'decorated_entry':decorated,'reentrant_same_instance':reentrant})
+                                         'decorated_entry':owner_group is not None and (not reentrant or group == owner_group),
+                                         'wrapper_owner_group':owner_group, 'reentrant_same_instance':reentrant})
                     if self.on_action: self.on_action('context_exit')
                 else:
                     self.records.append({'balanced':False})
@@ -1071,6 +1117,36 @@ class ContextObserver:
             torch.set_autocast_dtype(device, dtype)
 
 
+def probe_context_decorator(product):
+    """Exercise an independent copy after observation. No probe event grants coverage."""
+    import copy
+    if not callable(product) or not hasattr(type(product), '__enter__') or not hasattr(type(product), '__exit__'):
+        return 'unsupported'
+    try:
+        with ContextObserver(type(product), []) as observer:
+            context = copy.deepcopy(product)
+            if context is product:
+                return 'unknown'
+            observer.register_product(context)
+            entries = []
+            token = object()
+
+            def body():
+                entries.append(tuple(frame[0] for frame in observer.stack))
+                return token
+
+            wrapped = context(body)
+            if not callable(wrapped):
+                return 'unsupported'
+            with context:
+                returned = wrapped()
+            if returned is token and len(entries) == 1 and len(entries[0]) == 2 and entries[0][0] is context:
+                return 'same_instance' if entries[0][1] is context else 'different_instance'
+    except Exception:
+        return 'unknown'
+    return 'unknown'
+
+
 class CompilerObserver:
     """Observe compiler-created graph execution without inventing a compile call."""
     def __init__(self, probe, namespace, config):
@@ -1082,6 +1158,9 @@ class CompilerObserver:
         import torch
         from functools import wraps
         self.original = torch.compile
+        self.factory_target = self.config['api'] if self.probe._target is self.original else 'torch.compile'
+        if self.probe._target is self.original:
+            self.probe.factory_requires_invocation = True
         self.aliases = {k:v for k,v in self.namespace.items() if v is self.original}
         @wraps(self.original)
         def wrapped(model=None, **kwargs):
@@ -1186,7 +1265,8 @@ class CompilerObserver:
                                     'input_properties':properties, 'output':snapshot(outputs),
                                     'evidence':'executed FX graph', 'target_operands_observed':tree is not None,
                                     'execution_mode':'compiled', 'backend':str(selected), 'entry_context':entry_context,
-                                    **({'kind':'compiled_callable_execution', 'factory_target':'torch.compile',
+                                    **invocation.get('product_observation', {}),
+                                    **({'kind':'compiled_callable_execution', 'factory_target':self.factory_target,
                                         'factory_id':factory_id, 'callable_id':callable_id,
                                         'invocation_index':invocation['active'],
                                         'callable_identity_verified':invocation['active'] is not None} if macro else {})})
@@ -1206,6 +1286,12 @@ class CompilerObserver:
             # Only suspend our observation mode, never a user-selected mode.
             mode = (_pop_mode_temporarily() if _get_current_function_mode() is getattr(probe, '_action_observer', None)
                     and _get_current_function_mode() is not None else nullcontext())
+            previous_resources = invocation.get('product_observation', {})
+            if probe._target is self.original and self.config.get('state_goal'):
+                tree = {'args': args, 'kwargs': kw}
+                resources = probe._target_resources(discover(tree, probe._backend))
+                invocation['product_observation'] = dict(product_resources=resources,
+                    product_inputs=snapshot(tree) if resources else None)
             previous = invocation['active']
             invocation['active'] = invocation['next']
             invocation['next'] += 1
@@ -1213,9 +1299,10 @@ class CompilerObserver:
                 with mode: return compiled_model(*args, **kw)
             finally:
                 invocation['active'] = previous
-        self.factory_records.append({'factory_id':factory_id, 'factory_target':'torch.compile',
+                invocation['product_observation'] = previous_resources
+        self.factory_records.append({'factory_id':factory_id, 'factory_target':self.factory_target,
                                      'callable_ids':[callable_id]})
-        probe._register_callable(invoke_model, factory_target='torch.compile',
+        probe._register_callable(invoke_model, factory_target=self.factory_target,
                                  factory_id=factory_id, callable_id=callable_id)
         return invoke_model
 
@@ -1232,6 +1319,9 @@ class CaptureObserver:
         import torch
         from functools import wraps
         self.original = torch.cuda.make_graphed_callables
+        self.factory_target = self.config['api'] if self.probe._target is self.original else 'torch.cuda.make_graphed_callables'
+        if self.probe._target is self.original:
+            self.probe.factory_requires_invocation = True
         self.aliases = {k:v for k,v in self.namespace.items() if v is self.original}
         def captured(graph):
             if self.active: self.captured.setdefault(graph, len(self.captured))
@@ -1285,7 +1375,7 @@ class CaptureObserver:
         finally:
             self.active = False; probe._observing = previous
         model_after = model_state()
-        self.factory_records.append({'factory_id':factory_id, 'factory_target':'torch.cuda.make_graphed_callables',
+        self.factory_records.append({'factory_id':factory_id, 'factory_target':self.factory_target,
                                      'callable_ids':list(range(len(modules))),
                                      'before':model_before,'after':model_after,
                                      'buffer_free':all(isinstance(m,torch.nn.Module) and not list(m.buffers()) for m in modules),
@@ -1323,9 +1413,10 @@ class CaptureObserver:
                 try:
                     probe.calls.append({'index':index,'kind':'factory_result_execution',
                                         'inputs':before,'metadata':descriptors, 'input_properties':properties,
+                                        'registered_resources':probe._target_resources(operands) if owner.config.get('state_goal') else [],
                                         'output':snapshot(output),'completed_replays':completed_replays,
                                         'reference':reference, 'entry_context':entry_context,
-                                        'factory_target':'torch.cuda.make_graphed_callables',
+                                        'factory_target':owner.factory_target,
                                         'factory_id':factory_id, 'callable_id':self.callable_id,
                                         'invocation_index':invocation_index, 'callable_identity_verified':True,
                                         'execution_mode':'reference' if reference else 'captured'})
@@ -1337,7 +1428,7 @@ class CaptureObserver:
                 return output
         wrapped = tuple(ObservedCallable(x, i) for i, x in enumerate(result)) if isinstance(result,tuple) else (ObservedCallable(result, 0),)
         for item in wrapped:
-            probe._register_callable(item, factory_target='torch.cuda.make_graphed_callables',
+            probe._register_callable(item, factory_target=self.factory_target,
                                      factory_id=factory_id, callable_id=item.callable_id)
         return wrapped if isinstance(result,tuple) else wrapped[0]
 

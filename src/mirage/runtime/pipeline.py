@@ -69,7 +69,10 @@ class BudgetedProvider:
         begin = time.time()
         event = {'api': p.api, 'started': begin, 'finished': None,
                  'feedback_version': p.feedback_version, 'stage': request.stage.value,
-                 'contract': context.get('contract'), 'outcome': 'running'}
+                 'contract': context.get('contract'), 'retry_of_attempt': context.get('truncated_attempt'),
+                 'outcome': 'running'}
+        if context.get('oracle_precondition'):
+            event['oracle_precondition'] = context['oracle_precondition']
         with p.condition:
             p.model_events.append(event)
             p.persist()
@@ -78,7 +81,10 @@ class BudgetedProvider:
             event['outcome'] = 'completed'
             return response
         except BaseException as error:
-            event['outcome'] = type(error).__name__
+            event['outcome'] = getattr(error, 'category', type(error).__name__)
+            event.update(getattr(error, 'details', {}))
+            if 'truncated_attempt' in context:
+                event['retry_of_attempt'] = context['truncated_attempt']
             raise
         finally:
             end = time.time()
@@ -165,6 +171,8 @@ class ExecutionPipeline:
             self.feedback_rows.append({'directory': row['directory'], 'api': row.get('api'),
                 'verdict': row.get('verdict'), 'reason': row.get('reason'),
                 'representation': row.get('mutation'),
+                **({'product_use': row['inspection']['product_use']} if
+                   row.get('inspection', {}).get('product_use', {}).get('uses') else {}),
                 'runtime_valid': row.get('inspection', {}).get('valid') is True,
                 'representation_attained': row.get('representation_candidate_attained')})
             row['feedback_committed_version'] = self.feedback_version
