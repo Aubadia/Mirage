@@ -1,106 +1,58 @@
 # Mirage Agent Instructions
 
-## Project Goal
+## Project Scope
 
-Build a testing framework for deep learning (DL) frameworks that explores tensor memory representations and training states.
+Mirage is a research framework for testing deep learning framework correctness across tensor representations. Its three core components have distinct responsibilities.
 
-Previous testing approaches include API/model-input fuzzing, model architecture and API interaction testing, and gradient injection. Mirage explores the following additional testing space.
+| Component | Responsibility |
+| --- | --- |
+| Program Generator | Generate test programs for a target API from its documentation and other available evidence. Generate and validate inputs, verify that the program reaches the target API, and save valid programs and inputs for replay. |
+| Representation Mutation Engine | Construct diverse, value-preserving transformation sequences that reach a target representation described by predicates. Preserve the original input, deduplicate paths, and measure transition coverage according to the approved specification. |
+| Oracle | Run the same test program on a semantically valid reference input and on the mutated input. Compare the required forward and backward observations, handle execution failures, and record unexplained discrepancies as suspects. |
 
-### Tensor Memory Representation
+Read [the architecture specification](specs/architecture.md) and the relevant component specifications before changing component boundaries or shared interfaces. Keep components independently testable and use approved interfaces for cross-component data. Keep search policies, coverage definitions, numerical comparison policies, and service configuration in the relevant specifications.
 
-- Strides and contiguity.
-- Storage offset.
-- Storage identity, including cloning and new allocations.
-- Storage aliasing: shared versus independent storage.
-- Device and memory placement: CPU/GPU and pinned/pageable memory.
-- Materialization strategy: direct saving, packing/unpacking, offloading, and recomputation.
-- Tensor metadata: view/base relationships, version counters, and gradient history.
+## Spec-Anchored Development
 
-### Training State
+Spec-Anchored is a form of Spec-Driven Development (SDD) that uses the approved specifications as the shared source of truth for engineers and agents. Before development, agree on requirements, design, and expected behavior. During development, the agent implements the approved specifications while engineers review, make decisions, and verify the work. After development, keep the specifications and code in sync through reviewed changes.
 
-- Autograd state.
-- Activation checkpointing.
-- Offloading.
-- Compilation.
-- Graph lifecycle.
-- Optimizer state.
-- Scheduler, AMP, RNG, and DataLoader state.
-- Distributed state.
+Maintain one pair of specifications per component in both Notion and the repository. Use the same component name in both places. In Notion, the component page can contain both sections. In the repository, keep `requirement.md` and `design.md` together under the component's directory in `specs/`. A pair can cover multiple implementation files.
 
-## Framework Architecture
+- `requirement.md` defines the component's purpose, observable behavior, and acceptance criteria. Give functional requirements stable IDs such as `FR-1`. Document public interfaces with type annotations and docstrings, including preconditions, return values, and expected exceptions where applicable. Include relevant constraints, invariants, and an end-to-end example.
+- `design.md` defines the technical design and implementation approach. Document the execution flow and relate design decisions to the applicable requirement IDs. Include data structures, algorithms, internal interfaces, and dependencies where they clarify the implementation.
+- Humans lead and author the specifications. Agents may review human-authored drafts and flag gaps or inconsistencies. Specification authorship and approval belong to humans.
+- Before each implementation task, verify that both corresponding files exist in `specs/` for every affected component, have passed human review, and reflect the approved specifications in Notion. Surface missing or conflicting specifications with the affected behavior and files. Resolve those issues through human review before implementing the affected behavior.
 
-### Layer 1: State Transition Sampler & MR Selector
+## Development Workflow
 
-1. Select a target API `u` from the API pool. Use an LLM to generate a canonical training program `P_0` with a legal default training configuration. Verify that it executes and calls the target API, including the relevant backward path when testing backward correctness. `P_0` is the default source program, not a mandatory baseline for every MR.
-2. Model concrete training state `sigma` as model parameters, gradients, optimizer, scheduler, AMP, RNG, and DataLoader state, plus necessary tensor metadata and execution context. Define a state abstraction function `alpha(sigma)` for exploration and coverage.
-3. Sample `m` target state predicates `phi_i` over abstract states, rather than exact tensor or optimizer values. Use API legality, dependencies among state dimensions, unexplored API × State combinations, coverage feedback, and expected gain and cost. Preserve the initial conditions and semantic inputs required by the selected MR; the MR defines permitted differences.
-4. For each predicate, specify an execution checkpoint and plan a legal action sequence `tau_i = (a_1^(i), ..., a_k_i^(i))` from the canonical initial concrete state `sigma_0`, aiming for `phi_i(alpha(sigma_k_i^(i))) = True`. Actions must respect framework constraints and ordering. If no legal path is found, resample, adjust the predicate, or mark it unresolved. Planning alone does not establish reachability; Layer 3 verifies it at runtime.
-5. Select metamorphic rules (MRs) from the predefined MR library:
-   - **Applicability filtering:** Statically consider the target API, canonical program, transitions, MR Preconditions, Input Relation, and required observables.
-   - **Ranking:** Consider expected coverage gain, unexplored API × MR combinations, predicted applicability, and generation/execution cost.
-   - **Fallback:** Retain legal transition plans without applicable MRs for another correctness oracle or coverage-only testing. Do not sacrifice API coverage merely because no MR applies.
-   - **Dynamic validation:** Static applicability is provisional until verified by Layer 3.
+1. **Confirm specifications and scope.** Read the approved requirement and design files, shared interfaces, existing implementation, and tests. Identify the affected requirements and state the planned changes, files, and checks before editing. Obtain approval for scope expansion, including changes to shared contracts, dependencies, or repository configuration.
+2. **Write unit and end-to-end tests before implementation.** Follow the [Testing](#testing) requirements for coverage, input selection, and expected results.
+3. **Have a human review and approve the test baseline.** Freeze the approved baseline before implementation and follow the test change rules below.
+4. **Implement against the fixed baseline.** Follow the approved design and iterate on the implementation until all tests pass. Preserve behavior outside the approved scope. Use descriptive names, type annotations on public interfaces, and comments that explain invariants or research-specific decisions.
+5. **Refactor and rerun the tests.** Simplify syntax and remove redundant checks while preserving observable behavior and public interfaces. Rerun the suite after refactoring.
+6. **Review in a fresh agent session.** Have the reviewer use the approved specifications, tests, and implementation diff to check behavior, coverage, and design compliance. Address findings within the approved scope and rerun the affected checks.
+7. **Obtain final human review before merging.** Report the requirements covered, actual test results, skipped or unavailable checks, and unresolved findings. Route specification changes through human review and keep the approved Notion and repository versions synchronized with the code.
 
-### Layer 2: Training Program Generator
+## Testing
 
-1. Consume the target API, canonical program, target state predicates and checkpoints, transition sequences, and selected MRs.
-2. Use an LLM to derive a reusable training loop skeleton from `P_0`, preserving basic training semantics and marking injection points for forward/loss, backward/gradient accumulation, optimizer/scheduler updates, AMP/gradient scaling, checkpoint/restore, and distributed operations.
-3. Use incremental filling, potentially with a smaller language model, to inject actions and produce training programs `P_1, ..., P_m`. Check syntax, runtime legality, action ordering, target API paths, and static MR constraints after partial injections; use execution feedback for incremental repair.
-4. Construct MR-compatible source/follow-up program pairs. Use `P_0` as the source when suitable; otherwise construct another legal pair. Give each program its own execution configuration `c` to form execution cases `e = (P, c)`, including the necessary initial parameters, inputs, RNG settings, and environment. Preserve the MR's Preconditions, Input Relation, initial conditions, and semantic checkpoint requirements.
-5. If a legal program no longer supports its selected MR, reselect the MR or retain it for coverage-only testing. Send programs, execution configurations, target predicates/checkpoints, and MR specifications to Layer 3. Preliminary checks and generated code alone do not prove state attainment or MR applicability.
+Write both unit tests and end-to-end (E2E) tests for the affected behavior before implementation. Map each test to the applicable requirement ID and acceptance criterion in the approved `requirement.md`. Derive expected results and failure conditions from those criteria.
 
-### Layer 3: Inspector & Correctness Oracle
+- **Unit tests** exercise a component's public behavior in isolation. Check the relevant inputs, outputs, errors, and invariants. For a representation transformation, this can include target predicate attainment, logical value preservation, and preservation of the original input and its required alias relationships.
+- **E2E tests** exercise an affected workflow through its public entry point. For a complete Mirage case, verify program and input validation, the observed mutation, and the Oracle's comparison result. Include failure outcomes required by the specification and verify saved records or replay when they are part of the acceptance criteria.
+- **Input space partitioning** starts with the dimensions and constraints in the requirements. Identify valid and invalid equivalence classes by expected behavior and select representative inputs from each relevant class. Add edge cases at boundaries and exceptional conditions. For tensors, use relevant dimensions such as shape, dtype, device, layout, and aliasing, and cover combinations when the requirements depend on their interaction.
+- **Baseline review** checks the selected cases, expected results, and assertions against the acceptance criteria. Run the new tests before implementation and verify that any expected failures come from missing behavior. Obtain human approval before treating the tests as the fixed baseline.
+- **Changes to existing tests** require human review and explicit approval when a test contradicts approved expectations or conflicts with approved new behavior. Otherwise, extend coverage by adding tests. Apply this rule to removals and to changes in assertions, fixtures, tolerances, and configuration that affect existing test behavior.
+- **Execution and reporting** use the repository's configured test tools. Run the unit and E2E suites after implementation and again after refactoring. Report the commands, actual outcomes, and any checks skipped or blocked by an unavailable GPU, framework, or LLM endpoint.
 
-1. Collect runtime traces and necessary state evidence. Verify target API execution, the required backward path, legal completion of transition actions, and `phi_i(alpha(sigma)) = True` at the specified execution checkpoint.
-2. For an execution pair `(e_a, e_b)`, dynamically verify MR Preconditions `Pre_M(e_a, e_b)` and Input Relation `In_M(e_a, e_b)`. Only when both hold, executions are valid, and semantic checkpoints align, evaluate `Out_M(Obs_M(e_a), Obs_M(e_b))`. A sound MR requires the output relation to hold under these conditions in a correct framework implementation.
-3. Extract only the MR's required observables, such as loss, gradients, parameters, optimizer state, scheduler/AMP state, or checkpoint-restored state. Align semantic checkpoints; equal operation counts are not required. Use the MR's Output Relation, including suitable tolerances for numerical equivalence.
-4. Distinguish the following verdicts:
-   - **Invalid:** The program is invalid, the target API or required backward path did not execute, or the required target state was not reached.
-   - **Inapplicable:** MR Preconditions or Input Relation do not hold, or required checkpoints cannot align.
-   - **Pass:** The MR applies and its Output Relation holds.
-   - **Suspected Failure:** The MR applies but its Output Relation does not hold.
-5. Reproduce and minimize suspected failures, revalidate MR assumptions and numerical comparison conditions, and use another oracle or independent evidence before confirming a framework defect. Without a suitable MR, use another defined oracle or retain verified coverage with correctness unassessed.
-6. Return API Coverage, State Coverage, Transition Coverage, API × MR Coverage, MR Applicability, Correctness Feedback, and Generation Cost (including generation and execution resources) to Layer 1. Use verified evidence and explicit candidate-set denominators; coverage over known feasible candidates does not imply exhaustive theoretical coverage. Guide subsequent sampling toward unexplored API × State × MR combinations, expected coverage gain, bug-triggering potential, and reasonable cost.
+## Research Correctness
 
-## Correctness Principles
+- Generated programs expose `build` to construct the target API's inputs and `probe` to call the target API. Validate the inputs and use execution evidence to establish reachability, including the relevant backward path when required. Run generated code in an isolated environment with resource limits and without access to credentials or unrelated files.
+- Verify logical value preservation, the original input's relevant state and alias relationships, and the target representation predicates at the required execution point. Check the runtime representation after the transformations. Record the ordered path and apply the approved path identity and transition coverage definitions.
+- Prefer a contiguous reference input when applicable. Apply the selected metamorphic relation or numerical oracle only when its preconditions, input relation where applicable, and observation requirements hold. Compare corresponding forward and backward observations with the specified tolerances and nondeterminism policy.
+- Record invalid or unsupported cases, expected exceptions, crashes, inapplicable comparisons, and suspected correctness failures with their evidence. Reproduce and verify an unexplained discrepancy before reporting a confirmed framework defect.
+- Save the program, inputs or reconstruction data, ordered transformations, observed representation states, relevant RNG state and execution settings, framework version, device, dtype, observations, and oracle result as needed for replay. Replay uses saved experiment material without another LLM call. Base coverage and verdicts on recorded evidence.
 
-- Treat an MR as conditional on both its Preconditions and Input Relation. Reaching a target state does not prove MR applicability or require every observable to be preserved.
-- Preserve the initial conditions and semantic inputs required by the MR. Make permitted differences explicit; a shared seed alone does not establish comparable executions.
-- Define observables at aligned semantic checkpoints, the Output Relation, numerical tolerances, and nondeterminism handling for the API, transformation, dtype, and environment. Do not require equal operation counts or universal output equality.
-- Separate planning and static predictions from runtime evidence. Generated code or configuration flags alone do not establish API execution, state reachability, or MR applicability.
-- Distinguish generation failures, unresolved plans, unreachable states, inapplicable MRs, and oracle violations. Never classify an arbitrary difference as a framework bug or give coverage-only cases a correctness pass.
-- Report an oracle violation as a suspected failure with evidence. Confirm a framework defect only after reproduction, minimization, revalidation, and corroboration; absence of MR violations does not prove framework correctness.
+## Repository and Validation
 
-## Required Approval and Editing Workflow
-
-- The user will provide pseudocode for a specific file. Read that pseudocode and the relevant existing code before proposing changes.
-- Before modifying files, describe the intended implementation, affected files, and appropriate validation. Wait for explicit user approval of the plan.
-- After approval, implement the agreed scope. Existing approval covers work within that scope; do not ask for the same permission again.
-- Modify only the file or files explicitly authorized by the user.
-- If another file must change, explain why the change is necessary, identify the affected file and expected impact, and obtain permission before editing it.
-- Do not refactor unless the user explicitly requests it. Avoid unrelated cleanup, renaming, reformatting, or architectural changes.
-- If the pseudocode is materially ambiguous or conflicts with the approved design, explain the issue and obtain clarification before implementing the affected behavior.
-
-## Implementation and Comments
-
-- Follow the supplied pseudocode, approved plan, and existing project conventions.
-- Keep changes focused and easy to review. Do not invent additional requirements or abstractions.
-- Add concise comments when needed to explain intent, preconditions, or non-obvious constraints. Avoid comments that merely restate the code.
-- Do not add dependencies, change project configuration, or create supporting files outside the approved scope without permission.
-- Leave undecided design choices open until the user provides direction or approves a proposal. This includes the target DL framework, sampling algorithms, concrete state abstractions and predicates, coverage units and aggregation policies within the documented metrics, and MR library contents.
-
-## Validation and Reporting
-
-- Run validation appropriate to the approved change and available environment.
-- Creating or modifying test files is subject to the same file-scope approval rules as implementation changes.
-- Check relevant behavior and failure cases when practical; avoid unrelated or redundant tests.
-- Never claim validation passed unless it was actually run and passed. State any unavailable checks and their limitations.
-- When finished, summarize what changed, how it was validated, and any remaining limitations or decisions requiring user input.
-
-## Current Repository Context
-
-- The project is named `mirage` and uses a `src` layout.
-- The package entry file is `src/mirage/__init__.py`.
-- `pyproject.toml` currently requires Python `>=3.14`, uses `uv_build`, and declares the CLI entry point `mirage = "mirage:main"`.
-- No runtime dependencies are currently declared. Do not assume a DL framework or test runner has already been selected or installed.
-- Use the actual repository configuration as the source of truth if these details change.
+- Mirage uses a Python `src` layout. Read [`pyproject.toml`](pyproject.toml) and [`.python-version`](.python-version) for the environment. The configured CLI resolves `mirage:main` through `src/mirage/__init__.py`.
+- Keep generated experiment outputs and credentials out of source changes.
