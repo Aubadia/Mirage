@@ -59,17 +59,17 @@ class RepresentationState:
 
 ```python
 def inspect_tensor(
-		t: torch.Tensor,
-		*,
-		references: Mapping[str, torch.Tensor] | None = None,
+    t: torch.Tensor,
+    *,
+    references: Mapping[str, torch.Tensor] | None = None,
 ) -> "RepresentationState":
     """Inspect a tensor's representation state.
 
     Args:
         tensor: The tensor to inspect.
         references: Optional named tensors used to inspect relationships between
-						        `tensor` and each reference tensor. (Names identify reference
-						        tensors in the returned state.)
+                                                        `tensor` and each reference tensor. (Names identify reference
+                                                        tensors in the returned state.)
 
     Returns:
         A RepresentationState containing the supported properties of `tensor`.
@@ -78,8 +78,8 @@ def inspect_tensor(
 
     Raises:
         ValueError: If any input tensor falls outside the component's support scope.
-        TypeError: If `tensor` is not a torch.Tensor, or `references` is neither 
-						       None nor a mapping from strings to torch.Tensor objects.
+        TypeError: If `tensor` is not a torch.Tensor, or `references` is neither
+                                                       None nor a mapping from strings to torch.Tensor objects.
     """
     ...
 ```
